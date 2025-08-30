@@ -9,6 +9,16 @@
   gz_type_name: "gz.msgs.Clock"
   direction: "BIDIRECTIONAL"
 
+- topic_name: /panda/ft_sensor_finger1
+  ros_type_name: geometry_msgs/msg/Wrench
+  gz_type_name: gz.msgs.Wrench
+  direction: "BIDIRECTIONAL"
+
+- topic_name: /panda/ft_sensor_finger2
+  ros_type_name: geometry_msgs/msg/Wrench
+  gz_type_name: gz.msgs.Wrench
+  direction: "BIDIRECTIONAL"
+
 # Câmeras RGB
 - topic_name: "/depth_camera_1"
   ros_type_name: "sensor_msgs/msg/Image"

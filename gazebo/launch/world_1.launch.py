@@ -46,6 +46,7 @@ def generate_launch_description():
             name='depth_camera1_to_map',
             arguments=['0.2', '0.5', '1.1', '-0.52', '0', '0', 'map', 'depth_optical_frame_1']
         ),
+        
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
