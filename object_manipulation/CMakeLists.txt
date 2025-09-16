@@ -48,42 +48,13 @@ ament_target_dependencies(
   tf2_eigen 
   PCL
   vision_msgs
- 
   moveit_ros_planning_interface 
   Eigen3
 )
 
-add_executable(object_pose src/object_pose.cpp)
-ament_target_dependencies(
-  object_pose 
-  trajectory_msgs 
-  rclcpp nav_msgs 
-  geometry_msgs 
-  PCL 
-  pcl_conversions 
-  sensor_msgs 
-  tf2_geometry_msgs 
-  tf2 
-  tf2_ros 
-  tf2_sensor_msgs 
-  tf2_ros 
-  tf2_eigen 
-  PCL
-  moveit_ros_planning_interface 
-  Eigen3
-  vision_msgs
-)
 
 
 target_link_libraries(basic_algorithm
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
-
-target_link_libraries(object_pose
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
   ${GLEW_LIBRARIES}
@@ -98,7 +69,6 @@ install(DIRECTORY
 )
 
 install(TARGETS
-  object_pose
   basic_algorithm
   DESTINATION lib/${PROJECT_NAME}
 )

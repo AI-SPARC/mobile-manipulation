@@ -161,18 +161,19 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr depth_camera_subscription_1;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr depth_camera_subscription_2;
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr sub_1;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     rclcpp::TimerBase::SharedPtr parameterTimer;    
 
-    float resolution = 0.01;
-    int decimals = 0;
-    float x_min_lim, x_max_lim, y_min_lim, y_max_lim, z_min_lim, z_max_lim;
 
     std::vector<std::tuple<float, float, float>> points;
-    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
+    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
+    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
     rclcpp::TimerBase::SharedPtr init_timer_;
+
+    geometry_msgs::msg::Pose object_pose;
 
   
     inline float round_to_multiple(float value, float multiple, int decimals) 
@@ -206,12 +207,17 @@ private:
 
     void initMoveGroup() {
         try {
-            move_group_ = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                shared_from_this(), "arm");  // deve existir no SRDF
+            move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
+                shared_from_this(), "arm");  
+
+            move_group_gripper = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
+                shared_from_this(), "gripper");
 
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
-            init_timer_->cancel();  // para de tentar
-        } catch (const std::exception &e) {
+
+            init_timer_->cancel();  
+        } catch (const std::exception &e) 
+        {
             RCLCPP_WARN(this->get_logger(), "Ainda não consegui inicializar MoveGroupInterface: %s", e.what());
         }
 
@@ -219,63 +225,88 @@ private:
 
 
     
-    std::vector<double> getJointPositionsForPose(const geometry_msgs::msg::Pose &target_pose) 
+    void positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
     {
-        if (!move_group_) {
+        if (!move_group_arm) {
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface não inicializado.");
-            return {};
+            return;
         }
 
-        // Define a pose alvo
-        move_group_->setPoseTarget(target_pose);
+        move_group_arm->setPlannerId("RRTConnectkConfigDefault");
+        move_group_arm->setPoseTarget(target_pose);
 
-        // Planejamento
-        move_group_->setMaxVelocityScalingFactor(1.0);
-        move_group_->setMaxAccelerationScalingFactor(1.0);
+        move_group_arm->setMaxVelocityScalingFactor(1.0);
+        move_group_arm->setMaxAccelerationScalingFactor(1.0);
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
-        auto result = move_group_->plan(plan);
+        auto result = move_group_arm->plan(plan);
 
         if (result == moveit::core::MoveItErrorCode::SUCCESS) {
-            // executa mais rápido
-            move_group_->execute(plan);
+           
+            move_group_arm->execute(plan);
         }
 
-        // Pega as posições de juntas da última configuração da trajetória
+        
         if (plan.trajectory.joint_trajectory.points.empty()) {
             RCLCPP_WARN(this->get_logger(), "Trajetória vazia retornada pelo planejador");
-            return {};
+            return;
         }
 
-        return plan.trajectory.joint_trajectory.points.back().positions;
     }
 
-    geometry_msgs::msg::Pose randomPose() 
+    void close_gripper() 
     {
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
+        if (!move_group_gripper) {
+            RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do gripper não inicializado.");
+            return;
+        }
 
-        std::uniform_real_distribution<double> pos_dist(-0.5, 0.5);   // intervalo posição
-        std::uniform_real_distribution<double> ori_dist(-1.0, 1.0);   // intervalo orientação
+        
+        move_group_gripper->setJointValueTarget({
+            {"panda_finger_joint1", 0.0185},
+            {"panda_finger_joint2", 0.0185}
+        });
 
-        geometry_msgs::msg::Pose pose;
-        pose.position.x = pos_dist(gen);
-        pose.position.y = pos_dist(gen);
-        pose.position.z = pos_dist(gen) + 0.6; // mantém z acima de 0.0
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        auto result = move_group_gripper->plan(plan);
 
-        double qx = ori_dist(gen);
-        double qy = ori_dist(gen);
-        double qz = ori_dist(gen);
-        double qw = ori_dist(gen);
+        if (result == moveit::core::MoveItErrorCode::SUCCESS) 
+        {
+            auto exec_result = move_group_gripper->execute(plan);
 
-        double norm = std::sqrt(qx*qx + qy*qy + qz*qz + qw*qw);
-        pose.orientation.x = qx / norm;
-        pose.orientation.y = qy / norm;
-        pose.orientation.z = qz / norm;
-        pose.orientation.w = qw / norm;
-
-        return pose;
+            if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
+            {
+                RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+            }
+        }
     }
+
+    void open_gripper() 
+    {
+        if (!move_group_gripper) {
+            RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do gripper não inicializado.");
+            return;
+        }
+
+        move_group_gripper->setJointValueTarget({
+            {"panda_finger_joint1", 0.0385},
+            {"panda_finger_joint2", 0.0385}
+        });
+
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        auto result = move_group_gripper->plan(plan);
+
+        if (result == moveit::core::MoveItErrorCode::SUCCESS) 
+        {
+            auto exec_result = move_group_gripper->execute(plan);
+
+            if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
+            {
+                RCLCPP_INFO(this->get_logger(), "Gripper abriu (MoveIt).");
+            }
+        }
+    }
+
 
 
     /*
@@ -288,53 +319,76 @@ private:
 
     void send_joint_positions()
     {
-        // Pose e orientação desejadas do pegador (agora aleatória)
-        geometry_msgs::msg::Pose target_pose = randomPose();
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = object_pose.position.x - 0.4;
+        pose.position.y = object_pose.position.y;
+        pose.position.z = object_pose.position.z - 1.016 + 0.15;
 
-        // Obtem posições de juntas via MoveIt IK
-        std::vector<double> positions = getJointPositionsForPose(target_pose);
+        tf2::Quaternion q_obj;
+        tf2::fromMsg(object_pose.orientation, q_obj);
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        tf2::Quaternion q_rot;
+        q_rot.setRPY(M_PI, 0, 0);
+
+        tf2::Quaternion q_final = q_obj * q_rot;
+        q_final.normalize();
+
+        q_final.setW(-q_final.w());  
+
+        pose.orientation = tf2::toMsg(q_final);
+
+        positions_for_arm(pose);
+
+        geometry_msgs::msg::Pose pose_2;
+        pose_2.position.x = object_pose.position.x - 0.4;
+        pose_2.position.y = object_pose.position.y;
+        pose_2.position.z = object_pose.position.z - 1.016;
+
+        
+        tf2::fromMsg(object_pose.orientation, q_obj);
+
+        
+        q_rot.setRPY(M_PI, 0, 0);
+
+        q_final = q_obj * q_rot;
+        q_final.normalize();
+
+        q_final.setW(-q_final.w());  
+
+        pose_2.orientation = tf2::toMsg(q_final);
+
+        positions_for_arm(pose_2);
+
+        close_gripper();
+
+
+
+        geometry_msgs::msg::Pose pose_3;
+        pose_3.position.x = -0.4;
+        pose_3.position.y = 0.0;
+        pose_3.position.z = 0.05;
+
+        
+        tf2::fromMsg(object_pose.orientation, q_obj);
+
+        
+        q_rot.setRPY(M_PI, 0, 0);
+
+        q_final = q_obj * q_rot;
+        q_final.normalize();
+
+        q_final.setW(-q_final.w());  
+
+        pose_3.orientation = tf2::toMsg(q_final);
+
+        positions_for_arm(pose_3);
+
+        open_gripper();
+
+        rclcpp::sleep_for(std::chrono::seconds(20));
+
+
     }
-
-
-    void publish_created_vertices()
-    {
-        sensor_msgs::msg::PointCloud2 cloud_msgs_created_vertices;
-        cloud_msgs_created_vertices.header.stamp = this->get_clock()->now();
-        cloud_msgs_created_vertices.header.frame_id = "world";
-
-        cloud_msgs_created_vertices.height = 1; 
-        cloud_msgs_created_vertices.width = points.size(); 
-        cloud_msgs_created_vertices.is_dense = true;
-        cloud_msgs_created_vertices.is_bigendian = false;
-        cloud_msgs_created_vertices.point_step = 3 * sizeof(float); 
-        cloud_msgs_created_vertices.row_step = cloud_msgs_created_vertices.point_step * cloud_msgs_created_vertices.width;
-
-        sensor_msgs::PointCloud2Modifier modifier(cloud_msgs_created_vertices);
-        modifier.setPointCloud2FieldsByString(1, "xyz");
-        modifier.resize(cloud_msgs_created_vertices.width);
-
-        sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msgs_created_vertices, "x");
-        sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msgs_created_vertices, "y");
-        sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msgs_created_vertices, "z");
-        for (const auto& vertex : points) 
-        {
-           
-                *iter_x = std::get<0>(vertex);
-                *iter_y = std::get<1>(vertex);
-                *iter_z = std::get<2>(vertex);
-
-                ++iter_x;
-                ++iter_y;
-                ++iter_z;    
-        }
-
-        send_joint_positions();
-
-        publisher_rounded_points->publish(cloud_msgs_created_vertices);
-    }
-
 
   
     /*
@@ -345,123 +399,54 @@ private:
 
     void callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
-        for (const auto & detection : msg->detections) {
-        // há uma lista de hypotheses, normalmente [0] é a principal
-        if (!detection.results.empty() &&
-            detection.results[0].hypothesis.class_id == "1")
+        for (const auto & detection : msg->detections) 
         {
-            const auto & size = detection.bbox.size;
-            RCLCPP_INFO(this->get_logger(),
-            "Class 1 -> size x: %.3f, y: %.3f, z: %.3f",
-            size.x, size.y, size.z);
-        }
-        }
-    }
-
- 
-            
-    void callback_object_point_cloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
-    {
-        sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
-        sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
-        sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
-
-        points.clear();
-
-        // Limites da região de interesse
-
-        float x_min = std::numeric_limits<float>::max();
-        float x_max = std::numeric_limits<float>::lowest();
-        float y_min = std::numeric_limits<float>::max();
-        float y_max = std::numeric_limits<float>::lowest();
-        float z_min = std::numeric_limits<float>::max();
-        float z_max = std::numeric_limits<float>::lowest();
-
-        bool found = false;
-
-        for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
-        {
-            float x = *iter_x;
-            float y = *iter_y;
-            float z = *iter_z;
-
-            if (x >= x_min_lim && x <= x_max_lim && y >= y_min_lim && y <= y_max_lim && z >= z_min_lim && z <= z_max_lim)
+        
+            if (!detection.results.empty() &&
+                detection.results[0].hypothesis.class_id == "1")
             {
-                found = true;
-
-                if (x < x_min) x_min = x;
-                if (x > x_max) x_max = x;
-                if (y < y_min) y_min = y;
-                if (y > y_max) y_max = y;
-                if (z < z_min) z_min = z;
-                if (z > z_max) z_max = z;
-                
-                std::tuple<float, float, float> index = std::make_tuple(x, y, z);
-                
-                points.push_back(index);
+                const auto & size = detection.bbox.size;
+                RCLCPP_INFO(this->get_logger(),
+                "Class 1 -> size x: %.3f, y: %.3f, z: %.3f",
+                size.x, size.y, size.z);
             }
         }
-
-        if (found)
-        {
-            RCLCPP_INFO(rclcpp::get_logger("rclcpp"),
-                "ROI bounds: x[%f, %f], y[%f, %f], z[%f, %f]",
-                x_min, x_max, y_min, y_max, z_min, z_max);
-        }
-        else
-        {
-            RCLCPP_WARN(rclcpp::get_logger("rclcpp"),
-                "Nenhum ponto dentro da região de interesse.");
-        }
-
-        publish_created_vertices();
     }
 
+    void poseCallback(const geometry_msgs::msg::Pose::SharedPtr msg) 
+    {
+ 
+        object_pose.position.x = msg->position.x;
+        object_pose.position.y = msg->position.y;
+        object_pose.position.z = msg->position.z;
 
+        object_pose.orientation.x = msg->orientation.x;
+        object_pose.orientation.y = msg->orientation.y;
+        object_pose.orientation.z = msg->orientation.z;
+        object_pose.orientation.w = msg->orientation.w;
 
+        std::cout << object_pose.orientation.x << std::endl;
+        std::cout << object_pose.orientation.y << std::endl;
+        std::cout << object_pose.orientation.z << std::endl;
+        std::cout << object_pose.orientation.w << std::endl;
 
-
-
+        send_joint_positions();
+    }
+ 
 
 public:
     BasicAlgorithm()
      : Node("basic_algorithm")
     {
-        this->declare_parameter<double>("x_min", -2.0);
-        this->declare_parameter<double>("x_max", 2.0);
-        this->declare_parameter<double>("y_min", -2.0);
-        this->declare_parameter<double>("y_max", 2.0);
-        this->declare_parameter<double>("z_min", 0.0);
-        this->declare_parameter<double>("z_max", 2.0);
 
-        x_min_lim =  static_cast<float>(this->get_parameter("x_min").get_parameter_value().get<double>());
-        x_max_lim =  static_cast<float>(this->get_parameter("x_max").get_parameter_value().get<double>());
-        y_min_lim =  static_cast<float>(this->get_parameter("y_min").get_parameter_value().get<double>());
-        y_max_lim =  static_cast<float>(this->get_parameter("y_max").get_parameter_value().get<double>());
-        z_min_lim =  static_cast<float>(this->get_parameter("z_min").get_parameter_value().get<double>());
-        z_max_lim =  static_cast<float>(this->get_parameter("z_max").get_parameter_value().get<double>());
-
-  
-        RCLCPP_INFO(this->get_logger(), "x_min is set to: %f", x_min_lim);
-        RCLCPP_INFO(this->get_logger(), "x_max is set to: %f", x_max_lim);
-        RCLCPP_INFO(this->get_logger(), "y_min is set to: %f", y_min_lim);
-        RCLCPP_INFO(this->get_logger(), "y_max is set to: %f", y_max_lim);
-        RCLCPP_INFO(this->get_logger(), "z_min is set to: %f", z_min_lim);
-        RCLCPP_INFO(this->get_logger(), "z_max is set to: %f", z_max_lim);
-
-        joint_trajectory_pub = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(
-            "/joint_trajectory_controller/joint_trajectory", 10);
-
-        decimals = count_decimals(resolution);
-
-        publisher_rounded_points = this->create_publisher<sensor_msgs::msg::PointCloud2>("/points", 10);
-
-        depth_camera_subscription_1 = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            "/rounded_points", 10, std::bind(&BasicAlgorithm::callback_object_point_cloud, this, std::placeholders::_1));
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/boxes", 10,
             std::bind(&BasicAlgorithm::callback, this, std::placeholders::_1));
+
+        sub_1 = this->create_subscription<geometry_msgs::msg::Pose>(
+            "/model/small_black_box/pose", 10,
+            std::bind(&BasicAlgorithm::poseCallback, this, std::placeholders::_1));
 
         
         init_timer_ = this->create_wall_timer(
@@ -478,7 +463,7 @@ public:
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<rclcpp::Node>("basic_algorithm"); // único
+    auto node = std::make_shared<rclcpp::Node>("basic_algorithm");
 
     
     rclcpp::spin(std::make_shared<BasicAlgorithm>());
