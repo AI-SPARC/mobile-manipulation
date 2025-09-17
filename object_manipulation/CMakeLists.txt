@@ -32,8 +32,28 @@ find_package(trajectory_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED) 
 
 add_executable(basic_algorithm src/basic_algorithm.cpp)
+ament_target_dependencies(basic_algorithm 
+  trajectory_msgs 
+  rclcpp nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+)
+
+add_executable(multiple_objects src/multiple_objects.cpp)
 ament_target_dependencies(
-  basic_algorithm 
+  multiple_objects 
   trajectory_msgs 
   rclcpp nav_msgs 
   geometry_msgs 
@@ -62,6 +82,8 @@ target_link_libraries(basic_algorithm
   yaml-cpp
 )
 
+
+
 install(DIRECTORY
 
   launch
@@ -70,6 +92,8 @@ install(DIRECTORY
 
 install(TARGETS
   basic_algorithm
+  multiple_objects
+
   DESTINATION lib/${PROJECT_NAME}
 )
 

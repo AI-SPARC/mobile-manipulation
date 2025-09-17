@@ -14,10 +14,6 @@
   gz_type_name: "gz.msgs.Image"
   direction: "GZ_TO_ROS"
 
-- gz_topic_name: "/world/panda_world/dynamic_pose/info"
-  ros_topic_name: "/tf"
-  ros_type_name: "tf2_msgs/msg/TFMessage"
-  gz_type_name: "gz.msgs.Pose_V"
 
 - topic_name: "/depth_camera_1"
   ros_type_name: "sensor_msgs/msg/Image"
@@ -44,4 +40,21 @@
   gz_topic_name: "/tf_static"
   ros_type_name: "tf2_msgs/msg/TFMessage"
   gz_type_name: "gz.msgs.TFMessage"
+  direction: GZ_TO_ROS
+
+
+
+- topic_name: "/model/small_black_box/pose"
+  ros_type_name: "geometry_msgs/msg/Pose"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+
+- topic_name: "/model/small_black_box1/pose"
+  ros_type_name: "geometry_msgs/msg/Pose"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+
+- topic_name: "/model/small_black_box2/pose"
+  ros_type_name: "geometry_msgs/msg/Pose"
+  gz_type_name: "gz.msgs.Pose"
   direction: GZ_TO_ROS

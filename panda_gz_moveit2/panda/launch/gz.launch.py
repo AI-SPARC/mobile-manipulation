@@ -173,6 +173,16 @@ def generate_launch_description() -> LaunchDescription:
                         arguments=['0', '-0.5', '0.09', '0.52', '0', '0', 'world', 'depth_optical_frame_2']
                     ),
 
+                    Node(
+                        package='panda',
+                        executable='ros2_bridge_to_pose_array',
+                        parameters=[{
+                            "num_boxes": 3
+                        }],
+                        name='ros2_bridge_to_pose_array',
+                        output='screen',
+                    ),
+
                     # Node(
                     #     package='tf2_ros',
                     #     executable='static_transform_publisher',

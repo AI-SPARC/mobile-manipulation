@@ -10,6 +10,7 @@
       name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
+    
     <plugin filename="gz-sim-forcetorque-system"
         name="gz::sim::systems::ForceTorque"/>
     <plugin name='ignition::gazebo::systems::Physics' filename='ignition-gazebo-physics-system'/>
@@ -46,6 +47,7 @@
         <step>true</step>
         <start_paused>true</start_paused>
       </plugin>
+      
  
     </gui>
     <gravity>0 0 -9.8000000000000007</gravity>
@@ -124,20 +126,7 @@
           </inertia>
           <pose>0 0 0 0 0 0</pose>
         </inertial>
-        <collision name='collision'>
-          <geometry>
-            <box>
-              <size>0.1 0.1 0.1</size>
-            </box>
-          </geometry>
-          <surface>
-            <friction>
-              <ode/>
-            </friction>
-            <bounce/>
-            <contact/>
-          </surface>
-        </collision>
+        
         <visual name='visual'>
           <geometry>
             <mesh>
@@ -270,20 +259,7 @@
           </inertia>
           <pose>0 0 0 0 0 0</pose>
         </inertial>
-        <collision name='collision'>
-          <geometry>
-            <box>
-              <size>0.1 0.1 0.1</size>
-            </box>
-          </geometry>
-          <surface>
-            <friction>
-              <ode/>
-            </friction>
-            <bounce/>
-            <contact/>
-          </surface>
-        </collision>
+        
         <visual name='visual'>
           <geometry>
             <mesh>
@@ -372,6 +348,16 @@
     
 
   <model name='small_black_box'>
+  <plugin
+    filename="gz-sim-pose-publisher-system"
+    name="gz::sim::systems::PosePublisher">
+    <publish_link_pose>false</publish_link_pose>
+    <publish_collision_pose>false</publish_collision_pose>
+    <publish_visual_pose>false</publish_visual_pose>
+    <publish_nested_model_pose>true</publish_nested_model_pose>
+    <update_rate>60</update_rate>
+</plugin>
+
      <pose>1.0 0.3 1.15 0 0 0</pose> <!-- x, y, z, roll, pitch, yaw -->
     <static>false</static>
     <link name='link3'>
@@ -402,9 +388,7 @@
           <specular>0.1 0.1 0.1 1</specular>
           <emissive>0 0 0 1</emissive>
         </material>
-        <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
-              <label>1</label>
-            </plugin>
+     
       </visual>
       <inertial>
         <mass>0.1</mass>
@@ -424,6 +408,130 @@
             </plugin>
   </model>
 
+  <model name='small_black_box1'>
+  <plugin
+    filename="gz-sim-pose-publisher-system"
+    name="gz::sim::systems::PosePublisher">
+    <publish_link_pose>false</publish_link_pose>
+    <publish_collision_pose>false</publish_collision_pose>
+    <publish_visual_pose>false</publish_visual_pose>
+    <publish_nested_model_pose>true</publish_nested_model_pose>
+    <update_rate>60</update_rate>
+</plugin>
+
+     <pose>1.0 0 1.15 0 0 0</pose> <!-- x, y, z, roll, pitch, yaw -->
+    <static>false</static>
+    <link name='link3'>
+       <pose>0 0 0 0 0 0</pose>
+      <collision name='collision'>
+        <geometry>
+          <box>
+            <size>0.06 0.06 0.06</size> <!-- 10cm x 10cm x 10cm -->
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode/>
+          </friction>
+          <bounce/>
+          <contact/>
+        </surface>
+      </collision>
+      <visual name='visual'>
+        <geometry>
+          <box>
+            <size>0.06 0.06 0.06</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <emissive>0 0 0 1</emissive>
+        </material>
+     
+      </visual>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia>
+          <ixx>0.000166667</ixx>
+          <iyy>0.000166667</iyy>
+          <izz>0.000166667</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+        <pose>0 0 0 0 0 0</pose>
+      </inertial>
+    </link>
+    <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+              <label>2</label>
+            </plugin>
+  </model>
+
+
+
+  <model name='small_black_box2'>
+  <plugin
+    filename="gz-sim-pose-publisher-system"
+    name="gz::sim::systems::PosePublisher">
+    <publish_link_pose>false</publish_link_pose>
+    <publish_collision_pose>false</publish_collision_pose>
+    <publish_visual_pose>false</publish_visual_pose>
+    <publish_nested_model_pose>true</publish_nested_model_pose>
+    <update_rate>60</update_rate>
+</plugin>
+
+     <pose>1.0 -0.3 1.15 0 0 0</pose> <!-- x, y, z, roll, pitch, yaw -->
+    <static>false</static>
+    <link name='link3'>
+       <pose>0 0 0 0 0 0</pose>
+      <collision name='collision'>
+        <geometry>
+          <box>
+            <size>0.06 0.06 0.06</size> <!-- 10cm x 10cm x 10cm -->
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode/>
+          </friction>
+          <bounce/>
+          <contact/>
+        </surface>
+      </collision>
+      <visual name='visual'>
+        <geometry>
+          <box>
+            <size>0.06 0.06 0.06</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <emissive>0 0 0 1</emissive>
+        </material>
+     
+      </visual>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia>
+          <ixx>0.000166667</ixx>
+          <iyy>0.000166667</iyy>
+          <izz>0.000166667</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+        <pose>0 0 0 0 0 0</pose>
+      </inertial>
+    </link>
+    <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+              <label>3</label>
+            </plugin>
+  </model>
+
     <include>
       <uri>https://fuel.ignitionrobotics.org/1.0/OpenRobotics/models/Table/4</uri>
       <name>table1</name>
@@ -434,21 +542,7 @@
       <name>table2</name>
       <pose>0.79400000000000004 0 0 0 0 1.5708000000000006</pose>
     </include>
-    <include>
-      <uri>https://fuel.ignitionrobotics.org/1.0/GoogleResearch/models/Transformers_Age_of_Extinction_Mega_1Step_Bumblebee_Figure/1</uri>
-      <name>Transformers_Age_of_Extinction_Mega_1Step_Bumblebee_Figure</name>
-      <pose>0.0 0 1.0249999999999999 0 0 0</pose>
-    </include>
-
-   <include>
-    <uri>https://fuel.gazebosim.org/1.0/Gambit/models/Orange</uri>
-    <name>toma</name>
-    <pose>1.0 0 1.024 0 0 0</pose>
-    <enable_wind>false</enable_wind>
-    <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
-              <label>2</label>
-            </plugin>
-  </include>
+    
 
     <light name='sun' type='directional'>
       <pose>0 0 10 0 0 0</pose>

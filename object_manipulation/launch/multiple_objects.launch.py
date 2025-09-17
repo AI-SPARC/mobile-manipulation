@@ -83,9 +83,9 @@ def generate_launch_description():
     }
 
     # Node basic_algorithm com nome dinâmico
-    basic_algorithm_node = Node(
+    multiple_objects = Node(
         package="object_manipulation",
-        executable="basic_algorithm",
+        executable="multiple_objects",
         name=node_name,  # nome vem do LaunchArgument
         output="screen",
         parameters=[
@@ -111,17 +111,7 @@ def generate_launch_description():
     #     arguments=["--ros-args", "--log-level", log_level]
     # )
 
-    parameters=[{
-        "num_boxes": 3
-    }]
 
-    ros2_bridge_to_array = Node(
-        package='object_manipulation',
-        executable='ros2_bridge_to_pose_array',
-        parameters=parameters,
-        name='ros2_bridge',
-        output='screen',
-    )
 
-    # return LaunchDescription(declared_arguments + [basic_algorithm_node] + [rounded_points] + [ros2_bridge_to_array])
-    return LaunchDescription(declared_arguments + [basic_algorithm_node] + [ros2_bridge_to_array])   
+    # return LaunchDescription(declared_arguments + [multiple_objects] + [rounded_points] + [ros2_bridge_to_array])
+    return LaunchDescription(declared_arguments + [multiple_objects])   

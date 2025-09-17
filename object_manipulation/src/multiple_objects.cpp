@@ -1,74 +1,27 @@
-#include <string>
-#include <random>
-#include <algorithm>
-#include <geometry_msgs/msg/point.hpp>
-#include "geometry_msgs/msg/pose_array.hpp"
-#include "geometry_msgs/msg/pose.hpp"
-#include <chrono>
-#include <functional>
 #include <memory>
-#include <string>
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
-#include <pcl_conversions/pcl_conversions.h>
 #include <vector>
-#include <map>
-#include <stack>
-#include <unordered_map>
-#include <optional>
-#include <iostream>
-#include <climits>
-#include <iomanip>
-#include <thread>
-#include <queue>
 #include <tuple>
-#include "rclcpp/rclcpp.hpp"
-#include <nav_msgs/msg/odometry.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/point_cloud2_iterator.hpp>
-#include <nav_msgs/msg/path.hpp>
 #include <cmath>
-#include <cstring>
-#include <utility> 
-#include <iomanip>
-#include <filesystem>
-#include <barrier>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include "nav_msgs/msg/occupancy_grid.hpp"
-#include <future>
-#include <barrier>
-#include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/string.hpp>
-#include <termios.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <iostream>
+#include <functional>
+#include <chrono>
+#include <random>
+
 #include "rclcpp/rclcpp.hpp"
-#include <nav_msgs/msg/odometry.hpp>                       
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/point_cloud2_iterator.hpp>
-#include <cmath>
-#include <cstring>
-#include <utility> 
-#include <iomanip>
-#include <filesystem>
-#include "nav_msgs/msg/occupancy_grid.hpp"
+
 #include "geometry_msgs/msg/pose.hpp"
-#include "geometry_msgs/msg/point.hpp"
-#include "geometry_msgs/msg/quaternion.hpp"
+#include "vision_msgs/msg/detection3_d_array.hpp"
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
+#include "sensor_msgs/msg/point_cloud2.hpp"
+
+#include <moveit/move_group_interface/move_group_interface.hpp>
+#include <moveit/robot_state/robot_state.hpp>
+#include <moveit/robot_model_loader/robot_model_loader.hpp>
+#include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
-#include <moveit/move_group_interface/move_group_interface.hpp>
-#include <moveit_msgs/msg/move_it_error_codes.hpp>
-#include <moveit/robot_state/robot_state.h>
-#include <moveit/robot_model_loader/robot_model_loader.h>
-#include "vision_msgs/msg/detection3_d_array.hpp"
 
 using namespace std::chrono_literals;
 
@@ -141,23 +94,17 @@ struct TupleEqual {
 };
 
 
-class BasicAlgorithm : public rclcpp::Node {
+class MultipleObjects : public rclcpp::Node {
 
 private:
 
-
-    
-
-
     //Publishers.
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher_rounded_points;
     rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
 
     //Subscriptions.
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr depth_camera_subscription_1;
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr depth_camera_subscription_2;
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
-    rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr sub_1;
+    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
+
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -169,7 +116,8 @@ private:
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
     rclcpp::TimerBase::SharedPtr init_timer_;
 
-    geometry_msgs::msg::Pose object_pose;
+    vision_msgs::msg::Detection3DArray object_detections;
+
 
   
     inline float round_to_multiple(float value, float multiple, int decimals) 
@@ -346,7 +294,7 @@ private:
 
 
 
-    void send_joint_positions()
+    void send_joint_positions(const geometry_msgs::msg::Pose &object_pose)
     {
         geometry_msgs::msg::Pose pose;
         pose.position.x = object_pose.position.x - 0.4;
@@ -355,15 +303,10 @@ private:
 
         tf2::Quaternion q_obj;
         tf2::fromMsg(object_pose.orientation, q_obj);
-
-        tf2::Quaternion q_rot;
-        q_rot.setRPY(M_PI, 0, 0);
-
+        tf2::Quaternion q_rot; q_rot.setRPY(M_PI, 0, 0);
         tf2::Quaternion q_final = q_obj * q_rot;
         q_final.normalize();
-
-        q_final.setW(-q_final.w());  
-
+        q_final.setW(-q_final.w());
         pose.orientation = tf2::toMsg(q_final);
 
         positions_for_arm(pose);
@@ -373,10 +316,31 @@ private:
         pose_2.position.y = object_pose.position.y;
         pose_2.position.z = object_pose.position.z - 1.016;
 
-        
+        q_obj;
+        tf2::fromMsg(object_pose.orientation, q_obj);
+        q_rot; q_rot.setRPY(M_PI, 0, 0);
+        q_final = q_obj * q_rot;
+        q_final.normalize();
+        q_final.setW(-q_final.w());
+        pose_2.orientation = tf2::toMsg(q_final);
+
+        positions_for_arm(pose_2);
+
+        close_gripper();
+
+        pose_2;
+
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dist_x(-0.5, -0.1); 
+        std::uniform_real_distribution<float> dist_y(-0.5, 0.5); 
+
+        pose_2.position.x = dist_x(gen);
+        pose_2.position.y = dist_y(gen);
+        pose_2.position.z = 0.1; 
+                
         tf2::fromMsg(object_pose.orientation, q_obj);
 
-        
         q_rot.setRPY(M_PI, 0, 0);
 
         q_final = q_obj * q_rot;
@@ -388,30 +352,7 @@ private:
 
         positions_for_arm(pose_2);
 
-        close_gripper();
-
-
-
-        geometry_msgs::msg::Pose pose_3;
-        pose_3.position.x = -0.4;
-        pose_3.position.y = 0.0;
-        pose_3.position.z = 0.05;
-
-        
-        tf2::fromMsg(object_pose.orientation, q_obj);
-
-        
-        q_rot.setRPY(M_PI, 0, 0);
-
-        q_final = q_obj * q_rot;
-        q_final.normalize();
-
-        q_final.setW(-q_final.w());  
-
-        pose_3.orientation = tf2::toMsg(q_final);
-
-        positions_for_arm(pose_3);
-
+    
         open_gripper();
 
         return_to_origin();
@@ -428,63 +369,68 @@ private:
 
     */
 
-    void callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
-    {
-        for (const auto & detection : msg->detections) 
-        {
+    // void callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
+    // {
+    //     for (const auto & detection : msg->detections) 
+    //     {
         
-            if (!detection.results.empty() &&
-                detection.results[0].hypothesis.class_id == "1")
-            {
-                const auto & size = detection.bbox.size;
-                RCLCPP_INFO(this->get_logger(),
-                "Class 1 -> size x: %.3f, y: %.3f, z: %.3f",
-                size.x, size.y, size.z);
-            }
-        }
-    }
+    //         if (!detection.results.empty() && detection.results[0].hypothesis.class_id == "1")
+    //         {
+    //             const auto & size = detection.bbox.size;
+    //             RCLCPP_INFO(this->get_logger(),
+    //             "Class 1 -> size x: %.3f, y: %.3f, z: %.3f",
+    //             size.x, size.y, size.z);
+    //         }
+    //     }
+    // }
 
-    void poseCallback(const geometry_msgs::msg::Pose::SharedPtr msg) 
+    void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
- 
-        object_pose.position.x = msg->position.x;
-        object_pose.position.y = msg->position.y;
-        object_pose.position.z = msg->position.z;
+        if (msg->detections.empty()) 
+        {
+            RCLCPP_WARN(this->get_logger(), "Detection3DArray vazio recebido.");
+            return;
+        }
 
-        object_pose.orientation.x = msg->orientation.x;
-        object_pose.orientation.y = msg->orientation.y;
-        object_pose.orientation.z = msg->orientation.z;
-        object_pose.orientation.w = msg->orientation.w;
+        object_detections = *msg;
 
-        std::cout << object_pose.orientation.x << std::endl;
-        std::cout << object_pose.orientation.y << std::endl;
-        std::cout << object_pose.orientation.z << std::endl;
-        std::cout << object_pose.orientation.w << std::endl;
+        RCLCPP_INFO(this->get_logger(), "Recebidas %zu detecções", object_detections.detections.size());
 
-        send_joint_positions();
+    
+        for (size_t i = 0; i < object_detections.detections.size(); ++i) 
+        {
+            const auto &det = object_detections.detections[i];
+            const auto &target_pose = det.bbox.center;
+
+            RCLCPP_INFO(this->get_logger(),
+                "Objeto %zu -> x: %.3f, y: %.3f, z: %.3f",
+                i, target_pose.position.x, target_pose.position.y, target_pose.position.z);
+
+            send_joint_positions(target_pose);
+        }
+
+        
     }
+
+
+
  
 
 public:
-    BasicAlgorithm()
-     : Node("basic_algorithm")
+    MultipleObjects()
+     : Node("multiple_objects")
     {
 
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-            "/boxes", 10,
-            std::bind(&BasicAlgorithm::callback, this, std::placeholders::_1));
+            "/boxes_detection_array", 10,
+            std::bind(&MultipleObjects::detectionCallback, this, std::placeholders::_1));
 
-        sub_1 = this->create_subscription<geometry_msgs::msg::Pose>(
-            "/model/small_black_box/pose", 10,
-            std::bind(&BasicAlgorithm::poseCallback, this, std::placeholders::_1));
 
-        
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
-            std::bind(&BasicAlgorithm::initMoveGroup, this));
-            
-
+            std::bind(&MultipleObjects::initMoveGroup, this));
+        
      
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -494,10 +440,10 @@ public:
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<rclcpp::Node>("basic_algorithm");
+    auto node = std::make_shared<rclcpp::Node>("multiple_objects");
 
     
-    rclcpp::spin(std::make_shared<BasicAlgorithm>());
+    rclcpp::spin(std::make_shared<MultipleObjects>());
     rclcpp::shutdown();
     return 0;
 }
