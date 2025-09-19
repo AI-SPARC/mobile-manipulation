@@ -25,6 +25,7 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
+#include "object_manipulation_interfaces/srv/object_collision.hpp"
 
 using namespace std::chrono_literals;
 
@@ -97,17 +98,20 @@ struct TupleEqual {
 };
 
 
-class MultipleObjects : public rclcpp::Node {
+class AddCollision : public rclcpp::Node {
 
 private:
 
-    //Publishers.
+    // Publishers.
     rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
 
-    //Subscriptions.
+    // Subscriptions.
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
 
+    // Services.
+
+    rclcpp::Service<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr service_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -120,6 +124,8 @@ private:
     rclcpp::TimerBase::SharedPtr init_timer_;
 
     vision_msgs::msg::Detection3DArray object_detections;
+
+    std::string id_to_remove = "";
 
 
 
@@ -216,6 +222,8 @@ private:
     }
 
 
+    // CALLBACKS.
+
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         if (msg->detections.empty()) 
@@ -232,7 +240,6 @@ private:
         for (size_t i = 0; i < object_detections.detections.size(); ++i) 
         {
             const auto &det = object_detections.detections[i];
-            const auto &target_pose = det.bbox.center;
 
             // RCLCPP_INFO(this->get_logger(),
             //     "Objeto %zu -> x: %.3f, y: %.3f, z: %.3f",
@@ -242,32 +249,64 @@ private:
             pose.position.x -= 0.4;
             pose.position.z -= 1.016;
             
-
+            
             remove_collision_box(std::to_string(i));
-            add_collision_box(std::to_string(i), {0.06, 0.06, 0.06}, pose);
+            
+            if(id_to_remove != std::to_string(i))
+            {
+                add_collision_box(std::to_string(i), {0.06, 0.06, 0.06}, pose);
+            }
         }
-
         
     }
 
+    void handle_service(
+        const std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Request> request,
+        std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Response> response)
+    {
+        RCLCPP_INFO(this->get_logger(),
+                    "Recebido pedido para objeto '%s' | remove=%s",
+                    request->object_id.c_str(),
+                    request->remove.c_str());
 
+        if (request->remove == "true") 
+        {
+            id_to_remove = request->object_id;
+
+            remove_collision_box(id_to_remove);
+
+            RCLCPP_INFO(this->get_logger(), "Removendo objeto '%s'", request->object_id.c_str());
+        } 
+        else 
+        {
+            id_to_remove.clear(); 
+            RCLCPP_INFO(this->get_logger(), "Adicionando objeto '%s'", request->object_id.c_str());
+        }
+
+        response->success = true;
+    }
 
  
 
 public:
-    MultipleObjects()
+    AddCollision()
      : Node("add_colision_objects")
     {
 
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/boxes_detection_array", 10,
-            std::bind(&MultipleObjects::detectionCallback, this, std::placeholders::_1));
+            std::bind(&AddCollision::detectionCallback, this, std::placeholders::_1));
 
+        service_ = this->create_service<object_manipulation_interfaces::srv::ObjectCollision>(
+            "object_collision",
+            std::bind(&AddCollision::handle_service, this,
+                    std::placeholders::_1, std::placeholders::_2)
+        );
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
-            std::bind(&MultipleObjects::initMoveGroup, this));
+            std::bind(&AddCollision::initMoveGroup, this));
         
         add_ground_plane();
      
@@ -277,10 +316,9 @@ public:
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<rclcpp::Node>("add_colision_objects");
 
     
-    rclcpp::spin(std::make_shared<MultipleObjects>());
+    rclcpp::spin(std::make_shared<AddCollision>());
     rclcpp::shutdown();
     return 0;
 }

@@ -30,8 +30,10 @@ find_package(TBB REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED) 
+find_package(object_manipulation_interfaces REQUIRED)
 
 add_executable(basic_algorithm src/basic_algorithm.cpp)
+
 ament_target_dependencies(basic_algorithm 
   trajectory_msgs 
   rclcpp nav_msgs 
@@ -52,6 +54,7 @@ ament_target_dependencies(basic_algorithm
 )
 
 add_executable(multiple_objects src/multiple_objects.cpp)
+
 ament_target_dependencies(
   multiple_objects 
   trajectory_msgs 
@@ -69,10 +72,32 @@ ament_target_dependencies(
   PCL
   vision_msgs
   moveit_ros_planning_interface 
+  object_manipulation_interfaces
   Eigen3
 )
 
+add_executable(add_colision_objects src/add_colision_objects.cpp)
 
+ament_target_dependencies(
+  add_colision_objects 
+  trajectory_msgs 
+  rclcpp nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  moveit_ros_planning_interface
+  object_manipulation_interfaces 
+  Eigen3
+)
 
 target_link_libraries(basic_algorithm
   ${rclcpp_LIBRARIES}
@@ -82,10 +107,26 @@ target_link_libraries(basic_algorithm
   yaml-cpp
 )
 
+target_link_libraries(multiple_objects
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
+target_link_libraries(add_colision_objects
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
+
 
 
 install(DIRECTORY
-
   launch
   DESTINATION share/${PROJECT_NAME}
 )
@@ -93,7 +134,7 @@ install(DIRECTORY
 install(TARGETS
   basic_algorithm
   multiple_objects
-
+  add_colision_objects
   DESTINATION lib/${PROJECT_NAME}
 )
 

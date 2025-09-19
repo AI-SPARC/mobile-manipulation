@@ -86,7 +86,24 @@ def generate_launch_description():
     multiple_objects = Node(
         package="object_manipulation",
         executable="multiple_objects",
-        name=node_name,  # nome vem do LaunchArgument
+        name="multiple_objects",  # nome vem do LaunchArgument
+        output="screen",
+        parameters=[
+            robot_description,
+            robot_description_semantic,
+            robot_description_kinematics,
+            robot_description_planning,
+            planning_pipeline,
+            moveit_controller_manager,
+            {"use_sim_time": use_sim_time}
+        ],
+        arguments=["--ros-args", "--log-level", log_level]
+    )
+
+    add_colision_objects = Node(
+        package="object_manipulation",
+        executable="add_colision_objects",
+        name="add_colision_objects",  # nome vem do LaunchArgument
         output="screen",
         parameters=[
             robot_description,
@@ -114,4 +131,6 @@ def generate_launch_description():
 
 
     # return LaunchDescription(declared_arguments + [multiple_objects] + [rounded_points] + [ros2_bridge_to_array])
-    return LaunchDescription(declared_arguments + [multiple_objects])   
+    return LaunchDescription(
+        declared_arguments + [multiple_objects, add_colision_objects]
+    )

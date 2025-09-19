@@ -22,6 +22,10 @@
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
+#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
+#include <moveit_msgs/msg/collision_object.hpp>
+#include <shape_msgs/msg/solid_primitive.hpp>
+#include "object_manipulation_interfaces/srv/object_collision.hpp"
 
 using namespace std::chrono_literals;
 
@@ -105,16 +109,16 @@ private:
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
 
+    //Services.
 
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-    rclcpp::TimerBase::SharedPtr parameterTimer;    
+    rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr client_;
 
-
-    std::vector<std::tuple<float, float, float>> points;
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
+
     rclcpp::TimerBase::SharedPtr init_timer_;
+
+
 
     vision_msgs::msg::Detection3DArray object_detections;
 
@@ -176,11 +180,22 @@ private:
             return;
         }
 
-        move_group_arm->setPlannerId("RRTConnectkConfigDefault");
+        move_group_arm->setPlannerId("RRTConnect");
         move_group_arm->setPoseTarget(target_pose);
 
+        move_group_arm->setPlanningTime(10.0);
+        move_group_arm->setNumPlanningAttempts(200);
+
+    
         move_group_arm->setMaxVelocityScalingFactor(1.0);
         move_group_arm->setMaxAccelerationScalingFactor(1.0);
+
+
+        move_group_arm->setGoalTolerance(0.005);
+        move_group_arm->setGoalJointTolerance(0.005);
+        move_group_arm->setGoalPositionTolerance(0.005);
+        move_group_arm->setGoalOrientationTolerance(0.005);
+
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
         auto result = move_group_arm->plan(plan);
@@ -231,17 +246,35 @@ private:
         }
     }
 
-    void close_gripper() 
+    void close_gripper(std::string id) 
     {
         if (!move_group_gripper) {
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do gripper não inicializado.");
             return;
         }
 
+        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
+        request->object_id = id;
+        request->remove = "true"; 
+
+        auto result_future = client_->async_send_request(request);
+
+        if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), result_future) == rclcpp::FutureReturnCode::SUCCESS)
+        {
+            auto response = result_future.get();
+            RCLCPP_INFO(this->get_logger(), "Resposta: success=%s", response->success ? "true" : "false");
+        }
+        else
+        {
+            RCLCPP_ERROR(this->get_logger(), "Falha ao chamar serviço.");
+        }
+
+
+
         
         move_group_gripper->setJointValueTarget({
-            {"panda_finger_joint1", 0.0185},
-            {"panda_finger_joint2", 0.0185}
+            {"panda_finger_joint1", 0.02},
+            {"panda_finger_joint2", 0.02}
         });
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -265,9 +298,10 @@ private:
             return;
         }
 
+        
         move_group_gripper->setJointValueTarget({
-            {"panda_finger_joint1", 0.037},
-            {"panda_finger_joint2", 0.037}
+            {"panda_finger_joint1", 0.04},
+            {"panda_finger_joint2", 0.04}
         });
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -286,6 +320,7 @@ private:
 
 
 
+
     /*
 
         PUBLISHERS.
@@ -294,72 +329,50 @@ private:
 
 
 
-    void send_joint_positions(const geometry_msgs::msg::Pose &object_pose)
+   void send_joint_positions(const geometry_msgs::msg::Pose &object_pose, std::string id)
     {
+        // --- 1. Defina a orientação "para baixo" UMA VEZ ---
+        // Cria um quaternião que representa uma rotação de 180° no eixo X (Roll).
+        // Isso garante que o eixo Z do efetuador sempre aponte para o Z negativo do mundo.
+        tf2::Quaternion q_down_orientation;
+        q_down_orientation.setRPY(M_PI, 0, 0); // Roll: 180°, Pitch: 0, Yaw: 0
+        geometry_msgs::msg::Quaternion orientation_msg = tf2::toMsg(q_down_orientation);
+
+        // --- 2. Primeiro Movimento (aproximação) ---
         geometry_msgs::msg::Pose pose;
         pose.position.x = object_pose.position.x - 0.4;
         pose.position.y = object_pose.position.y;
         pose.position.z = object_pose.position.z - 1.016 + 0.15;
-
-        tf2::Quaternion q_obj;
-        tf2::fromMsg(object_pose.orientation, q_obj);
-        tf2::Quaternion q_rot; q_rot.setRPY(M_PI, 0, 0);
-        tf2::Quaternion q_final = q_obj * q_rot;
-        q_final.normalize();
-        q_final.setW(-q_final.w());
-        pose.orientation = tf2::toMsg(q_final);
-
+        pose.orientation = orientation_msg; // << USA A ORIENTAÇÃO FIXA
         positions_for_arm(pose);
 
+        // --- 3. Segundo Movimento (pegar o objeto) ---
         geometry_msgs::msg::Pose pose_2;
         pose_2.position.x = object_pose.position.x - 0.4;
         pose_2.position.y = object_pose.position.y;
         pose_2.position.z = object_pose.position.z - 1.016;
-
-        q_obj;
-        tf2::fromMsg(object_pose.orientation, q_obj);
-        q_rot; q_rot.setRPY(M_PI, 0, 0);
-        q_final = q_obj * q_rot;
-        q_final.normalize();
-        q_final.setW(-q_final.w());
-        pose_2.orientation = tf2::toMsg(q_final);
-
+        pose_2.orientation = orientation_msg; // << USA A MESMA ORIENTAÇÃO FIXA
         positions_for_arm(pose_2);
 
-        close_gripper();
+        close_gripper(id);
+        rclcpp::sleep_for(std::chrono::milliseconds(100)); // Adicionado um pequeno delay para garantir a pegada
 
-        pose_2;
-
+        // --- 4. Terceiro Movimento (levar para local aleatório) ---
         static std::random_device rd;
         static std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dist_x(-0.5, -0.1); 
-        std::uniform_real_distribution<float> dist_y(-0.5, 0.5); 
+        std::uniform_real_distribution<double> dist_x(-0.2, 0.2); 
+        std::uniform_real_distribution<double> dist_y(-0.3, 0.3); 
 
-        pose_2.position.x = dist_x(gen);
-        pose_2.position.y = dist_y(gen);
-        pose_2.position.z = 0.1; 
-                
-        tf2::fromMsg(object_pose.orientation, q_obj);
-
-        q_rot.setRPY(M_PI, 0, 0);
-
-        q_final = q_obj * q_rot;
-        q_final.normalize();
-
-        q_final.setW(-q_final.w());  
-
-        pose_2.orientation = tf2::toMsg(q_final);
-
+        pose_2.position.x = -0.4;
+        pose_2.position.y = 0.0;
+        pose_2.position.z = 0.15; 
+        pose_2.orientation = orientation_msg; // << USA A MESMA ORIENTAÇÃO FIXA DE NOVO
         positions_for_arm(pose_2);
-
-    
+        
+        rclcpp::sleep_for(std::chrono::milliseconds(10));
         open_gripper();
 
-        return_to_origin();
-
-        // rclcpp::sleep_for(std::chrono::seconds(20));
-
-
+        // return_to_origin();
     }
 
   
@@ -406,7 +419,8 @@ private:
                 "Objeto %zu -> x: %.3f, y: %.3f, z: %.3f",
                 i, target_pose.position.x, target_pose.position.y, target_pose.position.z);
 
-            send_joint_positions(target_pose);
+            
+            send_joint_positions(target_pose, std::to_string(i));
         }
 
         
@@ -414,33 +428,34 @@ private:
 
 
 
- 
-
 public:
     MultipleObjects()
      : Node("multiple_objects")
     {
 
-
+        // Topics.
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/boxes_detection_array", 10,
             std::bind(&MultipleObjects::detectionCallback, this, std::placeholders::_1));
 
+        // Services.
+
+        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>("object_collision");
+
+
+        // Timers.
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
             std::bind(&MultipleObjects::initMoveGroup, this));
-        
-     
-        tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+   
     }   
 };
 
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<rclcpp::Node>("multiple_objects");
 
     
     rclcpp::spin(std::make_shared<MultipleObjects>());
