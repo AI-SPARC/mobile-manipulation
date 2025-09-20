@@ -111,7 +111,6 @@ private:
 
     // Services.
 
-    rclcpp::Service<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr service_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -235,7 +234,7 @@ private:
         object_detections = *msg;
 
         // RCLCPP_INFO(this->get_logger(), "Recebidas %zu detecções", object_detections.detections.size());
-        add_ground_plane();
+        
     
         for (size_t i = 0; i < object_detections.detections.size(); ++i) 
         {
@@ -250,42 +249,14 @@ private:
             pose.position.z -= 1.016;
             
             
-            remove_collision_box(std::to_string(i));
+            // remove_collision_box(std::to_string(i));
             
-            if(id_to_remove != std::to_string(i))
-            {
-                add_collision_box(std::to_string(i), {0.06, 0.06, 0.06}, pose);
-            }
+          
+            // add_collision_box(std::to_string(i), {0.06, 0.06, 0.06}, pose);
+            
         }
         
     }
-
-    void handle_service(
-        const std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Request> request,
-        std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Response> response)
-    {
-        RCLCPP_INFO(this->get_logger(),
-                    "Recebido pedido para objeto '%s' | remove=%s",
-                    request->object_id.c_str(),
-                    request->remove.c_str());
-
-        if (request->remove == "true") 
-        {
-            id_to_remove = request->object_id;
-
-            remove_collision_box(id_to_remove);
-
-            RCLCPP_INFO(this->get_logger(), "Removendo objeto '%s'", request->object_id.c_str());
-        } 
-        else 
-        {
-            id_to_remove.clear(); 
-            RCLCPP_INFO(this->get_logger(), "Adicionando objeto '%s'", request->object_id.c_str());
-        }
-
-        response->success = true;
-    }
-
  
 
 public:
@@ -298,11 +269,6 @@ public:
             "/boxes_detection_array", 10,
             std::bind(&AddCollision::detectionCallback, this, std::placeholders::_1));
 
-        service_ = this->create_service<object_manipulation_interfaces::srv::ObjectCollision>(
-            "object_collision",
-            std::bind(&AddCollision::handle_service, this,
-                    std::placeholders::_1, std::placeholders::_2)
-        );
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),

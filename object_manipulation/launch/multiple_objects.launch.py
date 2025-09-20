@@ -86,7 +86,6 @@ def generate_launch_description():
     multiple_objects = Node(
         package="object_manipulation",
         executable="multiple_objects",
-        name="multiple_objects",  # nome vem do LaunchArgument
         output="screen",
         parameters=[
             robot_description,
@@ -103,7 +102,6 @@ def generate_launch_description():
     add_colision_objects = Node(
         package="object_manipulation",
         executable="add_colision_objects",
-        name="add_colision_objects",  # nome vem do LaunchArgument
         output="screen",
         parameters=[
             robot_description,

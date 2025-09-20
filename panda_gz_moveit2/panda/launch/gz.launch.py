@@ -159,6 +159,7 @@ def generate_launch_description() -> LaunchDescription:
                         parameters=[{"use_sim_time": use_sim_time}],
                     ),
 
+
                     Node(
                         package='tf2_ros',
                         executable='static_transform_publisher',
@@ -176,9 +177,10 @@ def generate_launch_description() -> LaunchDescription:
                     Node(
                         package='panda',
                         executable='ros2_bridge_to_pose_array',
-                        parameters=[{
-                            "num_boxes": 3
-                        }],
+                        parameters=[
+                            {"num_boxes": 3},
+                            {"use_sim_time": use_sim_time},
+                        ],
                         name='ros2_bridge_to_pose_array',
                         output='screen',
                     ),

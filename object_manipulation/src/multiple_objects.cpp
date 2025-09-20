@@ -124,42 +124,14 @@ private:
 
 
   
-    inline float round_to_multiple(float value, float multiple, int decimals) 
-    {
-        if (multiple == 0.0) return value; 
-        
-        float result = std::round(value / multiple) * multiple;
-        float factor = std::pow(10.0, decimals);
-        result = std::round(result * factor) / factor;
-        
-        return result;
-    }
-    
-
-    int count_decimals(float number) 
-    {
-      
-        float fractional = std::fabs(number - std::floor(number));
-        int decimals = 0;
-        const float epsilon = 1e-9; 
-    
-  
-        while (fractional > epsilon && decimals < 20) {
-            fractional *= 10;
-            fractional -= std::floor(fractional);
-            decimals++;
-        }
-        return decimals;
-    }
-
 
     void initMoveGroup() {
         try {
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                shared_from_this(), "arm");  
+                this->shared_from_this(), "arm");  
 
             move_group_gripper = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                shared_from_this(), "gripper");
+                this->shared_from_this(), "gripper");
 
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 
@@ -179,8 +151,11 @@ private:
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface não inicializado.");
             return;
         }
-
-        move_group_arm->setPlannerId("RRTConnect");
+        move_group_arm->setWorkspace(
+        /* min x */ -2.0, /* min y */ -2.0, /* min z */ 0.01,
+        /* max x */  2.0, /* max y */  2.0, /* max z */ 2.0
+    );
+        move_group_arm->setPlannerId("RRTConnectkConfigDefault");
         move_group_arm->setPoseTarget(target_pose);
 
         move_group_arm->setPlanningTime(10.0);
@@ -246,35 +221,19 @@ private:
         }
     }
 
-    void close_gripper(std::string id) 
+   void close_gripper() 
     {
         if (!move_group_gripper) {
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do gripper não inicializado.");
             return;
         }
 
-        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
-        request->object_id = id;
-        request->remove = "true"; 
-
-        auto result_future = client_->async_send_request(request);
-
-        if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), result_future) == rclcpp::FutureReturnCode::SUCCESS)
-        {
-            auto response = result_future.get();
-            RCLCPP_INFO(this->get_logger(), "Resposta: success=%s", response->success ? "true" : "false");
-        }
-        else
-        {
-            RCLCPP_ERROR(this->get_logger(), "Falha ao chamar serviço.");
-        }
-
-
-
+        move_group_gripper->setStartStateToCurrentState();
+        // rclcpp::sleep_for(std::chrono::milliseconds(300));
         
         move_group_gripper->setJointValueTarget({
-            {"panda_finger_joint1", 0.02},
-            {"panda_finger_joint2", 0.02}
+            {"panda_finger_joint1", 0.01},
+            {"panda_finger_joint2", 0.01}
         });
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -298,10 +257,11 @@ private:
             return;
         }
 
-        
+        move_group_gripper->setStartStateToCurrentState();
+        // rclcpp::sleep_for(std::chrono::milliseconds(300));
         move_group_gripper->setJointValueTarget({
-            {"panda_finger_joint1", 0.04},
-            {"panda_finger_joint2", 0.04}
+            {"panda_finger_joint1", 0.037},
+            {"panda_finger_joint2", 0.037}
         });
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -321,6 +281,7 @@ private:
 
 
 
+
     /*
 
         PUBLISHERS.
@@ -329,7 +290,7 @@ private:
 
 
 
-   void send_joint_positions(const geometry_msgs::msg::Pose &object_pose, std::string id)
+   void send_joint_positions(const geometry_msgs::msg::Pose &object_pose)
     {
         // --- 1. Defina a orientação "para baixo" UMA VEZ ---
         // Cria um quaternião que representa uma rotação de 180° no eixo X (Roll).
@@ -354,7 +315,7 @@ private:
         pose_2.orientation = orientation_msg; // << USA A MESMA ORIENTAÇÃO FIXA
         positions_for_arm(pose_2);
 
-        close_gripper(id);
+        close_gripper();
         rclcpp::sleep_for(std::chrono::milliseconds(100)); // Adicionado um pequeno delay para garantir a pegada
 
         // --- 4. Terceiro Movimento (levar para local aleatório) ---
@@ -420,7 +381,7 @@ private:
                 i, target_pose.position.x, target_pose.position.y, target_pose.position.z);
 
             
-            send_joint_positions(target_pose, std::to_string(i));
+            send_joint_positions(target_pose);
         }
 
         
@@ -440,7 +401,8 @@ public:
 
         // Services.
 
-        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>("object_collision");
+        joint_trajectory_pub = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(
+            "/gripper_trajectory_controller/joint_trajectory", 10);
 
 
         // Timers.
@@ -453,12 +415,10 @@ public:
     }   
 };
 
-
-int main(int argc, char **argv) {
-    rclcpp::init(argc, argv);
-
-    
-    rclcpp::spin(std::make_shared<MultipleObjects>());
-    rclcpp::shutdown();
-    return 0;
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<MultipleObjects>());
+  rclcpp::shutdown();
+  return 0;
 }

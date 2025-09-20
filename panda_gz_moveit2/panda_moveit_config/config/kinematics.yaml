@@ -3,6 +3,6 @@ arm:
   # kinematics_solver: cached_ik_kinematics_plugin/CachedKDLKinematicsPlugin
   # kinematics_solver: lma_kinematics_plugin/LMAKinematicsPlugin
   kinematics_solver_search_resolution: 0.0025
-  kinematics_solver_timeout: 0.05
-  kinematics_solver_attempts: 5
+  kinematics_solver_timeout: 0.2
+  kinematics_solver_attempts: 50
   # max_cache_size: 100000

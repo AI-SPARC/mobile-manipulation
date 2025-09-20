@@ -31,6 +31,7 @@ find_package(OpenCV REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED) 
 find_package(object_manipulation_interfaces REQUIRED)
+find_package(control_msgs REQUIRED)
 
 add_executable(basic_algorithm src/basic_algorithm.cpp)
 
@@ -73,6 +74,7 @@ ament_target_dependencies(
   vision_msgs
   moveit_ros_planning_interface 
   object_manipulation_interfaces
+  control_msgs
   Eigen3
 )
 

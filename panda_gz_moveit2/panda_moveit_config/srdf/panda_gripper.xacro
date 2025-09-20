@@ -17,12 +17,12 @@
     </group>
 
     <group_state name="open" group="gripper">
-      <joint name="${prefix}finger_joint1" value="0.04"/>
-      <joint name="${prefix}finger_joint2" value="0.04"/>
+      <joint name="${prefix}finger_joint1" value="0.042"/>
+      <joint name="${prefix}finger_joint2" value="0.042"/>
     </group_state>
     <group_state name="close" group="gripper">
-      <joint name="${prefix}finger_joint1" value="0.0"/>
-      <joint name="${prefix}finger_joint2" value="0.0"/>
+      <joint name="${prefix}finger_joint1" value="-0.01"/>
+      <joint name="${prefix}finger_joint2" value="-0.01"/>
     </group_state>
 
     <disable_collisions link1="${prefix}hand" link2="${prefix}leftfinger" reason="Adjacent"/>

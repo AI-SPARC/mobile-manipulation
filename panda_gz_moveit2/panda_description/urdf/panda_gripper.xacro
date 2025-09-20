@@ -22,8 +22,8 @@
   <xacro:property name="joint_finger1_origin_xyz" value="0 0 0.0584"/>
   <xacro:property name="joint_finger1_origin_rpy" value="0 0 0"/>
   <xacro:property name="joint_finger1_axis_xyz" value="0 1 0"/>
-  <xacro:property name="joint_finger1_lower_limit" value="0"/>
-  <xacro:property name="joint_finger1_upper_limit" value="0.04"/>
+  <xacro:property name="joint_finger1_lower_limit" value="-0.01"/>
+  <xacro:property name="joint_finger1_upper_limit" value="0.042"/>
   <xacro:property name="joint_finger1_velocity_limit" value="0.2"/>
   <xacro:property name="joint_finger1_torque_limit" value="20"/>
   <xacro:property name="joint_finger1_damping" value="3.0"/>
@@ -37,8 +37,8 @@
   <xacro:property name="joint_finger2_origin_xyz" value="0 0 0.0584"/>
   <xacro:property name="joint_finger2_origin_rpy" value="0 0 0"/>
   <xacro:property name="joint_finger2_axis_xyz" value="0 -1 0"/>
-  <xacro:property name="joint_finger2_lower_limit" value="0"/>
-  <xacro:property name="joint_finger2_upper_limit" value="0.04"/>
+  <xacro:property name="joint_finger2_lower_limit" value="-0.01"/>
+  <xacro:property name="joint_finger2_upper_limit" value="0.042"/>
   <xacro:property name="joint_finger2_velocity_limit" value="0.2"/>
   <xacro:property name="joint_finger2_torque_limit" value="20"/>
   <xacro:property name="joint_finger2_damping" value="3.0"/>
