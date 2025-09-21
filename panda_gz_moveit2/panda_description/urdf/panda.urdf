@@ -84,7 +84,7 @@
     <child link="panda_link2"/>
     <origin rpy="-1.5707963267948966 0 0" xyz="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit effort="87" lower="-1.7627825445142729" upper="1.7627825445142729" velocity="2.6179938779914944"/>
+    <limit effort="87" lower="-1.61277" upper="1.61277" velocity="2.6179938779914944"/>
     <dynamics damping="21.75" friction="3.48"/>
   </joint>
   <transmission name="panda_joint2_transmission">

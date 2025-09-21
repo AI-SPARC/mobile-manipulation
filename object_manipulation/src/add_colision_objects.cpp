@@ -110,6 +110,7 @@ private:
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
 
     // Services.
+    rclcpp::Service<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr service_;
 
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -121,11 +122,11 @@ private:
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
     rclcpp::TimerBase::SharedPtr init_timer_;
-
+    
     vision_msgs::msg::Detection3DArray object_detections;
 
     std::string id_to_remove = "";
-
+    std::unordered_set<std::string> added;
 
 
     void initMoveGroup() {
@@ -202,23 +203,23 @@ private:
         planning_scene_interface.applyCollisionObjects({collision_object});
     }
 
-    void remove_collision_box(const std::string &id)
-    {
-        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+    // void remove_collision_box(const std::string &id)
+    // {
+    //     static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
-        std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
-        if (std::find(known_objects.begin(), known_objects.end(), id) == known_objects.end()) 
-        {
-            // RCLCPP_WARN(rclcpp::get_logger("remove_collision_box"), 
-            //             "Objeto %s não encontrado no planning scene.", id.c_str());
-            return;
-        }
+    //     std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
+    //     if (std::find(known_objects.begin(), known_objects.end(), id) == known_objects.end()) 
+    //     {
+    //         // RCLCPP_WARN(rclcpp::get_logger("remove_collision_box"), 
+    //         //             "Objeto %s não encontrado no planning scene.", id.c_str());
+    //         return;
+    //     }
 
-        planning_scene_interface.removeCollisionObjects({id});
+    //     planning_scene_interface.removeCollisionObjects({id});
 
-        // RCLCPP_INFO(rclcpp::get_logger("remove_collision_box"), 
-        //             "Objeto %s removido do planning scene.", id.c_str());
-    }
+    //     // RCLCPP_INFO(rclcpp::get_logger("remove_collision_box"), 
+    //     //             "Objeto %s removido do planning scene.", id.c_str());
+    // }
 
 
     // CALLBACKS.
@@ -240,22 +241,34 @@ private:
         {
             const auto &det = object_detections.detections[i];
 
-            // RCLCPP_INFO(this->get_logger(),
-            //     "Objeto %zu -> x: %.3f, y: %.3f, z: %.3f",
-            //     i, target_pose.position.x, target_pose.position.y, target_pose.position.z);
-            
+          
             geometry_msgs::msg::Pose pose = det.bbox.center;
             pose.position.x -= 0.4;
             pose.position.z -= 1.016;
-            
-            
+            std::string toma = std::to_string(i);
+          
             // remove_collision_box(std::to_string(i));
             
-          
-            // add_collision_box(std::to_string(i), {0.06, 0.06, 0.06}, pose);
-            
+            if(added.find(toma) == added.end())
+            {
+                add_collision_box(std::to_string(i), {0.06, 0.06, 0.06}, pose);
+                added.insert(toma);
+            }
         }
         
+    }
+
+    void handle_service(
+        const std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Request> request,
+        std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Response> response)
+    {
+    
+    
+        id_to_remove = request->object_id;
+        added.erase(id_to_remove);
+        
+
+        response->success = true;
     }
  
 
@@ -269,6 +282,11 @@ public:
             "/boxes_detection_array", 10,
             std::bind(&AddCollision::detectionCallback, this, std::placeholders::_1));
 
+        service_ = this->create_service<object_manipulation_interfaces::srv::ObjectCollision>(
+            "object_collision",
+            std::bind(&AddCollision::handle_service, this,
+                    std::placeholders::_1, std::placeholders::_2)
+        );
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),

@@ -117,13 +117,58 @@ private:
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
 
     rclcpp::TimerBase::SharedPtr init_timer_;
+    rclcpp::TimerBase::SharedPtr threads;
 
 
 
     vision_msgs::msg::Detection3DArray object_detections;
 
 
-  
+    void add_collision_box(const std::string &id,
+                       const std::array<double, 3> &size,
+                       const geometry_msgs::msg::Pose &pose,
+                       const std::string &frame_id = "world")
+    {
+        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+
+        std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
+        if (std::find(known_objects.begin(), known_objects.end(), id) != known_objects.end()) {
+            return;
+        }
+
+        moveit_msgs::msg::CollisionObject collision_object;
+        collision_object.id = id;
+        collision_object.header.frame_id = frame_id;  // usa frame original
+
+        shape_msgs::msg::SolidPrimitive primitive;
+        primitive.type = primitive.BOX;
+        primitive.dimensions = {size[0], size[1], size[2]};
+
+        collision_object.primitives.push_back(primitive);
+        collision_object.primitive_poses.push_back(pose);
+        collision_object.operation = collision_object.ADD;
+
+        planning_scene_interface.applyCollisionObjects({collision_object});
+    }
+
+
+    void remove_collision_box(const std::string &id)
+    {
+        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+
+        std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
+        // if (std::find(known_objects.begin(), known_objects.end(), id) == known_objects.end()) 
+        // {
+        //     RCLCPP_WARN(rclcpp::get_logger("remove_collision_box"), 
+        //                 "Objeto %s não encontrado no planning scene.", id.c_str());
+        //     return;
+        // }
+
+        planning_scene_interface.removeCollisionObjects({id});
+
+        RCLCPP_INFO(rclcpp::get_logger("remove_collision_box"), 
+                    "Objeto %s removido do planning scene.", id.c_str());
+    }
 
     void initMoveGroup() {
         try {
@@ -151,42 +196,41 @@ private:
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface não inicializado.");
             return;
         }
+
         move_group_arm->setWorkspace(
-        /* min x */ -2.0, /* min y */ -2.0, /* min z */ 0.01,
-        /* max x */  2.0, /* max y */  2.0, /* max z */ 2.0
-    );
+            -2.0, -2.0, 0.01,   
+            2.0,  2.0, 2.0     
+        );
+        move_group_arm->setStartStateToCurrentState();
         move_group_arm->setPlannerId("RRTConnectkConfigDefault");
         move_group_arm->setPoseTarget(target_pose);
 
-        move_group_arm->setPlanningTime(10.0);
-        move_group_arm->setNumPlanningAttempts(200);
+        move_group_arm->setPlanningTime(2.0);
+        move_group_arm->setNumPlanningAttempts(40);
 
-    
         move_group_arm->setMaxVelocityScalingFactor(1.0);
         move_group_arm->setMaxAccelerationScalingFactor(1.0);
 
-
-        move_group_arm->setGoalTolerance(0.005);
-        move_group_arm->setGoalJointTolerance(0.005);
-        move_group_arm->setGoalPositionTolerance(0.005);
-        move_group_arm->setGoalOrientationTolerance(0.005);
-
+        move_group_arm->setGoalTolerance(0.002);
+        move_group_arm->setGoalJointTolerance(0.002);
+        move_group_arm->setGoalPositionTolerance(0.002);
+        move_group_arm->setGoalOrientationTolerance(0.002);
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
         auto result = move_group_arm->plan(plan);
 
         if (result == moveit::core::MoveItErrorCode::SUCCESS) {
-           
             move_group_arm->execute(plan);
+            rclcpp::sleep_for(std::chrono::milliseconds(50));
         }
 
-        
         if (plan.trajectory.joint_trajectory.points.empty()) {
             RCLCPP_WARN(this->get_logger(), "Trajetória vazia retornada pelo planejador");
             return;
         }
 
     }
+
 
     void return_to_origin()
     {
@@ -213,7 +257,7 @@ private:
         if (result == moveit::core::MoveItErrorCode::SUCCESS) 
         {
             auto exec_result = move_group_arm->execute(plan);
-
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
                 RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
@@ -242,9 +286,10 @@ private:
         if (result == moveit::core::MoveItErrorCode::SUCCESS) 
         {
             auto exec_result = move_group_gripper->execute(plan);
-
+            
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
+                rclcpp::sleep_for(std::chrono::milliseconds(50));
                 RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
             }
         }
@@ -273,6 +318,7 @@ private:
 
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
+                rclcpp::sleep_for(std::chrono::milliseconds(50));
                 RCLCPP_INFO(this->get_logger(), "Gripper abriu (MoveIt).");
             }
         }
@@ -290,73 +336,117 @@ private:
 
 
 
-   void send_joint_positions(const geometry_msgs::msg::Pose &object_pose)
+    void send_joint_positions(const std::string &id)
     {
-        // --- 1. Defina a orientação "para baixo" UMA VEZ ---
-        // Cria um quaternião que representa uma rotação de 180° no eixo X (Roll).
-        // Isso garante que o eixo Z do efetuador sempre aponte para o Z negativo do mundo.
+        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+
+        auto known_objects = planning_scene_interface.getKnownObjectNames();
+        
+
+        auto object_poses = planning_scene_interface.getObjectPoses({id});
+        auto it = object_poses.find(id);
+        if (it == object_poses.end()) {
+            RCLCPP_WARN(this->get_logger(), "Objeto '%s' não retornou pose", id.c_str());
+            return;
+        }
+
+        geometry_msgs::msg::Pose object_pose = it->second;
+
+        std::string frame = "world";  
+
+
+        RCLCPP_INFO(rclcpp::get_logger("get_object_pose"),
+                    "Objeto '%s' posição: x=%f, y=%f, z=%f",
+                    id.c_str(),
+                    object_pose.position.x,
+                    object_pose.position.y,
+                    object_pose.position.z);
+
+
         tf2::Quaternion q_down_orientation;
-        q_down_orientation.setRPY(M_PI, 0, 0); // Roll: 180°, Pitch: 0, Yaw: 0
+
+        q_down_orientation.setRPY(M_PI, 0, 0);
         geometry_msgs::msg::Quaternion orientation_msg = tf2::toMsg(q_down_orientation);
 
-        // --- 2. Primeiro Movimento (aproximação) ---
         geometry_msgs::msg::Pose pose;
-        pose.position.x = object_pose.position.x - 0.4;
+        pose.position.x = object_pose.position.x;
         pose.position.y = object_pose.position.y;
-        pose.position.z = object_pose.position.z - 1.016 + 0.15;
-        pose.orientation = orientation_msg; // << USA A ORIENTAÇÃO FIXA
+        pose.position.z = object_pose.position.z + 0.15;
+        pose.orientation = orientation_msg; 
         positions_for_arm(pose);
 
-        // --- 3. Segundo Movimento (pegar o objeto) ---
+   
+        
+
         geometry_msgs::msg::Pose pose_2;
-        pose_2.position.x = object_pose.position.x - 0.4;
+        pose_2.position.x = object_pose.position.x;
         pose_2.position.y = object_pose.position.y;
-        pose_2.position.z = object_pose.position.z - 1.016;
-        pose_2.orientation = orientation_msg; // << USA A MESMA ORIENTAÇÃO FIXA
+        pose_2.position.z = object_pose.position.z;
+        pose_2.orientation = orientation_msg;
         positions_for_arm(pose_2);
+
+    
+        remove_collision_box(id);
+
+        rclcpp::sleep_for(std::chrono::milliseconds(200));
 
         close_gripper();
-        rclcpp::sleep_for(std::chrono::milliseconds(100)); // Adicionado um pequeno delay para garantir a pegada
-
-        // --- 4. Terceiro Movimento (levar para local aleatório) ---
+        
         static std::random_device rd;
         static std::mt19937 gen(rd());
-        std::uniform_real_distribution<double> dist_x(-0.2, 0.2); 
-        std::uniform_real_distribution<double> dist_y(-0.3, 0.3); 
+        std::uniform_real_distribution<double> dist_y(-0.4, 0.4); 
+
+        double y_random = dist_y(gen);
+        y_random = std::round(y_random * 10.0) / 10.0;
 
         pose_2.position.x = -0.4;
-        pose_2.position.y = 0.0;
+        pose_2.position.y = y_random;
         pose_2.position.z = 0.15; 
-        pose_2.orientation = orientation_msg; // << USA A MESMA ORIENTAÇÃO FIXA DE NOVO
+        pose_2.orientation = orientation_msg; 
+
         positions_for_arm(pose_2);
-        
-        rclcpp::sleep_for(std::chrono::milliseconds(10));
+
+
         open_gripper();
 
-        // return_to_origin();
+        rclcpp::sleep_for(std::chrono::milliseconds(500));
+        
+        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
+        request->object_id = id;
+
+            // Checa se o service está disponível
+        if (!client_->wait_for_service(1s)) {
+            RCLCPP_WARN(this->get_logger(), "Service object_collision não disponível");
+            return;
+        }
+
+        // Chamada assíncrona com callback
+        client_->async_send_request(request,
+            [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) {
+                auto response = future_response.get();  
+                if (response->success) {
+                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+                }
+            }
+        );
+
+        
+        // return_to_origin(); 
     }
 
-  
+
+
+
+
+
     /*
     
         CALLBACKS.
 
     */
 
-    // void callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
-    // {
-    //     for (const auto & detection : msg->detections) 
-    //     {
-        
-    //         if (!detection.results.empty() && detection.results[0].hypothesis.class_id == "1")
-    //         {
-    //             const auto & size = detection.bbox.size;
-    //             RCLCPP_INFO(this->get_logger(),
-    //             "Class 1 -> size x: %.3f, y: %.3f, z: %.3f",
-    //             size.x, size.y, size.z);
-    //         }
-    //     }
-    // }
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
@@ -374,20 +464,15 @@ private:
         for (size_t i = 0; i < object_detections.detections.size(); ++i) 
         {
             const auto &det = object_detections.detections[i];
-            const auto &target_pose = det.bbox.center;
+            geometry_msgs::msg::Pose pose = det.bbox.center;
+            pose.position.x -= 0.4;
+            pose.position.z -= 1.016;
 
-            RCLCPP_INFO(this->get_logger(),
-                "Objeto %zu -> x: %.3f, y: %.3f, z: %.3f",
-                i, target_pose.position.x, target_pose.position.y, target_pose.position.z);
-
-            
-            send_joint_positions(target_pose);
+          
+            send_joint_positions(std::to_string(i));
         }
-
-        
     }
-
-
+   
 
 public:
     MultipleObjects()
@@ -401,9 +486,8 @@ public:
 
         // Services.
 
-        joint_trajectory_pub = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(
-            "/gripper_trajectory_controller/joint_trajectory", 10);
 
+        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>("object_collision");
 
         // Timers.
 
@@ -411,7 +495,6 @@ public:
             std::chrono::seconds(1),
             std::bind(&MultipleObjects::initMoveGroup, this));
 
-   
     }   
 };
 
