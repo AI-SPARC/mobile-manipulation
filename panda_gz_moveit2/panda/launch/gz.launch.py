@@ -248,7 +248,7 @@ def generate_declared_arguments() -> List[DeclareLaunchArgument]:
             default_value=path.join(
                 get_package_share_directory("panda_description"),
                 "worlds",
-                "world_1.sdf",
+                "world_2.sdf",
             ),
             description="Path to the Gazebo world to load.",
         ),

@@ -15,51 +15,57 @@ from threading import Lock
 class PolicyNet(nn.Module):
     def __init__(self, input_dim=1000, output_dim=7):
         super().__init__()
-        layers = []
-        hidden_dims = [512, 512, 256, 256, 128, 128]
-        prev_dim = input_dim
-        for h in hidden_dims:
-            layers.append(nn.Linear(prev_dim, h))
-            layers.append(nn.ReLU())
-            prev_dim = h
-        layers.append(nn.Linear(prev_dim, output_dim))
-        self.net = nn.Sequential(*layers)
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, output_dim),
+        )
 
     def forward(self, x):
         return self.net(x)
 
 
+
 # --- Função de voxelização e centralização ---
-def pointcloud_to_voxel_vector(msg, cube_size=10, vector_size=1000, max_dist=0.2):
+def pointcloud_to_vector(msg, vector_size=1000):
+    # Extrai pontos (x,y,z) da nuvem
     points = np.array(
-        [(x, y, z) for x, y, z in pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)],
+        [(x, y, z) for x, y, z in pc2.read_points(
+            msg, field_names=("x", "y", "z"), skip_nans=True
+        )],
         dtype=np.float32,
     )
 
     if points.shape[0] == 0:
         return np.zeros(vector_size, dtype=np.float32), np.zeros(3, dtype=np.float32)
 
-    # Agora não centraliza para a nuvem
-    max_abs = np.max(np.abs(points))
-    scale = max_dist / max_abs if max_abs != 0 else 1.0
-    points_scaled = points * scale
+    # Ordena por x, depois y, depois z
+    points_sorted = points[np.lexsort((points[:, 2], points[:, 1], points[:, 0]))]
 
-    normalized = ((points_scaled + max_dist) / (2 * max_dist) * cube_size)
-    normalized = np.floor(normalized).astype(int)
-    normalized = np.clip(normalized, 0, cube_size - 1)
+    # Centro do cubo (média dos extremos)
+    p_min = points_sorted.min(axis=0)
+    p_max = points_sorted.max(axis=0)
+    center = (p_min + p_max) / 2.0
 
-    grid = np.zeros((cube_size, cube_size, cube_size), dtype=np.float32)
-    for x, y, z in normalized:
-        grid[x, y, z] = 1.0
+    # Achata em vetor 1D
+    flat = points_sorted.flatten()
 
-    flat = grid.flatten()
+    # Ajusta tamanho para a rede (corta ou preenche com zero)
     if len(flat) < vector_size:
         flat = np.pad(flat, (0, vector_size - len(flat)), "constant")
     else:
         flat = flat[:vector_size]
 
-    # Para referência absoluta, retorna (0,0,0) porque não queremos deslocar a nuvem
-    return flat, np.zeros(3, dtype=np.float32)
+    return flat, center
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 
@@ -68,8 +74,8 @@ class RLPolicyNode(Node):
     def __init__(self):
         super().__init__("rl_policy_node_service")
 
-        self.model = PolicyNet()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
+        self.model = PolicyNet().to(device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-1)
 
         self.cli = self.create_client(EvaluateReward, "compute_reward")
         while not self.cli.wait_for_service(timeout_sec=1.0):
@@ -87,29 +93,34 @@ class RLPolicyNode(Node):
                 return
             self.processing = True
 
-        obs_vector, _ = pointcloud_to_voxel_vector(msg, cube_size=10, vector_size=1000, max_dist=self.max_distance)
-        obs = torch.tensor(obs_vector, dtype=torch.float32)
+        obs_vector, center = pointcloud_to_vector(msg, vector_size=1000)
+        obs = torch.tensor(obs_vector, dtype=torch.float32, device=device).unsqueeze(0)
 
         action = self.model(obs)
-        dist = torch.distributions.Normal(action, torch.ones_like(action) * 0.1)
+        dist = torch.distributions.Normal(action, torch.ones_like(action, device=device) * 1e-8)
         sampled_action = dist.rsample()
         logprob = dist.log_prob(sampled_action).sum()
 
-        # --- posição no frame world ---
-        pos_world = sampled_action[:3].detach().numpy()  # agora é diretamente no world
-        pos_world = np.clip(pos_world, -self.max_distance, self.max_distance)
+        # Posição e orientação
+        pos_world = sampled_action[:3].detach().cpu().numpy()
+        orient = sampled_action[3:7].detach().cpu().numpy() if len(sampled_action) >= 7 else np.array([0,0,0,1])
+
+        # Distância ao centro (posição apenas)
+        dist_to_center = np.linalg.norm(pos_world - center)
 
         pose_msg = Pose()
         pose_msg.position.x = float(pos_world[0])
         pose_msg.position.y = float(pos_world[1])
         pose_msg.position.z = float(pos_world[2])
-        pose_msg.orientation.x = float(sampled_action[3].item())
-        pose_msg.orientation.y = float(sampled_action[4].item())
-        pose_msg.orientation.z = float(sampled_action[5].item())
-        pose_msg.orientation.w = float(sampled_action[6].item())
+        pose_msg.orientation.x = float(orient[0])
+        pose_msg.orientation.y = float(orient[1])
+        pose_msg.orientation.z = float(orient[2])
+        pose_msg.orientation.w = float(orient[3])
 
-        self.get_logger().info(f"Pose proposta (world): {pose_msg.position.x}, {pose_msg.position.y}, {pose_msg.position.z}")
-
+        self.get_logger().info(
+            f"Pose proposta (world): pos={pos_world}, ori={orient}, distância ao centro={dist_to_center:.4f}"
+        )
+        
         req = EvaluateReward.Request()
         req.pose = sampled_action.detach().numpy().tolist()
 

@@ -37,12 +37,10 @@ def generate_cube_points(size=10, spacing=0.01):
     sorted_idx = np.argsort(-dists)
     points_sorted = points[sorted_idx]
 
-    # Normalizar para [-1,1]
-    points_min = points_sorted.min(axis=0)
-    points_max = points_sorted.max(axis=0)
-    points_norm = 2 * (points_sorted - points_min) / (points_max - points_min) - 1
-
-    return points_norm.flatten().astype(np.float32)
+    # --- ALTERAÇÃO REALIZADA AQUI ---
+    # A normalização foi removida. A função agora retorna os pontos brutos.
+    # Isso permite que a rede não fique restrita a um intervalo específico.
+    return points_sorted.flatten().astype(np.float32)
 
 
 # --- Recompensa ---
@@ -51,7 +49,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # --- Recompensa ---
 def compute_reward(action, target=None):
     if target is None:
-        target = torch.tensor([0.044, -0.055, 0.088], device=action.device)
+        target = torch.tensor([90.044, -20.055, 40.088], device=action.device)
     else:
         target = target.to(action.device)
     return -torch.norm(action - target)
@@ -60,7 +58,7 @@ def compute_reward(action, target=None):
 
 def main():
     model = PolicyNet().to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.004e-1)  # taxa mais alta
+    optimizer = optim.Adam(model.parameters(), lr=0.000025e-1)  # taxa mais alta
     print(torch.cuda.is_available())  # True se houver GPU CUDA
 
     # Pré-gera observação fixa
@@ -70,7 +68,7 @@ def main():
     rewards = []
     chosen_points = []
 
-    episodes = 2000000
+    episodes = 100000
     batch_size = 128
 
     obs_batch = obs.repeat(batch_size, 1).to(device)
@@ -80,7 +78,7 @@ def main():
         action_mean = model(obs_batch)  # sem tanh
 
         # Política com ruído mínimo
-        dist = torch.distributions.Normal(action_mean, torch.ones_like(action_mean, device=device) * 0.00000000001)
+        dist = torch.distributions.Normal(action_mean, torch.ones_like(action_mean, device=device) * 1e-12)
         actions = dist.rsample()
         logprob = dist.log_prob(actions).sum(dim=1)
 
@@ -101,9 +99,10 @@ def main():
         chosen_points.append(action_mean[0].detach().cpu().numpy())
 
         # Print do ponto escolhido
-        print(f"Ep {episode+1} | reward médio={avg_reward:.4f} | ponto escolhido={action_mean[0].detach().cpu().numpy()}")
+        if (episode + 1) % 40 == 0:
+            print(f"Ep {episode+1} | reward médio={avg_reward:.4f} | ponto escolhido={action_mean[0].detach().cpu().numpy()}")
 
-        if (episode + 1) % 200 == 0:
+        if (episode + 1) % 100 == 0:
             print(f"Ep {episode+1} | reward médio últimos 200={np.mean(rewards[-200:]):.4f}")
 
 

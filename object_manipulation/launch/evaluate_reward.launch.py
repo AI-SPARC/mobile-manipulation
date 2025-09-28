@@ -126,25 +126,25 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", log_level]
     )
 
-    evaluate_reward = Node(
-        package="object_manipulation",
-        executable="evaluate_reward",
-        output="screen",
-        parameters=[
-            robot_description,
-            robot_description_semantic,
-            robot_description_kinematics,
-            robot_description_planning,
-            planning_pipeline,
-            moveit_controller_manager,
-            {"use_sim_time": use_sim_time}
-        ],
-        arguments=["--ros-args", "--log-level", log_level]
-    )
+    # evaluate_reward = Node(
+    #     package="object_manipulation",
+    #     executable="evaluate_reward",
+    #     output="screen",
+    #     parameters=[
+    #         robot_description,
+    #         robot_description_semantic,
+    #         robot_description_kinematics,
+    #         robot_description_planning,
+    #         planning_pipeline,
+    #         moveit_controller_manager,
+    #         {"use_sim_time": use_sim_time}
+    #     ],
+    #     arguments=["--ros-args", "--log-level", log_level]
+    # )
 
     train_model = Node(
-        package="drl",
-        executable="train_model",
+        package="object_manipulation",
+        executable="rl_trainer_node",
         output="screen",
         parameters=[
             robot_description,
@@ -159,5 +159,5 @@ def generate_launch_description():
     )
 
     return LaunchDescription(
-        declared_arguments + [evaluate_reward, train_model, rounded_points]
+        declared_arguments + [train_model, rounded_points]
     )

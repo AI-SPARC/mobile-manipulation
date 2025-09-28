@@ -481,7 +481,7 @@ public:
     {
 
         service_ = this->create_service<object_manipulation_interfaces::srv::EvaluateReward>(
-            "compute_reward",
+            "evaluate_reward",
             std::bind(&EvaluateReward::handle_service, this,
                     std::placeholders::_1, std::placeholders::_2)
         );

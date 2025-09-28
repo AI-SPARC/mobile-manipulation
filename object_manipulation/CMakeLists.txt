@@ -32,6 +32,16 @@ find_package(trajectory_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED) 
 find_package(object_manipulation_interfaces REQUIRED)
 find_package(control_msgs REQUIRED)
+    
+################################################################################
+### INÍCIO DA ADIÇÃO PARA LIBTORCH ###
+# 1. Encontrar a biblioteca LibTorch.
+#    !! IMPORTANTE: SUBSTITUA "/path/to/libtorch" PELO CAMINHO CORRETO !!
+set(CMAKE_PREFIX_PATH "/home/momesso/libtorch/libtorch;${CMAKE_PREFIX_PATH}")
+find_package(Torch REQUIRED)
+### FIM DA ADIÇÃO ###
+################################################################################
+
 
 add_executable(basic_algorithm src/basic_algorithm.cpp)
 
@@ -147,6 +157,15 @@ ament_target_dependencies(
   Eigen3
 )
 
+add_executable(rl_trainer_node src/rl_trainer_node.cpp)
+
+ament_target_dependencies(rl_trainer_node
+  "rclcpp"
+  "sensor_msgs"
+  "object_manipulation_interfaces"
+  
+)
+
 
 target_link_libraries(basic_algorithm
   ${rclcpp_LIBRARIES}
@@ -188,6 +207,18 @@ target_link_libraries(rounded_points
   yaml-cpp
 )
 
+# A variável ${TORCH_LIBRARIES} agora será preenchida corretamente pelo find_package
+target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
+
+################################################################################
+### INÍCIO DA ADIÇÃO PARA C++ STANDARD ###
+# 2. Garantir que o C++17 seja usado para este alvo específico
+set_property(TARGET rl_trainer_node PROPERTY CXX_STANDARD 17)
+set_property(TARGET rl_trainer_node PROPERTY CXX_STANDARD_REQUIRED ON)
+### FIM DA ADIÇÃO ###
+################################################################################
+
+
 install(DIRECTORY
   launch
   DESTINATION share/${PROJECT_NAME}
@@ -199,6 +230,7 @@ install(TARGETS
   add_colision_objects
   evaluate_reward
   rounded_points
+  rl_trainer_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
