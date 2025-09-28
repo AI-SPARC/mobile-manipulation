@@ -44,17 +44,28 @@
 
 
 
-- topic_name: "/model/small_black_box/pose"
+- topic_name: "/model/object/pose"
   ros_type_name: "geometry_msgs/msg/Pose"
   gz_type_name: "gz.msgs.Pose"
   direction: GZ_TO_ROS
 
-- topic_name: "/model/small_black_box1/pose"
+- topic_name: "/model/object1/pose"
   ros_type_name: "geometry_msgs/msg/Pose"
   gz_type_name: "gz.msgs.Pose"
   direction: GZ_TO_ROS
 
-- topic_name: "/model/small_black_box2/pose"
+- topic_name: "/model/object2/pose"
   ros_type_name: "geometry_msgs/msg/Pose"
   gz_type_name: "gz.msgs.Pose"
   direction: GZ_TO_ROS
+
+- topic_name: "/model/object3/pose"
+  ros_type_name: "geometry_msgs/msg/Pose"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+
+- topic_name: "/model/object4/pose"
+  ros_type_name: "geometry_msgs/msg/Pose"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+

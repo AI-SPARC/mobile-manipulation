@@ -178,7 +178,7 @@ def generate_launch_description() -> LaunchDescription:
                         package='panda',
                         executable='ros2_bridge_to_pose_array',
                         parameters=[
-                            {"num_boxes": 3},
+                            {"num_boxes": 5},
                             {"use_sim_time": use_sim_time},
                         ],
                         name='ros2_bridge_to_pose_array',

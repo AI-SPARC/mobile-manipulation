@@ -101,6 +101,53 @@ ament_target_dependencies(
   Eigen3
 )
 
+add_executable(evaluate_reward src/evaluate_reward.cpp)
+
+ament_target_dependencies(
+  evaluate_reward 
+  trajectory_msgs 
+  rclcpp nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  moveit_ros_planning_interface
+  object_manipulation_interfaces 
+  Eigen3
+)
+
+add_executable(rounded_points src/rounded_points.cpp)
+
+ament_target_dependencies(
+  rounded_points 
+  trajectory_msgs 
+  rclcpp nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  moveit_ros_planning_interface
+  object_manipulation_interfaces 
+  Eigen3
+)
+
+
 target_link_libraries(basic_algorithm
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -125,8 +172,21 @@ target_link_libraries(add_colision_objects
   yaml-cpp
 )
 
+target_link_libraries(evaluate_reward
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
 
-
+target_link_libraries(rounded_points
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
 
 install(DIRECTORY
   launch
@@ -137,6 +197,8 @@ install(TARGETS
   basic_algorithm
   multiple_objects
   add_colision_objects
+  evaluate_reward
+  rounded_points
   DESTINATION lib/${PROJECT_NAME}
 )
 

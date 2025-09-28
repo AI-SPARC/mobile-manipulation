@@ -12,6 +12,7 @@ find_package(rclcpp REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ObjectCollision.srv"
+  "srv/EvaluateReward.srv"
   DEPENDENCIES 
   builtin_interfaces
 )

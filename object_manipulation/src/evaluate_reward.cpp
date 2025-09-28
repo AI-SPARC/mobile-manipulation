@@ -25,7 +25,7 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
-#include "object_manipulation_interfaces/srv/object_collision.hpp"
+#include "object_manipulation_interfaces/srv/evaluate_reward.hpp"
 
 using namespace std::chrono_literals;
 
@@ -98,30 +98,20 @@ struct TupleEqual {
 };
 
 
-class MultipleObjects : public rclcpp::Node {
+class EvaluateReward : public rclcpp::Node {
 
 private:
 
     //Publishers.
     rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
 
-    //Subscriptions.
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
-
     //Services.
-
-    rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr client_;
+    rclcpp::Service<object_manipulation_interfaces::srv::EvaluateReward>::SharedPtr service_;
 
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
 
     rclcpp::TimerBase::SharedPtr init_timer_;
-    rclcpp::TimerBase::SharedPtr threads;
-
-
-
-    vision_msgs::msg::Detection3DArray object_detections;
 
 
 
@@ -151,6 +141,17 @@ private:
             move_group_gripper = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
                 this->shared_from_this(), "gripper");
 
+            // geometry_msgs::msg::Pose pose;
+            // pose.position.x -= 0.4;
+            // pose.position.z -= 1.016;
+            // pose.orientation.x = 0.0;
+            // pose.orientation.y = 0.0;
+            // pose.orientation.z = 0.0;
+            // pose.orientation.w = 1.0;
+            
+
+            // add_collision_box(std::to_string(i), {0.12, 0.12, 0.12}, pose);
+
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 
             init_timer_->cancel();  
@@ -163,11 +164,11 @@ private:
 
 
     
-    void positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
+    float positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
     {
         if (!move_group_arm) {
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface não inicializado.");
-            return;
+            return 0;
         }
 
         move_group_arm->setWorkspace(
@@ -199,9 +200,10 @@ private:
 
         if (plan.trajectory.joint_trajectory.points.empty()) {
             RCLCPP_WARN(this->get_logger(), "Trajetória vazia retornada pelo planejador");
-            return;
+            return -100;
         }
 
+        return 0;
     }
 
 
@@ -299,7 +301,30 @@ private:
 
 
 
+     void add_ground_plane()
+    {
+        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
+        moveit_msgs::msg::CollisionObject ground;
+        ground.id = "ground_plane";
+        ground.header.frame_id = "world";
+
+        shape_msgs::msg::SolidPrimitive primitive;
+        primitive.type = primitive.BOX;
+        primitive.dimensions = {10.0, 10.0, 0.01}; 
+
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = 0.0;
+        pose.position.y = 0.0;
+        pose.position.z = 0.01;  
+        pose.orientation.w = 1.0;
+
+        ground.primitives.push_back(primitive);
+        ground.primitive_poses.push_back(pose);
+        ground.operation = ground.ADD;
+
+        planning_scene_interface.applyCollisionObjects({ground});
+    }
 
     /*
 
@@ -307,20 +332,77 @@ private:
 
     */
 
-
-
-    void send_joint_positions(const std::string &id)
+    float send_joint_positions(float x, float y, float z, float qx, float qy, float qz, float qw)
     {
+      
+        float reward = 0;
+
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = x;
+        pose.position.y = y;
+        pose.position.z = z + 0.15;
+        pose.orientation.x = qx; 
+        pose.orientation.y = qy;
+        pose.orientation.z = qz;
+        pose.orientation.w = qw;
+
+
+        reward = positions_for_arm(pose);
+
+        if(reward == -100)
+        {
+            return -10000;
+        }
+
+        geometry_msgs::msg::Pose pose_1;
+        pose_1.position.x = x;
+        pose_1.position.y = y;
+        pose_1.position.z = z;
+        pose_1.orientation.x = qx; 
+        pose_1.orientation.y = qy;
+        pose_1.orientation.z = qz;
+        pose_1.orientation.w = qw;
+
+
+        reward = positions_for_arm(pose_1);
+
+        if(reward == -100)
+        {
+            return -10000;
+        }
+
+        rclcpp::sleep_for(std::chrono::milliseconds(200));
+
+        close_gripper();
+        
+        geometry_msgs::msg::Pose pose_2;
+        pose_2.position.x = x;
+        pose_2.position.y = -0.3;
+        pose_2.position.z = 0.1;
+        pose_2.orientation.x = qx; 
+        pose_2.orientation.y = qy;
+        pose_2.orientation.z = qz;
+        pose_2.orientation.w = qw;
+
+
+        reward = positions_for_arm(pose_2);
+
+        if(reward == -100)
+        {
+            return -10000;
+        }
+
+        open_gripper();
+
         static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
         auto known_objects = planning_scene_interface.getKnownObjectNames();
+
+        const std::string id = "0";
         
         auto object_poses = planning_scene_interface.getObjectPoses({id});
         auto it = object_poses.find(id);
-        if (it == object_poses.end()) {
-            RCLCPP_WARN(this->get_logger(), "Objeto '%s' não retornou pose", id.c_str());
-            return;
-        }
+       
 
         geometry_msgs::msg::Pose object_pose = it->second;
 
@@ -333,145 +415,91 @@ private:
                     object_pose.position.y,
                     object_pose.position.z);
 
-        // --- LÓGICA DE ORIENTAÇÃO CORRIGIDA ---
-
-        tf2::Quaternion q_down_orientation;
-
-        q_down_orientation.setRPY(M_PI, 0, 0);
-        geometry_msgs::msg::Quaternion orientation_msg = tf2::toMsg(q_down_orientation);
-        // --- FIM DA LÓGICA DE ORIENTAÇÃO ---
-
-        // 1. Pose de aproximação
-        geometry_msgs::msg::Pose pose;
-        pose.position.x = object_pose.position.x;
-        pose.position.y = object_pose.position.y;
-        pose.position.z = object_pose.position.z + 0.15;
         
-        pose.orientation = orientation_msg; 
-
-        positions_for_arm(pose);
-
-        // 2. Pose de captura
-        geometry_msgs::msg::Pose pose_2;
-        pose_2.position.x = object_pose.position.x;
-        pose_2.position.y = object_pose.position.y;
-        pose_2.position.z = object_pose.position.z;
-        pose_2.orientation = orientation_msg; 
-
-        
-        positions_for_arm(pose_2);
-        remove_collision_box(id);
-        rclcpp::sleep_for(std::chrono::milliseconds(200));
-        
-        close_gripper();
-        
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-        std::uniform_real_distribution<double> dist_y(-0.4, 0.4); 
-
-        double y_random = dist_y(gen);
-        y_random = std::round(y_random * 10.0) / 10.0;
-
-        // 3. Pose de entrega
-        pose_2.position.x = -0.4;
-        pose_2.position.y = y_random;
-        pose_2.position.z = 0.15; 
-        pose_2.orientation = orientation_msg; 
-        // Continua usando a mesma orientação
-        positions_for_arm(pose_2);
-
-        open_gripper();
-        rclcpp::sleep_for(std::chrono::milliseconds(500));
-        
-        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
-        request->object_id = id;
-
-        if (!client_->wait_for_service(1s)) {
-            RCLCPP_WARN(this->get_logger(), "Service object_collision não disponível");
-            return;
+        if(object_pose.position.y <= 0.29)
+        {
+            float dist = position_distance(object_pose, x, y, z);     
+            reward = 0;
+            reward = abs((object_pose.position.y * -100) / dist);
+            return reward;
         }
 
-        client_->async_send_request(request,
-            [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) {
-                auto response = future_response.get();  
-                if (response->success) {
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                } else {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
-        
-        // return_to_origin(); 
+        float dist = position_distance(object_pose, x, y, z);
+
+        reward = 0;
+        reward = 1 / dist;
+
+        std::cout << "toma" << std::endl;
+        return reward;
     }
 
-
-
-
-
-    /*
-    
-        CALLBACKS.
-
-    */
-
-
-    void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
+    float position_distance(const geometry_msgs::msg::Pose& p, float x, float y, float z)
     {
-        if (msg->detections.empty()) 
-        {
-            RCLCPP_WARN(this->get_logger(), "Detection3DArray vazio recebido.");
-            return;
-        }
-
-        object_detections = *msg;
-
-        RCLCPP_INFO(this->get_logger(), "Recebidas %zu detecções", object_detections.detections.size());
-
-    
-        for (size_t i = 0; i < object_detections.detections.size(); ++i) 
-        {
-            const auto &det = object_detections.detections[i];
-            geometry_msgs::msg::Pose pose = det.bbox.center;
-            pose.position.x -= 0.4;
-            pose.position.z -= 1.016;
-
-            if(i >= 2)
-            {
-                send_joint_positions(std::to_string(i));
-            }
-        }
+        float dx = p.position.x - x;
+        float dy = p.position.y - y;
+        float dz = p.position.z - z;
+        return std::sqrt(dx*dx + dy*dy + dz*dz);
     }
+
+
+    void handle_service(
+        const std::shared_ptr<object_manipulation_interfaces::srv::EvaluateReward::Request> request,
+        std::shared_ptr<object_manipulation_interfaces::srv::EvaluateReward::Response> response)
+    {
+        // request->pose é float[7]
+        float x = request->pose[0];
+        float y = request->pose[1];
+        float z = request->pose[2];
+        float qx = request->pose[3];
+        float qy = request->pose[4];
+        float qz = request->pose[5];
+        float qw = request->pose[6];
+
+        std::cout << x + 0.6 << " " << y + 0.3 << " " << z << std::endl;
+        float reward = 0.0;
+
+        if(z > 0.0)
+        {
+            
+            reward = send_joint_positions(x + 0.6, y + 0.3, z, qx, qy, qz, qw);   
+            
+        }
+        else
+        {
+            reward = -30000;
+        }
+        std::cout << "toma" << std::endl;
+
+        response->reward = reward;
+    }
+
    
 
 public:
-    MultipleObjects()
+    EvaluateReward()
      : Node("multiple_objects")
     {
 
-        // Topics.
-        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-            "/boxes_detection_array", 10,
-            std::bind(&MultipleObjects::detectionCallback, this, std::placeholders::_1));
-
-        // Services.
-
-
-        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>("object_collision");
+        service_ = this->create_service<object_manipulation_interfaces::srv::EvaluateReward>(
+            "compute_reward",
+            std::bind(&EvaluateReward::handle_service, this,
+                    std::placeholders::_1, std::placeholders::_2)
+        );
 
         // Timers.
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
-            std::bind(&MultipleObjects::initMoveGroup, this));
-
+            std::bind(&EvaluateReward::initMoveGroup, this));
+        
+        // add_ground_plane();
     }   
 };
 
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<MultipleObjects>());
+  rclcpp::spin(std::make_shared<EvaluateReward>());
   rclcpp::shutdown();
   return 0;
 }

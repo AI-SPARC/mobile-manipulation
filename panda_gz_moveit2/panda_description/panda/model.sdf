@@ -1,7 +1,7 @@
 <sdf version='1.11'>
   <model name='panda'>
     <joint name='panda_joint_base' type='fixed'>
-      <pose relative_to='__model__'>0.4 0 1.016 0 0 0</pose>
+      <pose relative_to='__model__'>0 0 0 0 0 0</pose>
       <parent>world</parent>
       <child>panda_link0</child>
     </joint>z

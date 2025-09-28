@@ -83,51 +83,81 @@ def generate_launch_description():
     }
 
     # Node basic_algorithm com nome dinâmico
-    multiple_objects = Node(
-        package="object_manipulation",
-        executable="multiple_objects",
-        output="screen",
-        parameters=[
-            robot_description,
-            robot_description_semantic,
-            robot_description_kinematics,
-            robot_description_planning,
-            planning_pipeline,
-            moveit_controller_manager,
-            {"use_sim_time": use_sim_time}
-        ],
-        arguments=["--ros-args", "--log-level", log_level]
-    )
-
-    add_colision_objects = Node(
-        package="object_manipulation",
-        executable="add_colision_objects",
-        output="screen",
-        parameters=[
-            robot_description,
-            robot_description_semantic,
-            robot_description_kinematics,
-            robot_description_planning,
-            planning_pipeline,
-            moveit_controller_manager,
-            {"use_sim_time": use_sim_time}
-        ],
-        arguments=["--ros-args", "--log-level", log_level]
-    )
-
-    # rounded_points = Node(
+    # multiple_objects = Node(
     #     package="object_manipulation",
-    #     executable="rounded_points",
-    #     name=node_name,  # nome vem do LaunchArgument
+    #     executable="multiple_objects",
     #     output="screen",
     #     parameters=[
+    #         robot_description,
+    #         robot_description_semantic,
+    #         robot_description_kinematics,
+    #         robot_description_planning,
+    #         planning_pipeline,
+    #         moveit_controller_manager,
     #         {"use_sim_time": use_sim_time}
     #     ],
     #     arguments=["--ros-args", "--log-level", log_level]
     # )
 
+    # add_colision_objects = Node(
+    #     package="object_manipulation",
+    #     executable="add_colision_objects",
+    #     output="screen",
+    #     parameters=[
+    #         robot_description,
+    #         robot_description_semantic,
+    #         robot_description_kinematics,
+    #         robot_description_planning,
+    #         planning_pipeline,
+    #         moveit_controller_manager,
+    #         {"use_sim_time": use_sim_time}
+    #     ],
+    #     arguments=["--ros-args", "--log-level", log_level]
+    # )
 
+    rounded_points = Node(
+        package="object_manipulation",
+        executable="rounded_points",
+        name=node_name,  
+        output="screen",
+        parameters=[
+            {"use_sim_time": use_sim_time}
+        ],
+        arguments=["--ros-args", "--log-level", log_level]
+    )
+
+    evaluate_reward = Node(
+        package="object_manipulation",
+        executable="evaluate_reward",
+        output="screen",
+        parameters=[
+            robot_description,
+            robot_description_semantic,
+            robot_description_kinematics,
+            robot_description_planning,
+            planning_pipeline,
+            moveit_controller_manager,
+            {"use_sim_time": use_sim_time}
+        ],
+        arguments=["--ros-args", "--log-level", log_level]
+    )
+
+    train_model = Node(
+        package="drl",
+        executable="train_model",
+        output="screen",
+        parameters=[
+            robot_description,
+            robot_description_semantic,
+            robot_description_kinematics,
+            robot_description_planning,
+            planning_pipeline,
+            moveit_controller_manager,
+            {"use_sim_time": use_sim_time}
+        ],
+        arguments=["--ros-args", "--log-level", log_level]
+    )
 
     return LaunchDescription(
-        declared_arguments + [multiple_objects, add_colision_objects]
+        declared_arguments + [evaluate_reward, train_model, rounded_points]
     )

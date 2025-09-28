@@ -243,8 +243,8 @@ private:
 
           
             geometry_msgs::msg::Pose pose = det.bbox.center;
-            pose.position.x -= 0.4;
-            pose.position.z -= 1.016;
+            // pose.position.x -= 0.4;
+            // pose.position.z -= 1.016;
             std::string toma = std::to_string(i);
           
             // remove_collision_box(std::to_string(i));
