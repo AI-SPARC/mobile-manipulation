@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <xacro:macro name="denso_robot_ros2_control" params="name prefix 
+ <xacro:macro name="denso_robot_ros2_control" params="name prefix 
     use_fake_hardware:=^|false mock_sensor_commands:=^|false
     sim_gazebo_classic:=^|false 
-    sim_gazebo:=^|true 
+    sim_gazebo:=^|false
+    isaac:=^|true
     robot_ip:=^|192.168.0.1 
     robot_port:=^|5007 
     send_format 
@@ -25,7 +26,12 @@
           <param name="mock_sensor_commands">${mock_sensor_commands}</param>
           <param name="state_following_offset">0.0</param>
         </xacro:if>
-        <xacro:unless value="${use_fake_hardware or sim_gazebo_classic or sim_gazebo}">
+        <xacro:if value="${isaac}">
+          <plugin>topic_based_ros2_control/TopicBasedSystem</plugin>
+          <param name="joint_states_topic">/isaac_joint_states</param>
+          <param name="joint_commands_topic">/isaac_joint_commands</param>
+        </xacro:if>
+        <xacro:unless value="${use_fake_hardware or sim_gazebo_classic or sim_gazebo or isaac}">
           <plugin>denso_hw/denso_hw</plugin>
           <param name="robot_ip">${robot_ip}</param>
           <param name="robot_port">${robot_port}</param>
