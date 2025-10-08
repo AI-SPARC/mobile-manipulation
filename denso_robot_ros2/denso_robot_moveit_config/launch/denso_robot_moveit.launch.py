@@ -256,7 +256,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "use_sim_time",
-            default_value="false",
+            default_value="true",
             description="Make MoveIt to use simulation time. This is needed for the trajectory planing in simulation.",
         )
     )

@@ -220,7 +220,7 @@ def generate_launch_description():
             package="robot_state_publisher",
             executable="robot_state_publisher",
             output="log",
-            arguments=["--ros-args", "--log-level", log_level],
+            # arguments=["--ros-args", "--log-level", log_level],
             parameters=[
                 robot_description,
                 {
@@ -235,7 +235,7 @@ def generate_launch_description():
             package="controller_manager",
             executable="ros2_control_node",
             output="log",
-            arguments=["--ros-args", "--log-level", log_level],
+            # arguments=["--ros-args", "--log-level", log_level],
             parameters=[
                 robot_description,
                 controller_parameters,
@@ -260,7 +260,7 @@ def generate_launch_description():
             package="moveit_ros_move_group",
             executable="move_group",
             output="log",
-            arguments=["--ros-args", "--log-level", log_level],
+            # arguments=["--ros-args", "--log-level", log_level],
             parameters=[
                 robot_description,
                 robot_description_semantic,
@@ -278,7 +278,7 @@ def generate_launch_description():
             package="moveit_servo",
             executable="servo_node",
             output="log",
-            arguments=["--ros-args", "--log-level", log_level],
+            # arguments=["--ros-args", "--log-level", log_level],
             parameters=[
                 robot_description,
                 robot_description_semantic,
@@ -300,9 +300,9 @@ def generate_launch_description():
             arguments=[
                 "--display-config",
                 rviz_config,
-                "--ros-args",
-                "--log-level",
-                log_level,
+                # "--ros-args",
+                # "--log-level",
+                # log_level,
             ],
             parameters=[
                 robot_description,
@@ -398,13 +398,13 @@ def generate_declared_arguments() -> List[DeclareLaunchArgument]:
         ),
         DeclareLaunchArgument(
             "collision_gripper",
-            default_value="true",
+            default_value="false",
             description="Flag to enable collision geometry for manipulator's gripper (hand and fingers).",
         ),
         # Safety controller
         DeclareLaunchArgument(
             "safety_limits",
-            default_value="true",
+            default_value="false",
             description="Flag to enable safety limits controllers on manipulator joints.",
         ),
         DeclareLaunchArgument(
