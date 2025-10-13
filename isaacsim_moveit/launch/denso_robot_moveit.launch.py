@@ -15,6 +15,13 @@ def generate_launch_description():
     denso_robot_description_pkg = "denso_robot_description"
     denso_robot_moveit_config_pkg = "denso_robot_moveit_config"
 
+    mode_arg = DeclareLaunchArgument(
+        "mode",
+        default_value="1",
+        description="Modo de operação do robô (0 = padrão, 1 = inclui solda)",
+    )
+
+
     isaac_sim_arg = DeclareLaunchArgument(
         "isaac",
         default_value="true",
@@ -96,11 +103,17 @@ def generate_launch_description():
             "ros2_control_hardware_type": LaunchConfiguration("ros2_control_hardware_type"),
             "isaac": LaunchConfiguration("isaac"),
             "sim_gazebo": LaunchConfiguration("sim_gazebo"),
+            "mode": LaunchConfiguration("mode"),
             # Adicione outros parâmetros do XACRO que queira controlar aqui
         },
     )
 
-    moveit_configs_builder.robot_description_semantic(file_path=robot_description_semantic_path)
+    moveit_configs_builder.robot_description_semantic(
+        file_path=robot_description_semantic_path,
+        mappings={
+            "mode": LaunchConfiguration("mode"),  
+        },
+    )
     moveit_configs_builder.trajectory_execution(file_path=controllers_path)
     
     moveit_configs_builder.planning_pipelines(
@@ -209,14 +222,21 @@ def generate_launch_description():
         arguments=["trajectory_controller", "-c", "/controller_manager"],
     )
 
+    # denso_gripper_controller = Node(
+    #     package="controller_manager",
+    #     executable="spawner",
+    #     arguments=["gripper_controller", "-c", "/controller_manager"],
+    # )
+
     gui = os.path.join(
         get_package_share_directory("isaacsim_moveit"),
         "maps",
-        "denso_with_conveyor_belt.usd",
+        "denso_welding.usd",
     )
 
     return LaunchDescription(
         [
+            mode_arg, 
             isaac_sim_arg,
             gazebo_sim_arg,
             ros2_control_hardware_type,
@@ -227,7 +247,7 @@ def generate_launch_description():
             move_group_node,
             ros2_control_node,
             joint_state_broadcaster_spawner,
-            # panda_arm_controller_spawner,
+            # denso_gripper_controller,
             denso_arm_controller,
 
             IncludeLaunchDescription(

@@ -1,19 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot xmlns:xacro="http://wiki.ros.org/xacro">
 
+  <!-- Inclui definições comuns -->
   <xacro:include filename="$(find denso_robot_description)/urdf/common.xacro" />
+
+  <!-- Propriedade que controla o modo -->
+  <!-- mode=0 -> usa o mesh J6.dae -->
+  <!-- mode=1 -> usa o cilindro -->
 
   <xacro:macro name="denso_robot" params="
     prefix 
     parent 
-    *origin 
+    *origin
+    mode 
     initial_positions:=${dict(joint1=0.0,joint2=0.0,joint3=1.57,joint4=0.0,joint5=0.0,joint6=0.0)}"
-    >
-    <!-- LINKS -->
+  >
+
+    <!-- =========================== -->
+    <!-- ======== LINKS ============ -->
+    <!-- =========================== -->
+
     <!-- base link -->
     <link name="${prefix}base_link">
-      <!-- Default inertial for Gazebo/Ingnition - copy and edit block from 'common.xacro'
-           to get more realistic behaviour-->
       <xacro:default_inertial/>
       <visual>
         <origin rpy="0 0 0" xyz="0 0 0" />
@@ -28,10 +36,9 @@
         </geometry>
       </collision>
     </link>
-    <!-- link 1 -->
+
+    <!-- link1 -->
     <link name="${prefix}link1">
-      <!-- Default inertial for Gazebo/Ingnition - copy and edit block from 'common.xacro'
-           to get more realistic behaviour-->
       <xacro:default_inertial/>
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
@@ -46,10 +53,9 @@
         </geometry>
       </collision>
     </link>
-    <!-- link 2 -->
+
+    <!-- link2 -->
     <link name="${prefix}link2">
-      <!-- Default inertial for Gazebo/Ingnition - copy and edit block from 'common.xacro'
-           to get more realistic behaviour-->
       <xacro:default_inertial/>
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
@@ -60,14 +66,13 @@
       <collision>
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
-          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J2.dae"  />
+          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J2.dae" />
         </geometry>
       </collision>
     </link>
-    <!-- link 3 -->
+
+    <!-- link3 -->
     <link name="${prefix}link3">
-      <!-- Default inertial for Gazebo/Ingnition - copy and edit block from 'common.xacro'
-           to get more realistic behaviour-->
       <xacro:default_inertial/>
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
@@ -78,14 +83,13 @@
       <collision>
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
-          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J3.dae"  />
+          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J3.dae" />
         </geometry>
       </collision>
     </link>
-    <!-- link 4 -->
+
+    <!-- link4 -->
     <link name="${prefix}link4">
-      <!-- Default inertial for Gazebo/Ingnition - copy and edit block from 'common.xacro'
-           to get more realistic behaviour-->
       <xacro:default_inertial/>
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
@@ -96,14 +100,13 @@
       <collision>
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
-          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J4.dae"  />
+          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J4.dae" />
         </geometry>
       </collision>
     </link>
-    <!-- link 5 -->
+
+    <!-- link5 -->
     <link name="${prefix}link5">
-      <!-- Default inertial for Gazebo/Ingnition - copy and edit block from 'common.xacro'
-           to get more realistic behaviour-->
       <xacro:default_inertial/>
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
@@ -115,42 +118,72 @@
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
           <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J5.dae" />
-        </geometry>
-      </collision>
-    </link>
-    <!-- link 6 -->
-    <link name="${prefix}link6">
-      <!-- Default inertial for Gazebo/Ingnition - copy and edit block from 'common.xacro'
-           to get more realistic behaviour-->
-      <xacro:default_inertial/>
-      <visual>
-        <origin xyz="0 0 0" rpy="0 0 0" />
-        <geometry>
-          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J6.dae" />
-        </geometry>
-      </visual>
-      <collision>
-        <origin xyz="0 0 0" rpy="0 0 0" />
-        <geometry>
-          <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J6.dae" />
         </geometry>
       </collision>
     </link>
 
-    <!-- All-zero tool frame. This frame should correspond to the TOOL frame of the robot's controller.) -->
+    <!-- ========================== -->
+    <!-- link6 - alterna por 'mode' -->
+    <!-- ========================== -->
+
+    <xacro:if value="${mode == 0}">
+      <link name="${prefix}link6">
+        <xacro:default_inertial/>
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0" />
+          <geometry>
+            <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J6.dae" />
+          </geometry>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0" />
+          <geometry>
+            <mesh filename="package://denso_robot_description/meshes/denso_robot/visual/J6.dae" />
+          </geometry>
+        </collision>
+      </link>
+    </xacro:if>
+
+    <xacro:if value="${mode == 1}">
+      <link name="${prefix}link6">
+        <xacro:default_inertial/>
+        <inertial>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+          <mass value="1.0"/>
+          <inertia ixx="0.00015" ixy="0.0" ixz="0.0" iyy="0.0009083" iyz="0.0" izz="0.0009083"/>
+        </inertial>
+
+        <visual>
+          <origin xyz="0.0 0.0 0.09" rpy="0.0 0.0 0.0"/>
+          <geometry>
+            <cylinder radius="0.015" length="0.2"/>
+          </geometry>
+        </visual>
+
+        <collision>
+          <origin xyz="0.0 0.0 0.09" rpy="0.0 0.0 0.0"/>
+          <geometry>
+            <cylinder radius="0.015" length="0.2"/>
+          </geometry>
+        </collision>
+      </link>
+    </xacro:if>
+
+    
+
+    <!-- tool0 -->
     <link name="${prefix}tool0" />
-    <!-- tool link -->
 
-    <!-- END LINKS -->
+    <!-- =========================== -->
+    <!-- ======== JOINTS =========== -->
+    <!-- =========================== -->
 
-    <!-- JOINTS -->
-    <!-- base_joint fixes base_link to the environment -->
     <joint name="${prefix}base_joint" type="fixed">
       <xacro:insert_block name="origin" />
       <parent link="${parent}" />
       <child link="${prefix}base_link" />
     </joint>
-    <!-- joint 1 -->
+
     <joint name="${prefix}joint1" type="revolute">
       <origin xyz="0 0 0.197500" rpy="0 0 0" />
       <parent link="${prefix}base_link" />
@@ -159,7 +192,7 @@
       <limit effort="1000" lower="${radians(-170)}" upper="${radians(170)}" velocity="${radians(360)}" />
       <dynamics damping="0.7" friction="0.0"/>
     </joint>
-    <!-- joint 2 -->
+
     <joint name="${prefix}joint2" type="revolute">
       <origin xyz="0.03 0 0.1975" rpy="0 0 0" />
       <parent link="${prefix}link1" />
@@ -168,7 +201,7 @@
       <limit effort="1000" lower="${radians(-100)}" upper="${radians(135)}" velocity="${radians(300)}" />
       <dynamics damping="0.7" friction="0.0"/>
     </joint>
-    <!-- joint 3 -->
+
     <joint name="${prefix}joint3" type="revolute">
       <origin xyz="0 0 0.445" rpy="0 0 0" />
       <parent link="${prefix}link2" />
@@ -177,7 +210,7 @@
       <limit effort="1000" lower="${radians(-136)}" upper="${radians(153)}" velocity="${radians(408)}" />
       <dynamics damping="0.7" friction="0.0"/>
     </joint>
-    <!-- joint 4 -->
+
     <joint name="${prefix}joint4" type="revolute">
       <origin xyz="-0.02 0 0.287" rpy="0 0 0" />
       <parent link="${prefix}link3" />
@@ -186,7 +219,7 @@
       <limit effort="1000" lower="${radians(-270)}" upper="${radians(270)}" velocity="${radians(540)}" />
       <dynamics damping="0.7" friction="0.0"/>
     </joint>
-    <!-- joint 5 -->
+
     <joint name="${prefix}joint5" type="revolute">
       <origin xyz="0 0 0.143" rpy="0 0 0" />
       <parent link="${prefix}link4" />
@@ -195,7 +228,7 @@
       <limit effort="1000" lower="${radians(-120)}" upper="${radians(120)}" velocity="${radians(540)}" />
       <dynamics damping="0.7" friction="0.0"/>
     </joint>
-    <!-- joint 6 -->
+
     <joint name="${prefix}joint6" type="revolute">
       <origin xyz="0 0 0.08" rpy="0 0 0" />
       <parent link="${prefix}link5" />
@@ -205,14 +238,11 @@
       <dynamics damping="0.7" friction="0.0"/>
     </joint>
 
-    <!-- tool frame - fixed frame -->
     <joint name="${prefix}joint6-tool0" type="fixed">
       <parent link="${prefix}link6" />
       <child link="${prefix}tool0" />
       <origin xyz="0 0 -0.115" rpy="0 ${-pi} ${-pi/2}" />
     </joint>
-    <!-- END JOINTS -->
-
 
   </xacro:macro>
 </robot>
