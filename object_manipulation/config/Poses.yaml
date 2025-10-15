@@ -1,31 +1,31 @@
 location1:
-  position: [0.458, -0.15, 0.05]
+  position: [0.458, -0.16, 0.05]
   orientation: [0.0, -0.3, 0.0, 1.0]
 
 location2:
-  position: [0.458, -0.15, 0.685]
+  position: [0.458, -0.16, 0.685]
   orientation: [0.0, -1.0, 0.0, 1.0]
 
 location3:
-  position: [-0.19, -0.15, 0.685]
+  position: [-0.19, -0.16, 0.685]
   orientation: [0.0, -1.0, 0.0, 1.0]
 
 location4:
-  position: [-0.19, -0.15, 0.05]
+  position: [-0.19, -0.16, 0.05]
   orientation: [0.0, -0.3, 0.0, 1.0]
 
 location5:
-  position: [-0.21, -0.15, 0.05]
+  position: [-0.21, -0.16, 0.05]
   orientation: [0.0, -0.3, 0.0, 1.0]
 
 location6:
-  position: [-0.21, -0.15, 0.685]
+  position: [-0.21, -0.16, 0.685]
   orientation: [0.0, -1.0, 0.0, 1.0]
 
 location7:
-  position: [-0.458, -0.15, 0.685]
+  position: [-0.458, -0.16, 0.685]
   orientation: [0.0, -1.0, 0.0, 1.0]
 
 location8:
-  position: [-0.458, -0.15, 0.05]
+  position: [-0.458, -0.16, 0.05]
   orientation: [0.0, -0.3, 0.0, 1.0]

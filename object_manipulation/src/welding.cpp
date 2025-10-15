@@ -200,7 +200,25 @@ private:
         planning_scene_interface.applyCollisionObjects({ground});
     }
 
-    void add_collision_box()
+    void remove_collision_box(const std::string &id)
+    {
+        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+
+        std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
+        // if (std::find(known_objects.begin(), known_objects.end(), id) == known_objects.end()) 
+        // {
+        //     RCLCPP_WARN(rclcpp::get_logger("remove_collision_box"), 
+        //                 "Objeto %s não encontrado no planning scene.", id.c_str());
+        //     return;
+        // }
+
+        planning_scene_interface.removeCollisionObjects({id});
+
+        RCLCPP_INFO(rclcpp::get_logger("remove_collision_box"), 
+                    "Objeto %s removido do planning scene.", id.c_str());
+    }
+
+    void add_collision_box(const std::string &id)
     {
         static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
@@ -213,7 +231,7 @@ private:
 
         
         moveit_msgs::msg::CollisionObject collision_object;
-        collision_object.id = "0";
+        collision_object.id = id;
         collision_object.header.frame_id = "world";
 
         shape_msgs::msg::SolidPrimitive primitive;
@@ -302,6 +320,8 @@ private:
             if (det.results.empty() || det.results[0].hypothesis.class_id != "firecabinet")
                 continue;
 
+
+             add_collision_box(det.results[0].hypothesis.class_id);
             for (size_t i = 0; i < locations.size(); i++)
             {
                 tf2::Vector3 local_corner(locations[i].position.x, locations[i].position.y, locations[i].position.z);
@@ -336,7 +356,7 @@ private:
             }
 
             
-            
+           
         }
     }
 
@@ -363,7 +383,6 @@ public:
             std::bind(&Welding::initMoveGroup, this));
 
         add_ground_plane();
-        add_collision_box();
     }   
 };
 

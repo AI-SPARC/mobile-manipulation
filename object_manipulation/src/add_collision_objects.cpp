@@ -8,6 +8,7 @@
 #include <random>
 
 #include "rclcpp/rclcpp.hpp"
+#include <rosidl_runtime_cpp/bounded_vector.hpp>
 
 #include "geometry_msgs/msg/pose.hpp"
 #include "vision_msgs/msg/detection3_d_array.hpp"
@@ -111,7 +112,8 @@ private:
 
     // Services.
     rclcpp::Service<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr service_;
-
+    
+    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -132,12 +134,8 @@ private:
     void initMoveGroup() {
         try {
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                shared_from_this(), "arm");  
+                shared_from_this(), "denso_arm");  
 
-            move_group_gripper = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                shared_from_this(), "gripper");
-            
-        
 
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 
@@ -151,7 +149,6 @@ private:
 
     void add_ground_plane()
     {
-        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
         moveit_msgs::msg::CollisionObject ground;
         ground.id = "ground_plane";
@@ -174,12 +171,8 @@ private:
         planning_scene_interface.applyCollisionObjects({ground});
     }
 
-
-
-    void add_collision_box(const std::string &id,const std::array<double, 3> &size, const geometry_msgs::msg::Pose &pose)
+    void add_collision_box(const std::string &id,const std::array<double, 3> &dimensions, const geometry_msgs::msg::Pose &pose)
     {
-        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
-
        
         std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
         if (std::find(known_objects.begin(), known_objects.end(), id) != known_objects.end()) 
@@ -194,7 +187,7 @@ private:
 
         shape_msgs::msg::SolidPrimitive primitive;
         primitive.type = primitive.BOX;
-        primitive.dimensions = {size[0], size[1], size[2]};
+        primitive.dimensions = {dimensions[0], dimensions[1], dimensions[2]};
 
         collision_object.primitives.push_back(primitive);
         collision_object.primitive_poses.push_back(pose);
@@ -203,74 +196,64 @@ private:
         planning_scene_interface.applyCollisionObjects({collision_object});
     }
 
-    // void remove_collision_box(const std::string &id)
-    // {
-    //     static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+    void move_collision_box(const std::string &id, const geometry_msgs::msg::Pose &pose)
+    {
+        
+        moveit_msgs::msg::CollisionObject collision_object;
+        collision_object.id = id;
+        collision_object.header.frame_id = "world";
 
-    //     std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
-    //     if (std::find(known_objects.begin(), known_objects.end(), id) == known_objects.end()) 
-    //     {
-    //         // RCLCPP_WARN(rclcpp::get_logger("remove_collision_box"), 
-    //         //             "Objeto %s não encontrado no planning scene.", id.c_str());
-    //         return;
-    //     }
 
-    //     planning_scene_interface.removeCollisionObjects({id});
+        collision_object.primitive_poses.push_back(pose);
+        collision_object.operation = collision_object.MOVE;
 
-    //     // RCLCPP_INFO(rclcpp::get_logger("remove_collision_box"), 
-    //     //             "Objeto %s removido do planning scene.", id.c_str());
-    // }
+        planning_scene_interface.applyCollisionObjects({collision_object});
+    }
+
 
 
     // CALLBACKS.
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
-        if (msg->detections.empty()) 
+        if (msg->detections.empty())
         {
             RCLCPP_WARN(this->get_logger(), "Detection3DArray vazio recebido.");
             return;
         }
 
-        object_detections = *msg;
-
-        // RCLCPP_INFO(this->get_logger(), "Recebidas %zu detecções", object_detections.detections.size());
-        
-    
-        for (size_t i = 0; i < object_detections.detections.size(); ++i) 
+        for (size_t i = 0; i < msg->detections.size(); ++i)
         {
-            const auto &det = object_detections.detections[i];
-
-          
-            geometry_msgs::msg::Pose pose = det.bbox.center;
-            // pose.position.x -= 0.4;
-            // pose.position.z -= 1.016;
-            std::string toma = std::to_string(i);
-          
-            // remove_collision_box(std::to_string(i));
-            
-            if(added.find(toma) == added.end())
+            const auto &det = msg->detections[i];
+            if(det.results[0].hypothesis.class_id == "firecabinet")
             {
-                add_collision_box(std::to_string(i), {0.06, 0.06, 0.06}, pose);
-                added.insert(toma);
+                
+                std::string object_id = det.results[0].hypothesis.class_id;
+
+                geometry_msgs::msg::Pose pose = det.bbox.center;
+                pose.position.z += det.bbox.size.z / 2;
+
+                std::array<double, 3> size_array = {
+                    det.bbox.size.x,
+                    det.bbox.size.y,
+                    det.bbox.size.z
+                };
+
+                if(added.find(object_id) == added.end())
+                {
+                    add_collision_box(object_id, size_array, pose);
+                    added.insert(object_id);
+                }      
+                else
+                {
+                    move_collision_box(object_id, pose);
+                }  
             }
+            
         }
-        
     }
 
-    void handle_service(
-        const std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Request> request,
-        std::shared_ptr<object_manipulation_interfaces::srv::ObjectCollision::Response> response)
-    {
-    
-    
-        id_to_remove = request->object_id;
-        added.erase(id_to_remove);
-        
 
-        response->success = true;
-    }
- 
 
 public:
     AddCollision()
@@ -282,11 +265,6 @@ public:
             "/boxes_detection_array", 10,
             std::bind(&AddCollision::detectionCallback, this, std::placeholders::_1));
 
-        service_ = this->create_service<object_manipulation_interfaces::srv::ObjectCollision>(
-            "object_collision",
-            std::bind(&AddCollision::handle_service, this,
-                    std::placeholders::_1, std::placeholders::_2)
-        );
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),

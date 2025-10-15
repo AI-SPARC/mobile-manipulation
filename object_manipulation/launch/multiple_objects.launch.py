@@ -99,9 +99,9 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", log_level]
     )
 
-    add_colision_objects = Node(
+    add_collision_objects = Node(
         package="object_manipulation",
-        executable="add_colision_objects",
+        executable="add_collision_objects",
         output="screen",
         parameters=[
             robot_description,
@@ -129,5 +129,5 @@ def generate_launch_description():
 
 
     return LaunchDescription(
-        declared_arguments + [multiple_objects, add_colision_objects]
+        declared_arguments + [multiple_objects, add_collision_objects]
     )

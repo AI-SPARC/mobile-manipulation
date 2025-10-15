@@ -90,10 +90,10 @@ ament_target_dependencies(
   Eigen3
 )
 
-add_executable(add_colision_objects src/add_colision_objects.cpp)
+add_executable(add_collision_objects src/add_collision_objects.cpp)
 
 ament_target_dependencies(
-  add_colision_objects 
+  add_collision_objects 
   trajectory_msgs 
   rclcpp nav_msgs 
   geometry_msgs 
@@ -243,7 +243,7 @@ target_link_libraries(multiple_objects
   yaml-cpp
 )
 
-target_link_libraries(add_colision_objects
+target_link_libraries(add_collision_objects
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
   ${GLEW_LIBRARIES}
@@ -305,7 +305,7 @@ install(DIRECTORY
 install(TARGETS
   basic_algorithm
   multiple_objects
-  add_colision_objects
+  add_collision_objects
   evaluate_reward
   rounded_points
   rl_trainer_node

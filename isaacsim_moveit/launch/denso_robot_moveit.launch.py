@@ -255,6 +255,30 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    add_collision_objects = Node(
+        package="object_manipulation",
+        executable="add_collision_objects",
+        name="add_collision_objects",
+        output="screen",
+        parameters=[
+            moveit_configs.robot_description,
+            moveit_configs.robot_description_semantic,
+            moveit_configs.robot_description_kinematics,
+            moveit_configs.planning_pipelines,
+            robot_description_joint_limits,  
+            moveit_configs.trajectory_execution,
+            robot_description_kinematics,
+            planning_pipeline,                          
+            moveit_configs.planning_scene_monitor,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        remappings=[
+            ('/boxes_detection_array', '/bbox_3d_with_labels')
+            
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
     denso_arm_controller = Node(
         package="controller_manager",
         executable="spawner",
@@ -276,7 +300,8 @@ def generate_launch_description():
             ros2_control_node,
             joint_state_broadcaster_spawner,
             denso_arm_controller,
-            welding,
+            # welding,
+            add_collision_objects,
 
             Node(
                 package='object_manipulation',
