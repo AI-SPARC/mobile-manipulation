@@ -32,7 +32,9 @@ find_package(trajectory_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED) 
 find_package(object_manipulation_interfaces REQUIRED)
 find_package(control_msgs REQUIRED)
-    
+find_package(vision_msgs REQUIRED)
+find_package(message_filters REQUIRED)  
+
 ################################################################################
 ### INÍCIO DA ADIÇÃO PARA LIBTORCH ###
 # 1. Encontrar a biblioteca LibTorch.
@@ -163,10 +165,68 @@ ament_target_dependencies(rl_trainer_node
   "rclcpp"
   "sensor_msgs"
   "object_manipulation_interfaces"
-  
+  trajectory_msgs 
+  rclcpp nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  moveit_ros_planning_interface
+  object_manipulation_interfaces 
+  Eigen3
 )
 
+add_executable(synchronize_isaac_sim_labels src/synchronize_isaac_sim_labels.cpp)
 
+# Versão limpa, sem duplicatas
+ament_target_dependencies(synchronize_isaac_sim_labels
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+)
+
+add_executable(welding src/welding.cpp)
+
+# Versão limpa, sem duplicatas
+ament_target_dependencies(welding
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+)
 target_link_libraries(basic_algorithm
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -207,6 +267,22 @@ target_link_libraries(rounded_points
   yaml-cpp
 )
 
+target_link_libraries(synchronize_isaac_sim_labels
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
+target_link_libraries(welding
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
 # A variável ${TORCH_LIBRARIES} agora será preenchida corretamente pelo find_package
 target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
 
@@ -221,6 +297,8 @@ set_property(TARGET rl_trainer_node PROPERTY CXX_STANDARD_REQUIRED ON)
 
 install(DIRECTORY
   launch
+  config
+  models
   DESTINATION share/${PROJECT_NAME}
 )
 
@@ -231,6 +309,8 @@ install(TARGETS
   evaluate_reward
   rounded_points
   rl_trainer_node
+  synchronize_isaac_sim_labels
+  welding
   DESTINATION lib/${PROJECT_NAME}
 )
 

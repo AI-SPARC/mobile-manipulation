@@ -10,7 +10,7 @@ import time
 # ======================== PARÂMETROS PARA CONFIGURAR ===============================
 # ---------------------------------------------------------------------------------
 
-PRIM_A_SEGUIR = "/denso_robot/simple_articulation"
+PRIM_A_SEGUIR = "/denso_robot/link6/Cylinder"
 PHYSICS_SCENE_PATH = "/World/physicsScene"
 EIXO_FRONTAL_DO_GRIPPER = Gf.Vec3f(0, 0, 1)
 INTERVALO_CRIACAO = 0.0001

@@ -229,14 +229,27 @@
       <dynamics damping="0.7" friction="0.0"/>
     </joint>
 
-    <joint name="${prefix}joint6" type="revolute">
-      <origin xyz="0 0 0.08" rpy="0 0 0" />
-      <parent link="${prefix}link5" />
-      <child link="${prefix}link6" />
-      <axis xyz="0 0 1" />
-      <limit effort="1000" lower="${radians(-360)}" upper="${radians(360)}" velocity="${radians(864)}" />
-      <dynamics damping="0.7" friction="0.0"/>
-    </joint>
+    <xacro:if value="${mode == 0}">
+      <joint name="${prefix}joint6" type="revolute">
+        <origin xyz="0 0 0.08" rpy="0 0 0" />
+        <parent link="${prefix}link5" />
+        <child link="${prefix}link6" />
+        <axis xyz="0 0 1" />
+        <limit effort="1000" lower="${radians(-360)}" upper="${radians(360)}" velocity="${radians(864)}" />
+        <dynamics damping="0.7" friction="0.0"/>
+      </joint>
+    </xacro:if>
+
+    <xacro:if value="${mode == 1}">
+      <joint name="${prefix}joint6" type="revolute">
+        <origin xyz="0 0 0.26" rpy="0 ${pi} 0" />
+        <parent link="${prefix}link5" />
+        <child link="${prefix}link6" />
+        <axis xyz="0 0 1" />
+        <limit effort="1000" lower="${radians(-360)}" upper="${radians(360)}" velocity="${radians(864)}" />
+        <dynamics damping="0.7" friction="0.0"/>
+      </joint>
+    </xacro:if>
 
     <joint name="${prefix}joint6-tool0" type="fixed">
       <parent link="${prefix}link6" />

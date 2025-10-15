@@ -21,7 +21,6 @@ def generate_launch_description():
         description="Modo de operação do robô (0 = padrão, 1 = inclui solda)",
     )
 
-
     isaac_sim_arg = DeclareLaunchArgument(
         "isaac",
         default_value="true",
@@ -36,10 +35,9 @@ def generate_launch_description():
 
     ros2_control_hardware_type = DeclareLaunchArgument(
         "ros2_control_hardware_type",
-        default_value="isaac",  # CORRIGIDO: "isaac" deve ser uma string
+        default_value="isaac",
         description="ROS2 control hardware interface type to use for the launch file -- possible values: [mock_components, isaac]",
     )
- 
 
     use_sim_time = DeclareLaunchArgument(
         "use_sim_time",
@@ -96,7 +94,6 @@ def generate_launch_description():
         "controllers.yaml",
     )
 
-    # BLOCO NOVO E CORRIGIDO
     moveit_configs_builder.robot_description(
         file_path=robot_description_path,
         mappings={
@@ -104,7 +101,6 @@ def generate_launch_description():
             "isaac": LaunchConfiguration("isaac"),
             "sim_gazebo": LaunchConfiguration("sim_gazebo"),
             "mode": LaunchConfiguration("mode"),
-            # Adicione outros parâmetros do XACRO que queira controlar aqui
         },
     )
 
@@ -125,12 +121,20 @@ def generate_launch_description():
     moveit_configs.planning_pipelines = planning_pipeline
     moveit_configs.planning_scene_monitor = planning_scene_monitor_parameters
 
+    robot_description_joint_limits = {
+        "robot_description_planning": load_yaml(
+            denso_robot_moveit_config_pkg, path.join("config", "joint_limits.yaml")
+        )
+    }
+
+
     move_group_node = Node(
         package="moveit_ros_move_group",
         executable="move_group",
         output="screen",
         parameters=[
             moveit_configs.to_dict(),
+            robot_description_joint_limits,  
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         arguments=["--ros-args", "--log-level", "info"],
@@ -141,6 +145,13 @@ def generate_launch_description():
         "rviz",
         "moveit.rviz",
     )
+
+    _robot_description_kinematics_yaml = load_yaml(
+        denso_robot_moveit_config_pkg, path.join("config", "kinematics.yaml")
+    )
+    robot_description_kinematics = {
+        "robot_description_kinematics": _robot_description_kinematics_yaml
+    }
 
     rviz_node = Node(
         package="rviz2",
@@ -153,7 +164,8 @@ def generate_launch_description():
             moveit_configs.robot_description_semantic,
             moveit_configs.robot_description_kinematics,
             moveit_configs.planning_pipelines,
-            moveit_configs.joint_limits,
+            robot_description_joint_limits,  
+            robot_description_kinematics,
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
     )
@@ -214,7 +226,34 @@ def generate_launch_description():
         ],
     )
 
-    
+    pkg_name = 'object_manipulation'
+
+    yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'Poses.yaml'
+    )
+
+    welding = Node(
+        package="object_manipulation",
+        executable="welding",
+        name="welding",
+        output="screen",
+        parameters=[
+            moveit_configs.robot_description,
+            moveit_configs.robot_description_semantic,
+            moveit_configs.robot_description_kinematics,
+            moveit_configs.planning_pipelines,
+            robot_description_joint_limits,  
+            moveit_configs.trajectory_execution,
+            robot_description_kinematics,
+            planning_pipeline,                          
+            moveit_configs.planning_scene_monitor,
+            {'yaml_file': yaml_file},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
 
     denso_arm_controller = Node(
         package="controller_manager",
@@ -222,17 +261,6 @@ def generate_launch_description():
         arguments=["trajectory_controller", "-c", "/controller_manager"],
     )
 
-    # denso_gripper_controller = Node(
-    #     package="controller_manager",
-    #     executable="spawner",
-    #     arguments=["gripper_controller", "-c", "/controller_manager"],
-    # )
-
-    gui = os.path.join(
-        get_package_share_directory("isaacsim_moveit"),
-        "maps",
-        "denso_welding.usd",
-    )
 
     return LaunchDescription(
         [
@@ -247,21 +275,17 @@ def generate_launch_description():
             move_group_node,
             ros2_control_node,
             joint_state_broadcaster_spawner,
-            # denso_gripper_controller,
             denso_arm_controller,
+            welding,
 
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([os.path.join(
-                            get_package_share_directory("isaacsim"), "launch", "run_isaacsim.launch.py"
-                        ),
-                    ]
-                ),
-                launch_arguments={
-                    'version': '5.0.0',
-                    'play_sim_on_start': 'True',
-                    'gui': gui,
-                }.items(),
+            Node(
+                package='object_manipulation',
+                executable='synchronize_isaac_sim_labels',
+                name='synchronize_isaac_sim_labels',
+                output='screen',
             ),
+
+        
         ]
     )
 
