@@ -175,75 +175,6 @@ private:
         return locations;
     }
 
-    void add_ground_plane()
-    {
-        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
-
-        moveit_msgs::msg::CollisionObject ground;
-        ground.id = "ground_plane";
-        ground.header.frame_id = "world";
-
-        shape_msgs::msg::SolidPrimitive primitive;
-        primitive.type = primitive.BOX;
-        primitive.dimensions = {10.0, 10.0, 0.01}; 
-
-        geometry_msgs::msg::Pose pose;
-        pose.position.x = 0.0;
-        pose.position.y = 0.0;
-        pose.position.z = 0.0;  
-        pose.orientation.w = 1.0;
-
-        ground.primitives.push_back(primitive);
-        ground.primitive_poses.push_back(pose);
-        ground.operation = ground.ADD;
-
-        planning_scene_interface.applyCollisionObjects({ground});
-    }
-
-    void remove_collision_box(const std::string &id)
-    {
-        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
-
-        std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
-        // if (std::find(known_objects.begin(), known_objects.end(), id) == known_objects.end()) 
-        // {
-        //     RCLCPP_WARN(rclcpp::get_logger("remove_collision_box"), 
-        //                 "Objeto %s não encontrado no planning scene.", id.c_str());
-        //     return;
-        // }
-
-        planning_scene_interface.removeCollisionObjects({id});
-
-        RCLCPP_INFO(rclcpp::get_logger("remove_collision_box"), 
-                    "Objeto %s removido do planning scene.", id.c_str());
-    }
-
-    void add_collision_box(const std::string &id)
-    {
-        static moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
-
-       
-       
-        geometry_msgs::msg::Pose pose;
-        pose.position.x = 0.835;
-        pose.position.y = 0.0;
-        pose.position.z = 0.35;
-
-        
-        moveit_msgs::msg::CollisionObject collision_object;
-        collision_object.id = id;
-        collision_object.header.frame_id = "world";
-
-        shape_msgs::msg::SolidPrimitive primitive;
-        primitive.type = primitive.BOX;
-        primitive.dimensions = {0.26, 0.95, 0.7};
-
-        collision_object.primitives.push_back(primitive);
-        collision_object.primitive_poses.push_back(pose);
-        collision_object.operation = collision_object.ADD;
-
-        planning_scene_interface.applyCollisionObjects({collision_object});
-    }
 
 
     void initMoveGroup() {
@@ -321,7 +252,6 @@ private:
                 continue;
 
 
-             add_collision_box(det.results[0].hypothesis.class_id);
             for (size_t i = 0; i < locations.size(); i++)
             {
                 tf2::Vector3 local_corner(locations[i].position.x, locations[i].position.y, locations[i].position.z);
@@ -382,7 +312,6 @@ public:
             std::chrono::seconds(1),
             std::bind(&Welding::initMoveGroup, this));
 
-        add_ground_plane();
     }   
 };
 
