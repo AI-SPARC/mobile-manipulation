@@ -255,6 +255,13 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+
+    labels_yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'labels.yaml'
+    )
+
     add_collision_objects = Node(
         package="object_manipulation",
         executable="add_collision_objects",
@@ -270,6 +277,7 @@ def generate_launch_description():
             robot_description_kinematics,
             planning_pipeline,                          
             moveit_configs.planning_scene_monitor,
+            {'yaml_file': labels_yaml_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         remappings=[

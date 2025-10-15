@@ -1,0 +1,6 @@
+authorized_labels:
+  - firecabinet 
+  - box
+
+unauthorized_labels:
+  - camera

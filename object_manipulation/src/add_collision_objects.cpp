@@ -16,7 +16,9 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include "sensor_msgs/msg/point_cloud2.hpp"
-
+#include <unordered_set>
+#include "yaml-cpp/yaml.h"
+#include <fstream>
 #include <moveit/move_group_interface/move_group_interface.hpp>
 #include <moveit/robot_state/robot_state.hpp>
 #include <moveit/robot_model_loader/robot_model_loader.hpp>
@@ -129,6 +131,40 @@ private:
 
     std::string id_to_remove = "";
     std::unordered_set<std::string> added;
+    std::unordered_set<std::string> authorized_labels_;
+    std::unordered_set<std::string> unauthorized_labels_;
+
+    void load_labels_from_yaml(const std::string& file_path)
+    {
+        // Verifica se o arquivo existe antes de tentar carregar
+        std::ifstream f(file_path.c_str());
+        if (!f.good()) {
+            RCLCPP_ERROR(this->get_logger(), "Arquivo YAML de labels não encontrado em: %s", file_path.c_str());
+            return;
+        }
+
+        try {
+            YAML::Node config = YAML::LoadFile(file_path);
+
+            // Carrega os labels autorizados
+            if (config["authorized_labels"]) {
+                for (const auto& node : config["authorized_labels"]) {
+                    authorized_labels_.insert(node.as<std::string>());
+                }
+                RCLCPP_INFO(this->get_logger(), "%zu labels autorizados carregados.", authorized_labels_.size());
+            }
+
+            // Carrega os labels não autorizados
+            if (config["unauthorized_labels"]) {
+                for (const auto& node : config["unauthorized_labels"]) {
+                    unauthorized_labels_.insert(node.as<std::string>());
+                }
+                RCLCPP_INFO(this->get_logger(), "%zu labels não autorizados carregados.", unauthorized_labels_.size());
+            }
+        } catch (const YAML::Exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Erro ao processar o arquivo YAML: %s", e.what());
+        }
+    }
 
 
     void initMoveGroup() {
@@ -225,7 +261,7 @@ private:
         for (size_t i = 0; i < msg->detections.size(); ++i)
         {
             const auto &det = msg->detections[i];
-            if(det.results[0].hypothesis.class_id == "firecabinet")
+            if(authorized_labels_.find(det.results[0].hypothesis.class_id) != authorized_labels_.end() || (authorized_labels_.empty() && unauthorized_labels_.find(det.results[0].hypothesis.class_id) == unauthorized_labels_.end()))
             {
                 
                 std::string object_id = det.results[0].hypothesis.class_id;
@@ -259,7 +295,9 @@ public:
     AddCollision()
      : Node("add_colision_objects")
     {
+        this->declare_parameter<std::string>("yaml_file", "");
 
+        std::string labels_path = this->get_parameter("yaml_file").as_string();
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/boxes_detection_array", 10,
@@ -271,6 +309,7 @@ public:
             std::bind(&AddCollision::initMoveGroup, this));
         
         add_ground_plane();
+        load_labels_from_yaml(labels_path);
      
     }   
 };
