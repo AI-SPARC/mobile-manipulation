@@ -6,19 +6,18 @@
 #include <functional>
 #include <chrono>
 #include <random>
+#include <unordered_set>
+#include <unordered_map>
+#include <fstream>
 
 #include "rclcpp/rclcpp.hpp"
-#include <rosidl_runtime_cpp/bounded_vector.hpp>
-
 #include "geometry_msgs/msg/pose.hpp"
 #include "vision_msgs/msg/detection3_d_array.hpp"
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include "sensor_msgs/msg/point_cloud2.hpp"
-#include <unordered_set>
 #include "yaml-cpp/yaml.h"
-#include <fstream>
 #include <moveit/move_group_interface/move_group_interface.hpp>
 #include <moveit/robot_state/robot_state.hpp>
 #include <moveit/robot_model_loader/robot_model_loader.hpp>
@@ -100,6 +99,11 @@ struct TupleEqual {
     }
 };
 
+// Estrutura para labels com possibilidade de prefixo
+struct LabelRule {
+    std::string label;
+    bool is_prefix;
+};
 
 class AddCollision : public rclcpp::Node {
 
@@ -110,7 +114,6 @@ private:
 
     // Subscriptions.
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
 
     // Services.
     rclcpp::Service<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr service_;
@@ -131,12 +134,12 @@ private:
 
     std::string id_to_remove = "";
     std::unordered_set<std::string> added;
-    std::unordered_set<std::string> authorized_labels_;
-    std::unordered_set<std::string> unauthorized_labels_;
+
+    std::vector<LabelRule> authorized_labels_;
+    std::vector<LabelRule> unauthorized_labels_;
 
     void load_labels_from_yaml(const std::string& file_path)
     {
-        // Verifica se o arquivo existe antes de tentar carregar
         std::ifstream f(file_path.c_str());
         if (!f.good()) {
             RCLCPP_ERROR(this->get_logger(), "Arquivo YAML de labels não encontrado em: %s", file_path.c_str());
@@ -146,32 +149,39 @@ private:
         try {
             YAML::Node config = YAML::LoadFile(file_path);
 
-            // Carrega os labels autorizados
-            if (config["authorized_labels"]) {
-                for (const auto& node : config["authorized_labels"]) {
-                    authorized_labels_.insert(node.as<std::string>());
+            auto load_rules = [&](const YAML::Node& node, std::vector<LabelRule>& target) {
+                for (const auto& label_node : node) {
+                    std::string label = label_node.as<std::string>();
+                    bool is_prefix = false;
+
+                    // Se termina com '_', marcar como prefixo
+                    if (!label.empty() && label.back() == '_') {
+                        is_prefix = true;
+                    }
+
+                    target.push_back({label, is_prefix});
                 }
+            };
+
+            if (config["authorized_labels"]) {
+                load_rules(config["authorized_labels"], authorized_labels_);
                 RCLCPP_INFO(this->get_logger(), "%zu labels autorizados carregados.", authorized_labels_.size());
             }
 
-            // Carrega os labels não autorizados
             if (config["unauthorized_labels"]) {
-                for (const auto& node : config["unauthorized_labels"]) {
-                    unauthorized_labels_.insert(node.as<std::string>());
-                }
+                load_rules(config["unauthorized_labels"], unauthorized_labels_);
                 RCLCPP_INFO(this->get_logger(), "%zu labels não autorizados carregados.", unauthorized_labels_.size());
             }
+
         } catch (const YAML::Exception& e) {
             RCLCPP_ERROR(this->get_logger(), "Erro ao processar o arquivo YAML: %s", e.what());
         }
     }
 
-
     void initMoveGroup() {
         try {
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
                 shared_from_this(), "denso_arm");  
-
 
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 
@@ -180,12 +190,10 @@ private:
         {
             RCLCPP_WARN(this->get_logger(), "Ainda não consegui inicializar MoveGroupInterface: %s", e.what());
         }
-
     }
 
     void add_ground_plane()
     {
-
         moveit_msgs::msg::CollisionObject ground;
         ground.id = "ground_plane";
         ground.header.frame_id = "world";
@@ -209,14 +217,12 @@ private:
 
     void add_collision_box(const std::string &id,const std::array<double, 3> &dimensions, const geometry_msgs::msg::Pose &pose)
     {
-       
         std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
         if (std::find(known_objects.begin(), known_objects.end(), id) != known_objects.end()) 
         {
             return;
         }
 
-        
         moveit_msgs::msg::CollisionObject collision_object;
         collision_object.id = id;
         collision_object.header.frame_id = "world";
@@ -234,7 +240,6 @@ private:
 
     void move_collision_box(const std::string &id, const geometry_msgs::msg::Pose &pose)
     {
-        
         moveit_msgs::msg::CollisionObject collision_object;
         collision_object.id = id;
         collision_object.header.frame_id = "world";
@@ -245,9 +250,28 @@ private:
         planning_scene_interface.applyCollisionObjects({collision_object});
     }
 
+    bool is_authorized(const std::string& label)
+    {
+        for (const auto& rule : unauthorized_labels_) 
+        {
+            if ((rule.is_prefix && label.rfind(rule.label, 0) == 0) || (!rule.is_prefix && label == rule.label)) 
+            {
+                return false; 
+            }
+        }
 
+        if (authorized_labels_.empty()) return true;
 
-    // CALLBACKS.
+        for (const auto& rule : authorized_labels_) 
+        {
+            if ((rule.is_prefix && label.rfind(rule.label, 0) == 0) || (!rule.is_prefix && label == rule.label)) 
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
@@ -260,48 +284,41 @@ private:
         for (size_t i = 0; i < msg->detections.size(); ++i)
         {
             const auto &det = msg->detections[i];
-            if(authorized_labels_.find(det.results[0].hypothesis.class_id) != authorized_labels_.end() || (authorized_labels_.empty() && unauthorized_labels_.find(det.results[0].hypothesis.class_id) == unauthorized_labels_.end()))
+            std::string object_id = det.results[0].hypothesis.class_id;
+
+            if (!is_authorized(object_id)) continue;
+
+            geometry_msgs::msg::Pose pose = det.bbox.center;
+            pose.position.z += det.bbox.size.z / 2;
+
+            std::array<double, 3> size_array = {
+                det.bbox.size.x,
+                det.bbox.size.y,
+                det.bbox.size.z
+            };
+
+            if(added.find(object_id) == added.end())
             {
-                
-                std::string object_id = det.results[0].hypothesis.class_id;
-
-                geometry_msgs::msg::Pose pose = det.bbox.center;
-                pose.position.z += det.bbox.size.z / 2;
-
-                std::array<double, 3> size_array = {
-                    det.bbox.size.x,
-                    det.bbox.size.y,
-                    det.bbox.size.z
-                };
-
-                if(added.find(object_id) == added.end())
-                {
-                    add_collision_box(object_id, size_array, pose);
-                    added.insert(object_id);
-                }      
-                else
-                {
-                    move_collision_box(object_id, pose);
-                }  
-            }
-            
+                add_collision_box(object_id, size_array, pose);
+                added.insert(object_id);
+            }      
+            else
+            {
+                move_collision_box(object_id, pose);
+            }  
         }
     }
-
-
 
 public:
     AddCollision()
      : Node("add_colision_objects")
     {
         this->declare_parameter<std::string>("yaml_file", "");
-
         std::string labels_path = this->get_parameter("yaml_file").as_string();
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/boxes_detection_array", 10,
             std::bind(&AddCollision::detectionCallback, this, std::placeholders::_1));
-
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
@@ -309,15 +326,12 @@ public:
         
         add_ground_plane();
         load_labels_from_yaml(labels_path);
-     
     }   
 };
 
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-
-    
     rclcpp::spin(std::make_shared<AddCollision>());
     rclcpp::shutdown();
     return 0;
