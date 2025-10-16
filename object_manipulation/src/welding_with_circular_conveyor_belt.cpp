@@ -346,7 +346,6 @@ private:
                 }
 
                 welding_done = true;
-                rclcpp::sleep_for(std::chrono::milliseconds(50));
                 return_to_welding_position();
                 stopped = false;
                 publish_velocity(0.2);

@@ -227,6 +227,29 @@ ament_target_dependencies(welding
   "control_msgs"
   "trajectory_msgs"
 )
+
+add_executable(welding_with_circular_conveyor_belt src/welding_with_circular_conveyor_belt.cpp)
+
+# Versão limpa, sem duplicatas
+ament_target_dependencies(welding_with_circular_conveyor_belt
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+)
+
 target_link_libraries(basic_algorithm
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -283,6 +306,14 @@ target_link_libraries(welding
   yaml-cpp
 )
 
+target_link_libraries(welding_with_circular_conveyor_belt
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
 # A variável ${TORCH_LIBRARIES} agora será preenchida corretamente pelo find_package
 target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
 
@@ -311,6 +342,7 @@ install(TARGETS
   rl_trainer_node
   synchronize_isaac_sim_labels
   welding
+  welding_with_circular_conveyor_belt
   DESTINATION lib/${PROJECT_NAME}
 )
 
