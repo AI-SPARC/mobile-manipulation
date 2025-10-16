@@ -239,7 +239,6 @@ private:
         collision_object.id = id;
         collision_object.header.frame_id = "world";
 
-
         collision_object.primitive_poses.push_back(pose);
         collision_object.operation = collision_object.MOVE;
 

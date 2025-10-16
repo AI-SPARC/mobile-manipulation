@@ -26,6 +26,7 @@
 #include "object_manipulation_interfaces/srv/object_collision.hpp"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
+#include <std_msgs/msg/float32.hpp>
 
 using namespace std::chrono_literals;
 
@@ -104,6 +105,7 @@ private:
 
     //Publishers.
     rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
+    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
 
     //Subscriptions.
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
@@ -183,6 +185,8 @@ private:
 
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
                 this->shared_from_this(), "denso_arm");  
+
+                rclcpp::sleep_for(std::chrono::milliseconds(5000));
             
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 
@@ -194,7 +198,36 @@ private:
 
     }
 
+    void return_to_welding_position()
+    {
+         if (!move_group_arm) {
+            RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do arm não inicializado.");
+            return;
+        }
 
+        
+        move_group_arm->setJointValueTarget({
+            {"joint1", 0.0},
+            {"joint2", -1.1288},
+            {"joint3", 2.057},
+            {"joint4", 0.0},
+            {"joint5", 0.658},
+            {"joint6", 0.0},        
+        });
+
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        auto result = move_group_arm->plan(plan);
+
+        if (result == moveit::core::MoveItErrorCode::SUCCESS) 
+        {
+            auto exec_result = move_group_arm->execute(plan);
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+            if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
+            {
+                RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+            }
+        }
+    }
     
     void positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
     {
@@ -208,7 +241,7 @@ private:
         move_group_arm->setPlannerId("RRTConnect");
         move_group_arm->setPoseTarget(target_pose);
 
-        move_group_arm->setPlanningTime(4.0);
+        move_group_arm->setPlanningTime(10.0);
         move_group_arm->setNumPlanningAttempts(200);
 
         move_group_arm->setMaxVelocityScalingFactor(0.5);
@@ -235,6 +268,15 @@ private:
 
     }
 
+    void publish_velocity(float velocity)
+    {
+        auto message = std_msgs::msg::Float32();
+        message.data = velocity;
+
+        publisher_->publish(message);
+
+    }
+
 
     /*
     
@@ -242,7 +284,8 @@ private:
 
     */
     
-    
+    std::unordered_set<std::string> welding_done;
+    bool stopped = false;
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
@@ -251,42 +294,55 @@ private:
             if (det.results.empty() || det.results[0].hypothesis.class_id != "firecabinet")
                 continue;
 
-
-            for (size_t i = 0; i < locations.size(); i++)
+            if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > 0.0 && stopped == false && welding_done.find(det.results[0].hypothesis.class_id) == welding_done.end())
             {
-                tf2::Vector3 local_corner(locations[i].position.x, locations[i].position.y, locations[i].position.z);
-
-                const auto &pose = det.bbox.center;
-                tf2::Quaternion q(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
-                tf2::Matrix3x3 rot(q);
-                tf2::Vector3 translation(pose.position.x, pose.position.y, pose.position.z);
-
-                tf2::Vector3 world_corner = rot * local_corner + translation;
-
-                tf2::Vector3 global_offset(-0.13, 0.0, 0.0);
-                world_corner += global_offset;
-
-                // Converter tf2::Vector3 → geometry_msgs::msg::Pose
-                geometry_msgs::msg::Pose target_pose;
-                target_pose.position.x = world_corner.x();
-                target_pose.position.y = world_corner.y();
-                target_pose.position.z = world_corner.z();
-
-                
-                target_pose.orientation.x = locations[i].orientation.x;
-                target_pose.orientation.y = locations[i].orientation.y;
-                target_pose.orientation.z = locations[i].orientation.z;
-                target_pose.orientation.w = locations[i].orientation.w;
-
-                RCLCPP_INFO(this->get_logger(),
-                            "Pose %zu - ponto global: x=%.3f, y=%.3f, z=%.3f",
-                            i, world_corner.x(), world_corner.y(), world_corner.z());
-
-                positions_for_arm(target_pose);
+                publish_velocity(0.0);
+                rclcpp::sleep_for(std::chrono::milliseconds(500));
+                stopped = true;
             }
+            else if(stopped == true && welding_done.find(det.results[0].hypothesis.class_id) == welding_done.end())
+            {
+                
+                for (size_t i = 0; i < locations.size(); i++)
+                {
+                    tf2::Vector3 local_corner(locations[i].position.x, locations[i].position.y, locations[i].position.z);
 
-            
-           
+                    const auto &pose = det.bbox.center;
+                    tf2::Quaternion q(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
+                    tf2::Matrix3x3 rot(q);
+                    tf2::Vector3 translation(pose.position.x, pose.position.y, pose.position.z);
+
+                    tf2::Vector3 world_corner = rot * local_corner + translation;
+
+                    geometry_msgs::msg::Pose target_pose;
+                    target_pose.position.x = world_corner.x();
+                    target_pose.position.y = world_corner.y();
+                    target_pose.position.z = world_corner.z();
+
+                    
+                    target_pose.orientation.x = locations[i].orientation.x;
+                    target_pose.orientation.y = locations[i].orientation.y;
+                    target_pose.orientation.z = locations[i].orientation.z;
+                    target_pose.orientation.w = locations[i].orientation.w;
+
+                    RCLCPP_INFO(this->get_logger(),
+                                "Pose %zu - ponto global: x=%.3f, y=%.3f, z=%.3f",
+                                i, world_corner.x(), world_corner.y(), world_corner.z());
+
+                    positions_for_arm(target_pose);
+                }
+
+                welding_done.insert(det.results[0].hypothesis.class_id);
+                return_to_welding_position();
+                stopped = false;
+                publish_velocity(0.1);
+                rclcpp::sleep_for(std::chrono::milliseconds(50));
+            }
+            else
+            {
+                publish_velocity(0.1);
+                rclcpp::sleep_for(std::chrono::milliseconds(50));
+            }
         }
     }
 
@@ -300,7 +356,8 @@ public:
         this->declare_parameter<std::string>("yaml_file", "");
    
         yaml_file = this->get_parameter("yaml_file").as_string();
- 
+        
+        publisher_ = this->create_publisher<std_msgs::msg::Float32>("/conveyor_velocity", 10);
        
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,
