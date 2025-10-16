@@ -16,7 +16,7 @@ def generate_launch_description():
     gui = os.path.join(
         get_package_share_directory("isaacsim_moveit"),
         "maps",
-        "denso_welding.usd",
+        "denso_welding_with_conveyor.usd",
     )
 
     return LaunchDescription(
