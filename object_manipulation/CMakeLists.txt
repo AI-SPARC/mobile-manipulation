@@ -41,8 +41,6 @@ find_package(message_filters REQUIRED)
 #    !! IMPORTANTE: SUBSTITUA "/path/to/libtorch" PELO CAMINHO CORRETO !!
 set(CMAKE_PREFIX_PATH "/home/momesso/libtorch/libtorch;${CMAKE_PREFIX_PATH}")
 find_package(Torch REQUIRED)
-### FIM DA ADIÇÃO ###
-################################################################################
 
 
 add_executable(basic_algorithm src/basic_algorithm.cpp)
@@ -186,7 +184,6 @@ ament_target_dependencies(rl_trainer_node
 
 add_executable(synchronize_isaac_sim_labels src/synchronize_isaac_sim_labels.cpp)
 
-# Versão limpa, sem duplicatas
 ament_target_dependencies(synchronize_isaac_sim_labels
   "rclcpp"
   "sensor_msgs"
@@ -208,7 +205,6 @@ ament_target_dependencies(synchronize_isaac_sim_labels
 
 add_executable(welding src/welding.cpp)
 
-# Versão limpa, sem duplicatas
 ament_target_dependencies(welding
   "rclcpp"
   "sensor_msgs"
@@ -230,8 +226,28 @@ ament_target_dependencies(welding
 
 add_executable(welding_with_circular_conveyor_belt src/welding_with_circular_conveyor_belt.cpp)
 
-# Versão limpa, sem duplicatas
 ament_target_dependencies(welding_with_circular_conveyor_belt
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+)
+
+add_executable(welding_multiple_objects src/welding_multiple_objects.cpp)
+
+ament_target_dependencies(welding_multiple_objects
   "rclcpp"
   "sensor_msgs"
   "vision_msgs"
@@ -314,6 +330,14 @@ target_link_libraries(welding_with_circular_conveyor_belt
   yaml-cpp
 )
 
+target_link_libraries(welding_multiple_objects
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
 # A variável ${TORCH_LIBRARIES} agora será preenchida corretamente pelo find_package
 target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
 
@@ -343,6 +367,7 @@ install(TARGETS
   synchronize_isaac_sim_labels
   welding
   welding_with_circular_conveyor_belt
+  welding_multiple_objects
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -106,7 +106,6 @@ private:
     //Publishers.
     rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
-    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_1;
 
     //Subscriptions.
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
@@ -225,7 +224,7 @@ private:
             rclcpp::sleep_for(std::chrono::milliseconds(100));
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
-                RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+                RCLCPP_INFO(this->get_logger(), "Returned to welding position.");
             }
         }
     }
@@ -242,16 +241,16 @@ private:
         move_group_arm->setPlannerId("RRTConnect");
         move_group_arm->setPoseTarget(target_pose);
 
-        move_group_arm->setPlanningTime(5.0);
-        move_group_arm->setNumPlanningAttempts(40);
+        move_group_arm->setPlanningTime(10.0);
+        move_group_arm->setNumPlanningAttempts(200);
 
         move_group_arm->setMaxVelocityScalingFactor(0.5);
         move_group_arm->setMaxAccelerationScalingFactor(0.5);
 
-        move_group_arm->setGoalTolerance(0.01);
-        move_group_arm->setGoalJointTolerance(0.01);
-        move_group_arm->setGoalPositionTolerance(0.01);
-        move_group_arm->setGoalOrientationTolerance(0.01);
+        move_group_arm->setGoalTolerance(0.001);
+        move_group_arm->setGoalJointTolerance(0.001);
+        move_group_arm->setGoalPositionTolerance(0.001);
+        move_group_arm->setGoalOrientationTolerance(0.001);
 
         moveit::planning_interface::MoveGroupInterface::Plan plan;
         auto result = move_group_arm->plan(plan);
@@ -278,15 +277,6 @@ private:
 
     }
 
-    void publish_angular_velocity(float velocity)
-    {
-        auto message = std_msgs::msg::Float32();
-        message.data = velocity;
-
-        publisher_1->publish(message);
-
-    }
-
 
     /*
     
@@ -294,26 +284,23 @@ private:
 
     */
     
-    std::string welding_id;
-    bool stopped = false, welding_done = false;
+    std::unordered_set<std::string> welding_done;
+    bool stopped = false;
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         for (const auto &det : msg->detections)
         {
-            if (det.results.empty() || det.results[0].hypothesis.class_id.find("firecabinet") == std::string::npos)
-            {
+            if (det.results.empty() || det.results[0].hypothesis.class_id != "firecabinet")
                 continue;
-            }
-            
-            if(stopped == false)
+
+            if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > 0.0 && stopped == false && welding_done.find(det.results[0].hypothesis.class_id) == welding_done.end())
             {
-                publish_velocity(0.2);
-                publish_angular_velocity(0.4);
+                publish_velocity(0.0);
+                rclcpp::sleep_for(std::chrono::milliseconds(500));
+                stopped = true;
             }
-
-
-            if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > -0.2  && det.bbox.center.position.x > 0.0 && stopped == true && welding_id == det.results[0].hypothesis.class_id)
+            else if(stopped == true && welding_done.find(det.results[0].hypothesis.class_id) == welding_done.end())
             {
                 
                 for (size_t i = 0; i < locations.size(); i++)
@@ -345,24 +332,17 @@ private:
                     positions_for_arm(target_pose);
                 }
 
-                welding_done = true;
-                rclcpp::sleep_for(std::chrono::milliseconds(50));
+                welding_done.insert(det.results[0].hypothesis.class_id);
                 return_to_welding_position();
                 stopped = false;
-                publish_velocity(0.2);
-                publish_angular_velocity(0.4);
+                publish_velocity(0.1);
                 rclcpp::sleep_for(std::chrono::milliseconds(50));
             }
-            else if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > -0.2 && det.bbox.center.position.x > 0.0 && stopped == false && welding_id != det.results[0].hypothesis.class_id)
+            else
             {
-                publish_velocity(0.0);
-                publish_angular_velocity(0.0);
-                rclcpp::sleep_for(std::chrono::milliseconds(1000));
-                welding_id = det.results[0].hypothesis.class_id;
-                welding_done = false;
-                stopped = true;
+                publish_velocity(0.1);
+                rclcpp::sleep_for(std::chrono::milliseconds(50));
             }
-
         }
     }
 
@@ -378,7 +358,6 @@ public:
         yaml_file = this->get_parameter("yaml_file").as_string();
         
         publisher_ = this->create_publisher<std_msgs::msg::Float32>("/conveyor_velocity", 10);
-        publisher_1 = this->create_publisher<std_msgs::msg::Float32>("/conveyor_angular_velocity", 10);
        
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,

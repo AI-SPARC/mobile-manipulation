@@ -114,59 +114,79 @@ private:
 
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
 
-    std::vector<geometry_msgs::msg::Pose> locations;
     std::string yaml_file;
 
     rclcpp::TimerBase::SharedPtr init_timer_;
 
-    std::vector<geometry_msgs::msg::Pose> loadLocationsFromYaml(const std::string &yaml_path)
-    {
-        
+    std::unordered_map<std::string, std::vector<geometry_msgs::msg::Pose>> welding_poses;
 
+    void loadLocationsFromYaml(const std::string &yaml_path)
+    {
         try
         {
             YAML::Node config = YAML::LoadFile(yaml_path);
 
-            for (const auto &it : config)
+            // Agora 'config' é um MAPA: { "trashcan": [...], "firecabinet": [...] }
+            for (const auto &label_node : config)
             {
-                const std::string key = it.first.as<std::string>();
-                const YAML::Node node = it.second;
+                const std::string label = label_node.first.as<std::string>();
+                const YAML::Node &locations_node = label_node.second;
 
-                if (!node["position"] || !node["orientation"])
+                std::vector<geometry_msgs::msg::Pose> locations;
+
+                // locations_node é uma LISTA
+                for (const auto &loc_item : locations_node)
                 {
-                    RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
-                                "Location '%s' missing position or orientation", key.c_str());
-                    continue;
+                    if (!loc_item.IsMap() || loc_item.size() != 1)
+                    {
+                        RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
+                                    "[%s] Ignorando entrada inválida de localização.", label.c_str());
+                        continue;
+                    }
+
+                    // Cada item é um mapa { "locationX": { position, orientation } }
+                    const auto &loc_name = loc_item.begin()->first.as<std::string>();
+                    const YAML::Node &loc_data = loc_item.begin()->second;
+
+                    if (!loc_data["position"] || !loc_data["orientation"])
+                    {
+                        RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
+                                    "[%s] '%s' missing position/orientation",
+                                    label.c_str(), loc_name.c_str());
+                        continue;
+                    }
+
+                    const YAML::Node &pos = loc_data["position"];
+                    const YAML::Node &ori = loc_data["orientation"];
+
+                    if (pos.size() != 3 || ori.size() != 4)
+                    {
+                        RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
+                                    "[%s] '%s' invalid position/orientation size",
+                                    label.c_str(), loc_name.c_str());
+                        continue;
+                    }
+
+                    geometry_msgs::msg::Pose pose;
+                    pose.position.x = pos[0].as<double>();
+                    pose.position.y = pos[1].as<double>();
+                    pose.position.z = pos[2].as<double>();
+                    pose.orientation.x = ori[0].as<double>();
+                    pose.orientation.y = ori[1].as<double>();
+                    pose.orientation.z = ori[2].as<double>();
+                    pose.orientation.w = ori[3].as<double>();
+
+                    locations.push_back(pose);
+
+                    RCLCPP_INFO(rclcpp::get_logger("yaml_loader"),
+                                "Loaded [%s - %s] -> pos:[%.2f, %.2f, %.2f], ori:[%.2f, %.2f, %.2f, %.2f]",
+                                label.c_str(), loc_name.c_str(),
+                                pose.position.x, pose.position.y, pose.position.z,
+                                pose.orientation.x, pose.orientation.y,
+                                pose.orientation.z, pose.orientation.w);
                 }
 
-                const YAML::Node pos = node["position"];
-                const YAML::Node ori = node["orientation"];
-
-                if (pos.size() != 3 || ori.size() != 4)
-                {
-                    RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
-                                "Invalid size for position/orientation in '%s'", key.c_str());
-                    continue;
-                }
-
-                geometry_msgs::msg::Pose pose;
-                pose.position.x = pos[0].as<double>();
-                pose.position.y = pos[1].as<double>();
-                pose.position.z = pos[2].as<double>();
-
-                pose.orientation.x = ori[0].as<double>();
-                pose.orientation.y = ori[1].as<double>();
-                pose.orientation.z = ori[2].as<double>();
-                pose.orientation.w = ori[3].as<double>();
-
-                locations.push_back(pose);
-
-                RCLCPP_INFO(rclcpp::get_logger("yaml_loader"),
-                            "Loaded %s -> pos:[%.2f, %.2f, %.2f], ori:[%.2f, %.2f, %.2f, %.2f]",
-                            key.c_str(),
-                            pose.position.x, pose.position.y, pose.position.z,
-                            pose.orientation.x, pose.orientation.y,
-                            pose.orientation.z, pose.orientation.w);
+                welding_poses[label] = locations;
             }
         }
         catch (const YAML::Exception &e)
@@ -174,9 +194,9 @@ private:
             RCLCPP_ERROR(rclcpp::get_logger("yaml_loader"),
                         "Failed to load YAML file '%s': %s", yaml_path.c_str(), e.what());
         }
-
-        return locations;
     }
+
+
 
 
 
@@ -269,6 +289,11 @@ private:
 
     }
 
+    
+    
+        
+    
+
     void publish_velocity(float velocity)
     {
         auto message = std_msgs::msg::Float32();
@@ -299,9 +324,22 @@ private:
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
+        std::string id;
         for (const auto &det : msg->detections)
         {
-            if (det.results.empty() || det.results[0].hypothesis.class_id.find("firecabinet") == std::string::npos)
+            
+
+            size_t pos = det.results[0].hypothesis.class_id.find('_'); 
+            if (pos != std::string::npos) 
+            {
+                id = det.results[0].hypothesis.class_id.substr(0, pos);  
+            } 
+            else
+            {
+                id = det.results[0].hypothesis.class_id;  
+            }
+
+            if (det.results.empty() || welding_poses.find(id) == welding_poses.end())
             {
                 continue;
             }
@@ -313,46 +351,66 @@ private:
             }
 
 
-            if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > -0.2  && det.bbox.center.position.x > 0.0 && stopped == true && welding_id == det.results[0].hypothesis.class_id)
+            if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > -0.1  && det.bbox.center.position.x > 0.0 && stopped == true && welding_id == det.results[0].hypothesis.class_id)
             {
                 
-                for (size_t i = 0; i < locations.size(); i++)
+                if (welding_poses.find(id) != welding_poses.end())  
                 {
-                    tf2::Vector3 local_corner(locations[i].position.x, locations[i].position.y, locations[i].position.z);
+                    const auto &poses = welding_poses[id];  
 
-                    const auto &pose = det.bbox.center;
-                    tf2::Quaternion q(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
-                    tf2::Matrix3x3 rot(q);
-                    tf2::Vector3 translation(pose.position.x, pose.position.y, pose.position.z);
+                    for (size_t i = 0; i < poses.size(); ++i)
+                    {
+                        const auto &pose_local = poses[i];
 
-                    tf2::Vector3 world_corner = rot * local_corner + translation;
+                        tf2::Vector3 local_corner(
+                            pose_local.position.x,
+                            pose_local.position.y,
+                            pose_local.position.z);
 
-                    geometry_msgs::msg::Pose target_pose;
-                    target_pose.position.x = world_corner.x();
-                    target_pose.position.y = world_corner.y();
-                    target_pose.position.z = world_corner.z();
+                        const auto &bbox_pose = det.bbox.center;
 
-                    
-                    target_pose.orientation.x = locations[i].orientation.x;
-                    target_pose.orientation.y = locations[i].orientation.y;
-                    target_pose.orientation.z = locations[i].orientation.z;
-                    target_pose.orientation.w = locations[i].orientation.w;
+                        tf2::Quaternion q(
+                            bbox_pose.orientation.x,
+                            bbox_pose.orientation.y,
+                            bbox_pose.orientation.z,
+                            bbox_pose.orientation.w);
 
-                    RCLCPP_INFO(this->get_logger(),
-                                "Pose %zu - ponto global: x=%.3f, y=%.3f, z=%.3f",
-                                i, world_corner.x(), world_corner.y(), world_corner.z());
+                        tf2::Matrix3x3 rot(q);
+                        tf2::Vector3 translation(
+                            bbox_pose.position.x,
+                            bbox_pose.position.y,
+                            bbox_pose.position.z);
 
-                    positions_for_arm(target_pose);
+                        tf2::Vector3 world_corner = rot * local_corner + translation;
+
+                        geometry_msgs::msg::Pose target_pose;
+                        target_pose.position.x = world_corner.x();
+                        target_pose.position.y = world_corner.y();
+                        target_pose.position.z = world_corner.z();
+
+                        target_pose.orientation = pose_local.orientation;
+
+                        RCLCPP_INFO(this->get_logger(),
+                                    "Pose %zu - ponto global: x=%.3f, y=%.3f, z=%.3f",
+                                    i, world_corner.x(), world_corner.y(), world_corner.z());
+
+                        positions_for_arm(target_pose);
+                    }
+                }
+                else
+                {
+                    RCLCPP_WARN(this->get_logger(), "ID '%s' não encontrado em welding_poses", det.results[0].hypothesis.class_id.c_str());
                 }
 
                 welding_done = true;
                 return_to_welding_position();
                 stopped = false;
+
                 publish_velocity(0.2);
                 publish_angular_velocity(0.4);
                 rclcpp::sleep_for(std::chrono::milliseconds(50));
             }
-            else if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > -0.2 && det.bbox.center.position.x > 0.0 && stopped == false && welding_id != det.results[0].hypothesis.class_id)
+            else if(det.bbox.center.position.y < 0.2 && det.bbox.center.position.y > -0.1 && det.bbox.center.position.x > 0.0 && stopped == false && welding_id != det.results[0].hypothesis.class_id)
             {
                 publish_velocity(0.0);
                 publish_angular_velocity(0.0);

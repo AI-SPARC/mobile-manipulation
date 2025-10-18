@@ -1,6 +1,9 @@
 authorized_labels:
   - firecabinet_
   - box
+  - trashcan
+  - case_
+  - eletricheater_
 
 unauthorized_labels:
   - camera
