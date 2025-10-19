@@ -266,6 +266,27 @@ ament_target_dependencies(welding_multiple_objects
   "trajectory_msgs"
 )
 
+add_executable(welding_with_trajectory src/welding_with_trajectory.cpp)
+
+ament_target_dependencies(welding_with_trajectory
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+)
+
 target_link_libraries(basic_algorithm
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -338,6 +359,14 @@ target_link_libraries(welding_multiple_objects
   yaml-cpp
 )
 
+target_link_libraries(welding_with_trajectory
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
 # A variável ${TORCH_LIBRARIES} agora será preenchida corretamente pelo find_package
 target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
 
@@ -368,6 +397,7 @@ install(TARGETS
   welding
   welding_with_circular_conveyor_belt
   welding_multiple_objects
+  welding_with_trajectory
   DESTINATION lib/${PROJECT_NAME}
 )
 

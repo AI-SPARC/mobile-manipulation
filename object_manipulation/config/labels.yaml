@@ -4,6 +4,7 @@ authorized_labels:
   - trashcan
   - case_
   - eletricheater_
+  - drum_
 
 unauthorized_labels:
   - camera
