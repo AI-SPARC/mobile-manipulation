@@ -41,7 +41,7 @@ def generate_launch_description():
     )
 
     moveit_config = (
-        MoveItConfigsBuilder("moveit_resources_panda")
+        MoveItConfigsBuilder("vai_se_ferrar")
         .robot_description(
             file_path="config/panda.urdf.xacro",
             mappings={
@@ -53,6 +53,7 @@ def generate_launch_description():
         .robot_description_semantic(file_path="config/panda.srdf")
         .trajectory_execution(file_path="config/gripper_moveit_controllers.yaml")
         .planning_pipelines(pipelines=["ompl", "pilz_industrial_motion_planner"])
+        .robot_description_kinematics(file_path="config/kinematics.yaml")
         .to_moveit_configs()
     )
 
@@ -99,7 +100,7 @@ def generate_launch_description():
         output="log",
         arguments=[
             "0.0",
-            "-0.64",
+            "0.0",
             "0.0",
             "0.0",
             "0.0",
@@ -140,7 +141,7 @@ def generate_launch_description():
 
     # ros2_control using FakeSystem as hardware
     ros2_controllers_path = os.path.join(
-        get_package_share_directory("moveit_resources_panda_moveit_config"),
+        get_package_share_directory("vai_se_ferrar_moveit_config"),
         "config",
         "ros2_controllers.yaml",
     )
@@ -189,27 +190,27 @@ def generate_launch_description():
         [
             ros2_control_hardware_type,
             use_sim_time,  # Declare use_sim_time argument here
-            rviz_node,
-            world2robot_tf_node,
+            # rviz_node,
+            # world2robot_tf_node,
             # hand2camera_tf_node,
             robot_state_publisher,
             move_group_node,
             ros2_control_node,
             joint_state_broadcaster_spawner,
             panda_arm_controller_spawner,
-            panda_hand_controller_spawner,
+            # panda_hand_controller_spawner,
 
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([os.path.join(
-                            get_package_share_directory("isaacsim"), "launch", "run_isaacsim.launch.py"
-                        ),
-                    ]
-                ),
-                launch_arguments={
-                    'version': '5.0.0',
-                    'play_sim_on_start': 'True',
-                    'gui': gui,
-                }.items(),
-            ),
+            # IncludeLaunchDescription(
+            #     PythonLaunchDescriptionSource([os.path.join(
+            #                 get_package_share_directory("isaacsim"), "launch", "run_isaacsim.launch.py"
+            #             ),
+            #         ]
+            #     ),
+            #     launch_arguments={
+            #         'version': '5.0.0',
+            #         'play_sim_on_start': 'True',
+            #         'gui': gui,
+            #     }.items(),
+            # ),
         ]
     )

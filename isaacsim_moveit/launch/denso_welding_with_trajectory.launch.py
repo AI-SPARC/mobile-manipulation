@@ -177,7 +177,7 @@ def generate_launch_description():
         output="log",
         arguments=[
             "0.0",
-            "-0.64",
+            "0.0",
             "0.0",
             "0.0",
             "0.0",
