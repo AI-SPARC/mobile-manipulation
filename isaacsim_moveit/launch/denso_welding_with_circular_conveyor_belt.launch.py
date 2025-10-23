@@ -226,7 +226,7 @@ def generate_launch_description():
         ],
     )
 
-    pkg_name = 'object_manipulation'
+    pkg_name = 'welding_package'
 
     yaml_file = os.path.join(
         get_package_share_directory(pkg_name),
@@ -235,7 +235,7 @@ def generate_launch_description():
     )
 
     welding_with_circular_conveyor_belt = Node(
-        package="object_manipulation",
+        package="welding_package",
         executable="welding_with_circular_conveyor_belt",
         name="welding_with_circular_conveyor_belt",
         output="screen",
@@ -263,7 +263,7 @@ def generate_launch_description():
     )
 
     add_collision_objects = Node(
-        package="object_manipulation",
+        package="welding_package",
         executable="add_collision_objects",
         name="add_collision_objects",
         output="screen",
@@ -279,6 +279,7 @@ def generate_launch_description():
             moveit_configs.planning_scene_monitor,
             {'yaml_file': labels_yaml_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
+            {'move_group': "denso_arm"},
         ],
         remappings=[
             ('/boxes_detection_array', '/bbox_3d_with_labels')
@@ -312,7 +313,7 @@ def generate_launch_description():
             add_collision_objects,
 
             Node(
-                package='object_manipulation',
+                package='isaacsim_moveit',
                 executable='synchronize_isaac_sim_labels',
                 name='synchronize_isaac_sim_labels',
                 output='screen',

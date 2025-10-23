@@ -88,28 +88,7 @@ ament_target_dependencies(
   Eigen3
 )
 
-add_executable(add_collision_objects src/add_collision_objects.cpp)
 
-ament_target_dependencies(
-  add_collision_objects 
-  trajectory_msgs 
-  rclcpp nav_msgs 
-  geometry_msgs 
-  PCL 
-  pcl_conversions 
-  sensor_msgs 
-  tf2_geometry_msgs 
-  tf2 
-  tf2_ros 
-  tf2_sensor_msgs 
-  tf2_ros 
-  tf2_eigen 
-  PCL
-  vision_msgs
-  moveit_ros_planning_interface
-  object_manipulation_interfaces 
-  Eigen3
-)
 
 add_executable(evaluate_reward src/evaluate_reward.cpp)
 
@@ -182,93 +161,9 @@ ament_target_dependencies(rl_trainer_node
   Eigen3
 )
 
-add_executable(synchronize_isaac_sim_labels src/synchronize_isaac_sim_labels.cpp)
+add_executable(pick_and_place_conveyor src/pick_and_place_conveyor.cpp)
 
-ament_target_dependencies(synchronize_isaac_sim_labels
-  "rclcpp"
-  "sensor_msgs"
-  "vision_msgs"
-  "geometry_msgs"
-  "nav_msgs"
-  "message_filters"
-  "pcl_conversions"
-  "tf2"
-  "tf2_ros"
-  "tf2_eigen"
-  "tf2_geometry_msgs"
-  "tf2_sensor_msgs"
-  "moveit_ros_planning_interface"
-  "object_manipulation_interfaces"
-  "control_msgs"
-  "trajectory_msgs"
-)
-
-add_executable(welding src/welding.cpp)
-
-ament_target_dependencies(welding
-  "rclcpp"
-  "sensor_msgs"
-  "vision_msgs"
-  "geometry_msgs"
-  "nav_msgs"
-  "message_filters"
-  "pcl_conversions"
-  "tf2"
-  "tf2_ros"
-  "tf2_eigen"
-  "tf2_geometry_msgs"
-  "tf2_sensor_msgs"
-  "moveit_ros_planning_interface"
-  "object_manipulation_interfaces"
-  "control_msgs"
-  "trajectory_msgs"
-)
-
-add_executable(welding_with_circular_conveyor_belt src/welding_with_circular_conveyor_belt.cpp)
-
-ament_target_dependencies(welding_with_circular_conveyor_belt
-  "rclcpp"
-  "sensor_msgs"
-  "vision_msgs"
-  "geometry_msgs"
-  "nav_msgs"
-  "message_filters"
-  "pcl_conversions"
-  "tf2"
-  "tf2_ros"
-  "tf2_eigen"
-  "tf2_geometry_msgs"
-  "tf2_sensor_msgs"
-  "moveit_ros_planning_interface"
-  "object_manipulation_interfaces"
-  "control_msgs"
-  "trajectory_msgs"
-)
-
-add_executable(welding_multiple_objects src/welding_multiple_objects.cpp)
-
-ament_target_dependencies(welding_multiple_objects
-  "rclcpp"
-  "sensor_msgs"
-  "vision_msgs"
-  "geometry_msgs"
-  "nav_msgs"
-  "message_filters"
-  "pcl_conversions"
-  "tf2"
-  "tf2_ros"
-  "tf2_eigen"
-  "tf2_geometry_msgs"
-  "tf2_sensor_msgs"
-  "moveit_ros_planning_interface"
-  "object_manipulation_interfaces"
-  "control_msgs"
-  "trajectory_msgs"
-)
-
-add_executable(welding_with_trajectory src/welding_with_trajectory.cpp)
-
-ament_target_dependencies(welding_with_trajectory
+ament_target_dependencies(pick_and_place_conveyor
   "rclcpp"
   "sensor_msgs"
   "vision_msgs"
@@ -303,13 +198,6 @@ target_link_libraries(multiple_objects
   yaml-cpp
 )
 
-target_link_libraries(add_collision_objects
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
 
 target_link_libraries(evaluate_reward
   ${rclcpp_LIBRARIES}
@@ -327,39 +215,7 @@ target_link_libraries(rounded_points
   yaml-cpp
 )
 
-target_link_libraries(synchronize_isaac_sim_labels
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
-
-target_link_libraries(welding
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
-
-target_link_libraries(welding_with_circular_conveyor_belt
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
-
-target_link_libraries(welding_multiple_objects
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
-
-target_link_libraries(welding_with_trajectory
+target_link_libraries(pick_and_place_conveyor
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
   ${GLEW_LIBRARIES}
@@ -389,15 +245,10 @@ install(DIRECTORY
 install(TARGETS
   basic_algorithm
   multiple_objects
-  add_collision_objects
   evaluate_reward
   rounded_points
   rl_trainer_node
-  synchronize_isaac_sim_labels
-  welding
-  welding_with_circular_conveyor_belt
-  welding_multiple_objects
-  welding_with_trajectory
+  pick_and_place_conveyor
   DESTINATION lib/${PROJECT_NAME}
 )
 

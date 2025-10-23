@@ -22,6 +22,8 @@ from ament_index_python.packages import get_package_share_directory
 from moveit_configs_utils import MoveItConfigsBuilder
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from os import path
+import yaml
 
 
 def generate_launch_description():
@@ -69,6 +71,13 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    _robot_description_kinematics_yaml = load_yaml(
+        "vai_se_ferrar_moveit_config", path.join("config", "kinematics.yaml")
+    )
+    robot_description_kinematics = {
+        "robot_description_kinematics": _robot_description_kinematics_yaml
+    }
+
     # RViz
     rviz_config_file = os.path.join(
         get_package_share_directory("isaacsim_moveit"),
@@ -88,6 +97,7 @@ def generate_launch_description():
             moveit_config.robot_description_kinematics,
             moveit_config.planning_pipelines,
             moveit_config.joint_limits,
+            # robot_description_kinematics,
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
     )
@@ -174,11 +184,11 @@ def generate_launch_description():
         arguments=["panda_arm_controller", "-c", "/controller_manager"],
     )
 
-    panda_hand_controller_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["panda_hand_controller", "-c", "/controller_manager"],
-    )
+    # panda_hand_controller_spawner = Node(
+    #     package="controller_manager",
+    #     executable="spawner",
+    #     arguments=["panda_hand_controller", "-c", "/controller_manager"],
+    # )
 
     gui = os.path.join(
         get_package_share_directory("isaacsim_moveit"),
@@ -190,7 +200,7 @@ def generate_launch_description():
         [
             ros2_control_hardware_type,
             use_sim_time,  # Declare use_sim_time argument here
-            # rviz_node,
+            rviz_node,
             # world2robot_tf_node,
             # hand2camera_tf_node,
             robot_state_publisher,
@@ -214,3 +224,17 @@ def generate_launch_description():
             # ),
         ]
     )
+
+
+def load_yaml(package_name: str, file_path: str):
+    package_path = get_package_share_directory(package_name)
+    absolute_file_path = path.join(package_path, file_path)
+    return parse_yaml(absolute_file_path)
+
+
+def parse_yaml(absolute_file_path: str):
+    try:
+        with open(absolute_file_path, "r") as file:
+            return yaml.safe_load(file)
+    except EnvironmentError:
+        return None

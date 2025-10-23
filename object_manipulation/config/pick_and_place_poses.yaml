@@ -1,0 +1,6 @@
+cardbox:
+  - location1:
+      position: [0.0, 0.0, 0.14]
+      orientation: [1.0, 0.0, 0.0, 0.0]
+
+

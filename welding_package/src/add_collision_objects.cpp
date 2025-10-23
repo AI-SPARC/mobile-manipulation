@@ -132,7 +132,7 @@ private:
     
     vision_msgs::msg::Detection3DArray object_detections;
 
-    std::string id_to_remove = "";
+    std::string id_to_remove = "", move_group;
     std::unordered_set<std::string> added;
 
     std::vector<LabelRule> authorized_labels_;
@@ -181,7 +181,7 @@ private:
     void initMoveGroup() {
         try {
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                shared_from_this(), "denso_arm");  
+                shared_from_this(), move_group);  
 
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 
@@ -314,7 +314,11 @@ public:
      : Node("add_colision_objects")
     {
         this->declare_parameter<std::string>("yaml_file", "");
+        this->declare_parameter<std::string>("move_group", "denso_arm");
+
         std::string labels_path = this->get_parameter("yaml_file").as_string();
+        move_group = this->get_parameter("move_group").as_string();
+
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/boxes_detection_array", 10,

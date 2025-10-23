@@ -187,7 +187,7 @@ private:
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
                 this->shared_from_this(), "denso_arm");  
 
-                rclcpp::sleep_for(std::chrono::milliseconds(5000));
+            rclcpp::sleep_for(std::chrono::milliseconds(5000));
             
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 

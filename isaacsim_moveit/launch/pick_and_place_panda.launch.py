@@ -1,475 +1,258 @@
-#!/usr/bin/env -S ros2 launch
-"""Configure and setup move group for planning with MoveIt 2"""
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-from os import path
-from typing import List
-
-import yaml
-from ament_index_python.packages import get_package_share_directory
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
-from launch.substitutions import (
-    Command,
-    FindExecutable,
-    LaunchConfiguration,
-    PathJoinSubstitution,
-    PythonExpression,
-)
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
+from ament_index_python.packages import get_package_share_directory
+from moveit_configs_utils import MoveItConfigsBuilder
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from os import path
+import yaml
 
 
 def generate_launch_description():
-    # Declare all launch arguments
-    declared_arguments = generate_declared_arguments()
 
-    # Get substitution for all arguments
-    description_package = LaunchConfiguration("description_package")
-    description_filepath = LaunchConfiguration("description_filepath")
-    moveit_config_package = "panda_moveit_config"
-    name = LaunchConfiguration("name")
-    prefix = LaunchConfiguration("prefix")
-    gripper = LaunchConfiguration("gripper")
-    collision_arm = LaunchConfiguration("collision_arm")
-    collision_gripper = LaunchConfiguration("collision_gripper")
-    safety_limits = LaunchConfiguration("safety_limits")
-    safety_position_margin = LaunchConfiguration("safety_position_margin")
-    safety_k_position = LaunchConfiguration("safety_k_position")
-    safety_k_velocity = LaunchConfiguration("safety_k_velocity")
-    ros2_control = LaunchConfiguration("ros2_control")
-    ros2_control_plugin = LaunchConfiguration("ros2_control_plugin")
-    ros2_control_command_interface = LaunchConfiguration(
-        "ros2_control_command_interface"
+    # Command-line arguments
+    ros2_control_hardware_type = DeclareLaunchArgument(
+        "ros2_control_hardware_type",
+        default_value="isaac",
+        description="ROS2 control hardware interface type to use for the launch file -- possible values: [mock_components, isaac]",
     )
-    gazebo_preserve_fixed_joint = LaunchConfiguration("gazebo_preserve_fixed_joint")
-    enable_servo = LaunchConfiguration("enable_servo")
-    enable_rviz = LaunchConfiguration("enable_rviz")
-    rviz_config = LaunchConfiguration("rviz_config")
-    use_sim_time = LaunchConfiguration("use_sim_time")
-    log_level = LaunchConfiguration("log_level")
 
-    # URDF
-    _robot_description_xml = Command(
-        [
-            PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
-            PathJoinSubstitution(
-                [FindPackageShare(description_package), description_filepath]
-            ),
-            " ",
-            "name:=",
-            name,
-            " ",
-            "prefix:=",
-            prefix,
-            " ",
-            "gripper:=",
-            gripper,
-            " ",
-            "collision_arm:=",
-            collision_arm,
-            " ",
-            "collision_gripper:=",
-            collision_gripper,
-            " ",
-            "safety_limits:=",
-            safety_limits,
-            " ",
-            "safety_position_margin:=",
-            safety_position_margin,
-            " ",
-            "safety_k_position:=",
-            safety_k_position,
-            " ",
-            "safety_k_velocity:=",
-            safety_k_velocity,
-            " ",
-            "ros2_control:=",
-            ros2_control,
-            " ",
-            "ros2_control_plugin:=",
-            ros2_control_plugin,
-            " ",
-            "ros2_control_command_interface:=",
-            ros2_control_command_interface,
-            " ",
-            "gazebo_preserve_fixed_joint:=",
-            gazebo_preserve_fixed_joint,
-        ]
+    # Declare use_sim_time argument
+    use_sim_time = DeclareLaunchArgument(
+        "use_sim_time",
+        default_value="true",
+        description="Use simulation clock if true",
     )
-    robot_description = {"robot_description": _robot_description_xml}
 
-    # SRDF
-    _robot_description_semantic_xml = Command(
-        [
-            PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
-            PathJoinSubstitution(
-                [
-                    FindPackageShare(moveit_config_package),
-                    "srdf",
-                    "panda.srdf.xacro",
-                ]
-            ),
-            " ",
-            "name:=",
-            name,
-            " ",
-            "prefix:=",
-            prefix,
-        ]
+    moveit_config = (
+        MoveItConfigsBuilder("vai_se_ferrar")
+        .robot_description(
+            file_path="config/panda.urdf.xacro",
+            mappings={
+                "ros2_control_hardware_type": LaunchConfiguration(
+                    "ros2_control_hardware_type"
+                )
+            },
+        )
+        .robot_description_semantic(file_path="config/panda.srdf")
+        .trajectory_execution(file_path="config/gripper_moveit_controllers.yaml")
+        .planning_pipelines(pipelines=["ompl", "pilz_industrial_motion_planner"])
+        .robot_description_kinematics(file_path="config/kinematics.yaml")
+        .to_moveit_configs()
     )
-    robot_description_semantic = {
-        "robot_description_semantic": _robot_description_semantic_xml
-    }
 
-    # Kinematics
+    # Start the actual move_group node/action server
+    move_group_node = Node(
+        package="moveit_ros_move_group",
+        executable="move_group",
+        output="screen",
+        parameters=[
+            moveit_config.to_dict(),
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
     _robot_description_kinematics_yaml = load_yaml(
-        moveit_config_package, path.join("config", "kinematics.yaml")
+        "vai_se_ferrar_moveit_config", path.join("config", "kinematics.yaml")
     )
     robot_description_kinematics = {
         "robot_description_kinematics": _robot_description_kinematics_yaml
     }
 
-    # Joint limits
-    joint_limits = {
+    # RViz
+    rviz_config_file = os.path.join(
+        get_package_share_directory("isaacsim_moveit"),
+        "rviz",
+        "moveit.rviz",
+    )
+
+    rviz_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="log",
+        arguments=["-d", rviz_config_file],
+        parameters=[
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            moveit_config.joint_limits,
+            # robot_description_kinematics,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+    )
+
+   
+
+    # Publish TF
+    robot_state_publisher = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        name="robot_state_publisher",
+        output="both",
+        parameters=[
+            moveit_config.robot_description,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+    )
+
+    # ros2_control using FakeSystem as hardware
+    ros2_controllers_path = os.path.join(
+        get_package_share_directory("vai_se_ferrar_moveit_config"),
+        "config",
+        "ros2_controllers.yaml",
+    )
+    ros2_control_node = Node(
+        package="controller_manager",
+        executable="ros2_control_node",
+        parameters=[
+            ros2_controllers_path,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        remappings=[
+            ("/controller_manager/robot_description", "/robot_description"),
+        ],
+        output="screen",
+    )
+
+    joint_state_broadcaster_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "joint_state_broadcaster",
+            "--controller-manager",
+            "/controller_manager",
+        ],
+    )
+
+    panda_arm_controller_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["panda_arm_controller", "-c", "/controller_manager"],
+    )
+
+ 
+    pkg_name = 'object_manipulation'
+
+    yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'pick_and_place_poses.yaml'
+    )
+
+    robot_description_joint_limits = {
         "robot_description_planning": load_yaml(
-            moveit_config_package, path.join("config", "joint_limits.yaml")
+            "vai_se_ferrar_moveit_config", path.join("config", "joint_limits.yaml")
         )
     }
 
-    # Servo
-    servo_params = {
-        "moveit_servo": load_yaml(
-            moveit_config_package, path.join("config", "servo.yaml")
-        )
-    }
-    servo_params["moveit_servo"].update({"use_gazebo": use_sim_time})
-
-    # Planning pipeline
-    planning_pipeline = {
-        "planning_pipelines": ["ompl"],
-        "default_planning_pipeline": "ompl",
-        "ompl": {
-            "planning_plugin": "ompl_interface/OMPLPlanner",
-            # TODO: Re-enable `default_planner_request_adapters/AddRuckigTrajectorySmoothing` once its issues are resolved
-            "request_adapters": ["default_planning_request_adapters/ResolveConstraintFrames",
-                                  "default_planning_request_adapters/ValidateWorkspaceBounds",
-                                  "default_planning_request_adapters/CheckStartStateBounds",
-                                  "default_planning_request_adapters/CheckStartStateCollision"],
-            # # TODO: Reduce start_state_max_bounds_error once spawning with specific joint configuration is enabled
-            "response_adapters": ["default_planning_response_adapters/AddTimeOptimalParameterization",
-#                                  "default_planning_response_adapters/AddRuckigTrajectorySmoothing",
-                                  "default_planning_response_adapters/ValidateSolution",
-                                  "default_planning_response_adapters/DisplayMotionPath"],
-            "start_state_max_bounds_error": 0.31416,
-        },
-    }
-    _ompl_yaml = load_yaml(
-        moveit_config_package, path.join("config", "ompl_planning.yaml")
+    pick_and_place_conveyor = Node(
+        package="object_manipulation",
+        executable="pick_and_place_conveyor",
+        name="pick_and_place_conveyor",
+        output="screen",
+        parameters=[
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            robot_description_joint_limits,  
+            moveit_config.trajectory_execution,
+            robot_description_kinematics,
+            moveit_config.planning_scene_monitor,
+            {'yaml_file': yaml_file},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
     )
-    planning_pipeline["ompl"].update(_ompl_yaml)
 
-    # Planning scene
-    planning_scene_monitor_parameters = {
-        "publish_planning_scene": True,
-        "publish_geometry_updates": True,
-        "publish_state_updates": True,
-        "publish_transforms_updates": True,
-    }
 
-    # MoveIt controller manager
-    moveit_controller_manager_yaml = load_yaml(
-        moveit_config_package, path.join("config", "moveit_controller_manager.yaml")
+    labels_yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'labels.yaml'
     )
-    moveit_controller_manager = {
-        "moveit_controller_manager": "moveit_simple_controller_manager/MoveItSimpleControllerManager",
-        "moveit_simple_controller_manager": moveit_controller_manager_yaml,
-    }
 
-    # Trajectory execution
-    trajectory_execution = {
-        "allow_trajectory_execution": True,
-        "moveit_manage_controllers": False,
-        "execution_duration_monitoring": False,
-        "trajectory_execution.allowed_execution_duration_scaling": 1.5,
-        "trajectory_execution.allowed_goal_duration_margin": 0.5,
-        "trajectory_execution.allowed_start_tolerance": 0.01,
-    }
-
-    # Controller parameters
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            "__controller_parameters_basename",
-            default_value=["controllers_", ros2_control_command_interface, ".yaml"],
-        )
+    add_collision_objects = Node(
+        package="object_manipulation",
+        executable="add_collision_objects",
+        name="add_collision_objects",
+        output="screen",
+        parameters=[
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            robot_description_joint_limits,  
+            moveit_config.trajectory_execution,
+            robot_description_kinematics,
+            moveit_config.planning_scene_monitor,
+            {'yaml_file': labels_yaml_file},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+            {'move_group': "panda_arm"},
+        ],
+        remappings=[
+            ('/boxes_detection_array', '/bbox_3d_with_labels')
+            
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
     )
-    controller_parameters = PathJoinSubstitution(
+
+   
+    return LaunchDescription(
         [
-            FindPackageShare(moveit_config_package),
-            "config",
-            LaunchConfiguration("__controller_parameters_basename"),
+            ros2_control_hardware_type,
+            use_sim_time,  # Declare use_sim_time argument here
+            rviz_node,
+            # world2robot_tf_node,
+            # hand2camera_tf_node,
+            robot_state_publisher,
+            move_group_node,
+            ros2_control_node,
+            joint_state_broadcaster_spawner,
+            panda_arm_controller_spawner,
+            pick_and_place_conveyor,
+            add_collision_objects,
+
+            Node(
+                package='object_manipulation',
+                executable='synchronize_isaac_sim_labels',
+                name='synchronize_isaac_sim_labels',
+                output='screen',
+            ),
         ]
     )
 
-    # List of nodes to be launched
-    nodes = [
-        # robot_state_publisher
-        Node(
-            package="robot_state_publisher",
-            executable="robot_state_publisher",
-            output="log",
-            # arguments=["--ros-args", "--log-level", log_level],
-            parameters=[
-                robot_description,
-                {
-                    "publish_frequency": 50.0,
-                    "frame_prefix": "",
-                    "use_sim_time": use_sim_time,
-                },
-            ],
-        ),
-        # ros2_control_node (only for fake controller)
-        Node(
-            package="controller_manager",
-            executable="ros2_control_node",
-            output="log",
-            # arguments=["--ros-args", "--log-level", log_level],
-            parameters=[
-                robot_description,
-                controller_parameters,
-                {"use_sim_time": use_sim_time},
-            ],
-            condition=(
-                IfCondition(
-                    PythonExpression(
-                        [
-                            "'",
-                            ros2_control_plugin,
-                            "'",
-                            " == ",
-                            "'fake'",
-                        ]
-                    )
-                )
-            ),
-        ),
-        # move_group (with execution)
-        Node(
-            package="moveit_ros_move_group",
-            executable="move_group",
-            output="log",
-            # arguments=["--ros-args", "--log-level", log_level],
-            parameters=[
-                robot_description,
-                robot_description_semantic,
-                robot_description_kinematics,
-                joint_limits,
-                planning_pipeline,
-                trajectory_execution,
-                planning_scene_monitor_parameters,
-                moveit_controller_manager,
-                {"use_sim_time": use_sim_time},
-            ],
-        ),
-        # move_servo
-        Node(
-            package="moveit_servo",
-            executable="servo_node",
-            output="log",
-            # arguments=["--ros-args", "--log-level", log_level],
-            parameters=[
-                robot_description,
-                robot_description_semantic,
-                robot_description_kinematics,
-                joint_limits,
-                planning_pipeline,
-                trajectory_execution,
-                planning_scene_monitor_parameters,
-                servo_params,
-                {"use_sim_time": use_sim_time},
-            ],
-            condition=IfCondition(enable_servo),
-        ),
-        # rviz2
-        Node(
-            package="rviz2",
-            executable="rviz2",
-            output="log",
-            arguments=[
-                "--display-config",
-                rviz_config,
-                # "--ros-args",
-                # "--log-level",
-                # log_level,
-            ],
-            parameters=[
-                robot_description,
-                robot_description_semantic,
-                robot_description_kinematics,
-                planning_pipeline,
-                joint_limits,
-                {"use_sim_time": use_sim_time},
-            ],
-            condition=IfCondition(enable_rviz),
-        ),
-
-        Node(
-            package="controller_manager",
-            executable="spawner",
-            arguments=["gripper_trajectory_controller", "-c", "/controller_manager"],
-        ),
-
-        Node(
-            package="controller_manager",
-            executable="spawner",
-            arguments=["joint_trajectory_controller", "-c", "/controller_manager"],
-        ),
-    ]
-
-  
-
-    return LaunchDescription(declared_arguments + nodes)
-
 
 def load_yaml(package_name: str, file_path: str):
-    """
-    Load yaml configuration based on package name and file path relative to its share.
-    """
-
     package_path = get_package_share_directory(package_name)
     absolute_file_path = path.join(package_path, file_path)
     return parse_yaml(absolute_file_path)
 
 
 def parse_yaml(absolute_file_path: str):
-    """
-    Parse yaml from file, given its absolute file path.
-    """
-
     try:
         with open(absolute_file_path, "r") as file:
             return yaml.safe_load(file)
     except EnvironmentError:
         return None
-
-
-def generate_declared_arguments() -> List[DeclareLaunchArgument]:
-    """
-    Generate list of all launch arguments that are declared for this launch script.
-    """
-
-    return [
-        # Locations of robot resources
-        DeclareLaunchArgument(
-            "description_package",
-            default_value="panda_description",
-            description="Custom package with robot description.",
-        ),
-        DeclareLaunchArgument(
-            "description_filepath",
-            default_value=path.join("urdf", "panda.urdf.xacro"),
-            description="Path to xacro or URDF description of the robot, relative to share of `description_package`.",
-        ),
-        # Naming of the robot
-        DeclareLaunchArgument(
-            "name",
-            default_value="panda",
-            description="Name of the robot.",
-        ),
-        DeclareLaunchArgument(
-            "prefix",
-            default_value="panda_",
-            description="Prefix for all robot entities. If modified, then joint names in the configuration of controllers must also be updated.",
-        ),
-        # Gripper
-        DeclareLaunchArgument(
-            "gripper",
-            default_value="true",
-            description="Flag to enable default gripper.",
-        ),
-        # Collision geometry
-        DeclareLaunchArgument(
-            "collision_arm",
-            default_value="true",
-            description="Flag to enable collision geometry for manipulator's arm.",
-        ),
-        DeclareLaunchArgument(
-            "collision_gripper",
-            default_value="true",
-            description="Flag to enable collision geometry for manipulator's gripper (hand and fingers).",
-        ),
-        # Safety controller
-        DeclareLaunchArgument(
-            "safety_limits",
-            default_value="false",
-            description="Flag to enable safety limits controllers on manipulator joints.",
-        ),
-        DeclareLaunchArgument(
-            "safety_position_margin",
-            default_value="0.15",
-            description="Lower and upper margin for position limits of all safety controllers.",
-        ),
-        DeclareLaunchArgument(
-            "safety_k_position",
-            default_value="100.0",
-            description="Parametric k-position factor of all safety controllers.",
-        ),
-        DeclareLaunchArgument(
-            "safety_k_velocity",
-            default_value="40.0",
-            description="Parametric k-velocity factor of all safety controllers.",
-        ),
-        # ROS 2 control
-        DeclareLaunchArgument(
-            "ros2_control",
-            default_value="true",
-            description="Flag to enable ros2 controllers for manipulator.",
-        ),
-        DeclareLaunchArgument(
-            "ros2_control_plugin",
-            default_value="isaac",
-            description="The ros2_control plugin that should be loaded for the manipulator ('fake', 'gz', 'real' or custom).",
-        ),
-        DeclareLaunchArgument(
-            "ros2_control_command_interface",
-            default_value="position",
-            description="The output control command interface provided by ros2_control ('position', 'velocity', 'effort' or certain combinations 'position,velocity').",
-        ),
-        # Gazebo
-        DeclareLaunchArgument(
-            "gazebo_preserve_fixed_joint",
-            default_value="false",
-            description="Flag to preserve fixed joints and prevent lumping when generating SDF for Gazebo.",
-        ),
-        # Servo
-        DeclareLaunchArgument(
-            "enable_servo",
-            default_value="true",
-            description="Flag to enable MoveIt2 Servo for manipulator.",
-        ),
-        # Miscellaneous
-        DeclareLaunchArgument(
-            "enable_rviz", default_value="true", description="Flag to enable RViz2."
-        ),
-        DeclareLaunchArgument(
-            "rviz_config",
-            default_value=path.join(
-                get_package_share_directory("panda_moveit_config"),
-                "rviz",
-                "moveit.rviz",
-            ),
-            description="Path to configuration for RViz2.",
-        ),
-        DeclareLaunchArgument(
-            "use_sim_time",
-            default_value="true",
-            description="If true, use simulated clock.",
-        ),
-        DeclareLaunchArgument(
-            "log_level",
-            default_value="debug",
-            description="The level of logging that is applied to all ROS 2 nodes launched by this script.",
-        ),
-    ]
