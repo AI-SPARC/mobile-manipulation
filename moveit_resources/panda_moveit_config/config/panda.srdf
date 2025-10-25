@@ -16,8 +16,13 @@
         <link name="panda_leftfinger"/>
         <link name="panda_rightfinger"/>
         <joint name="panda_finger_joint1"/>
-        <passive_joint name="panda_finger_joint2"/>
+        <joint name="panda_finger_joint2"/>
     </group>
+
+    <!-- <group name="panda_arm_hand">
+      <group name="panda_arm"/>
+      <group name="hand"/>
+    </group> -->
 
     <!-- 
       MUDANÇA 3: A tag <end_effector> foi ADICIONADA.
@@ -25,6 +30,13 @@
       conectado ao 'panda_link8' do grupo 'panda_arm'.
     -->
     <end_effector name="hand_eef" parent_link="panda_link8" group="hand" parent_group="panda_arm"/>
+    
+   <group name="panda_arm_hand">
+    <chain base_link="panda_link0" tip_link="panda_link8"/>
+    <group name="hand"/>
+  </group>
+
+  <end_effector name="hand" parent_link="panda_link8" group="hand"/>
 
     <!-- 
       MUDANÇA 4: Os group_states do 'panda_arm' foram limpos 
@@ -63,9 +75,11 @@
     -->
     <group_state group="hand" name="open">
         <joint name="panda_finger_joint1" value="0.04"/>
+        <joint name="panda_finger_joint2" value="0.04"/>
     </group_state>
     <group_state group="hand" name="closed">
         <joint name="panda_finger_joint1" value="0.0"/>
+        <joint name="panda_finger_joint2" value="0.0"/>
     </group_state>
 
 

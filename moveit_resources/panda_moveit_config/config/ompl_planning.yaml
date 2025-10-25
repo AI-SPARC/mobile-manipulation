@@ -170,6 +170,7 @@ panda_arm:
     - SPARSkConfigDefault
     - SPARStwokConfigDefault
     - TrajOptDefault
+  longest_valid_segment_fraction: 0.005
   
 hand:
   planner_configs:
@@ -198,3 +199,33 @@ hand:
     - SPARSkConfigDefault
     - SPARStwokConfigDefault
     - TrajOptDefault
+  longest_valid_segment_fraction: 0.005
+
+panda_arm_hand:
+  planner_configs:
+    - APSConfigDefault
+    - SBLkConfigDefault
+    - ESTkConfigDefault
+    - LBKPIECEkConfigDefault
+    - BKPIECEkConfigDefault
+    - KPIECEkConfigDefault
+    - RRTkConfigDefault
+    - RRTConnectkConfigDefault
+    - RRTstarkConfigDefault
+    - TRRTkConfigDefault
+    - PRMkConfigDefault
+    - PRMstarkConfigDefault
+    - FMTkConfigDefault
+    - BFMTkConfigDefault
+    - PDSTkConfigDefault
+    - STRIDEkConfigDefault
+    - BiTRRTkConfigDefault
+    - LBTRRTkConfigDefault
+    - BiESTkConfigDefault
+    - ProjESTkConfigDefault
+    - LazyPRMkConfigDefault
+    - LazyPRMstarkConfigDefault
+    - SPARSkConfigDefault
+    - SPARStwokConfigDefault
+    - TrajOptDefault
+  longest_valid_segment_fraction: 0.005

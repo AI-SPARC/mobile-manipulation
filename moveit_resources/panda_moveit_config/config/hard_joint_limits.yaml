@@ -43,7 +43,7 @@ joint_limits:
     has_velocity_limits: true
     max_velocity: 2.6100
     has_acceleration_limits: true
-    max_acceleration: 20.0
+    max_acceleration: 0.1
     has_jerk_limits: true
     max_jerk: 300.0
   panda_joint7:
@@ -57,13 +57,13 @@ joint_limits:
     has_velocity_limits: true
     max_velocity: 0.1
     has_acceleration_limits: true
-    max_acceleration: 1.0
+    max_acceleration: 0.1
     has_jerk_limits: true
     max_jerk: 300.0
   panda_finger_joint2:
     has_velocity_limits: true
     max_velocity: 0.1
     has_acceleration_limits: true
-    max_acceleration: 1.0
+    max_acceleration: 0.1
     has_jerk_limits: true
     max_jerk: 300.0

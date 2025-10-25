@@ -193,10 +193,10 @@ def generate_launch_description():
         'labels.yaml'
     )
 
-    add_collision_objects = Node(
+    add_collision = Node(
         package="object_manipulation",
-        executable="add_collision_objects",
-        name="add_collision_objects",
+        executable="add_collision",
+        name="add_collision",
         output="screen",
         parameters=[
             moveit_config.robot_description,
@@ -223,7 +223,7 @@ def generate_launch_description():
         [
             ros2_control_hardware_type,
             use_sim_time,  # Declare use_sim_time argument here
-            rviz_node,
+            # rviz_node,
             # world2robot_tf_node,
             # hand2camera_tf_node,
             robot_state_publisher,
@@ -232,10 +232,10 @@ def generate_launch_description():
             joint_state_broadcaster_spawner,
             panda_arm_controller_spawner,
             pick_and_place_conveyor,
-            add_collision_objects,
+            add_collision,
 
             Node(
-                package='object_manipulation',
+                package='isaacsim_moveit',
                 executable='synchronize_isaac_sim_labels',
                 name='synchronize_isaac_sim_labels',
                 output='screen',

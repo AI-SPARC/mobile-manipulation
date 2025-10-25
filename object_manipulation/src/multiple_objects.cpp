@@ -383,24 +383,24 @@ private:
         open_gripper();
         rclcpp::sleep_for(std::chrono::milliseconds(500));
         
-        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
-        request->object_id = id;
+        // auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
+        // request->object_id = id;
 
-        if (!client_->wait_for_service(1s)) {
-            RCLCPP_WARN(this->get_logger(), "Service object_collision não disponível");
-            return;
-        }
+        // if (!client_->wait_for_service(1s)) {
+        //     RCLCPP_WARN(this->get_logger(), "Service object_collision não disponível");
+        //     return;
+        // }
 
-        client_->async_send_request(request,
-            [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) {
-                auto response = future_response.get();  
-                if (response->success) {
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                } else {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
+        // client_->async_send_request(request,
+        //     [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) {
+        //         auto response = future_response.get();  
+        //         if (response->success) {
+        //             RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+        //         } else {
+        //             RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+        //         }
+        //     }
+        // );
         
         // return_to_origin(); 
     }

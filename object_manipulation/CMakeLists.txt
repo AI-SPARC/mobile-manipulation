@@ -5,7 +5,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -35,13 +34,31 @@ find_package(control_msgs REQUIRED)
 find_package(vision_msgs REQUIRED)
 find_package(message_filters REQUIRED)  
 
-################################################################################
-### INÍCIO DA ADIÇÃO PARA LIBTORCH ###
-# 1. Encontrar a biblioteca LibTorch.
-#    !! IMPORTANTE: SUBSTITUA "/path/to/libtorch" PELO CAMINHO CORRETO !!
+
 set(CMAKE_PREFIX_PATH "/home/momesso/libtorch/libtorch;${CMAKE_PREFIX_PATH}")
 find_package(Torch REQUIRED)
 
+add_executable(add_collision src/add_collision.cpp)
+
+ament_target_dependencies(add_collision 
+  trajectory_msgs 
+  rclcpp nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+  object_manipulation_interfaces
+)
 
 add_executable(basic_algorithm src/basic_algorithm.cpp)
 
@@ -180,6 +197,15 @@ ament_target_dependencies(pick_and_place_conveyor
   "object_manipulation_interfaces"
   "control_msgs"
   "trajectory_msgs"
+  "object_manipulation_interfaces"
+)
+
+target_link_libraries(add_collision
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
 )
 
 target_link_libraries(basic_algorithm
@@ -223,16 +249,11 @@ target_link_libraries(pick_and_place_conveyor
   yaml-cpp
 )
 
-# A variável ${TORCH_LIBRARIES} agora será preenchida corretamente pelo find_package
 target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
 
-################################################################################
-### INÍCIO DA ADIÇÃO PARA C++ STANDARD ###
-# 2. Garantir que o C++17 seja usado para este alvo específico
+
 set_property(TARGET rl_trainer_node PROPERTY CXX_STANDARD 17)
 set_property(TARGET rl_trainer_node PROPERTY CXX_STANDARD_REQUIRED ON)
-### FIM DA ADIÇÃO ###
-################################################################################
 
 
 install(DIRECTORY
@@ -243,6 +264,7 @@ install(DIRECTORY
 )
 
 install(TARGETS
+  add_collision
   basic_algorithm
   multiple_objects
   evaluate_reward

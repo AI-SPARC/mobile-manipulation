@@ -27,13 +27,10 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <std_msgs/msg/float32.hpp>
-
-// [INCLUSÃO FALTANDO] Para std::isfinite
 #include <cmath> 
 
 using namespace std::chrono_literals;
 
-// ... (Hashers e structs auxiliares - sem mudanças) ...
 namespace std 
 {
     template <>
@@ -116,13 +113,16 @@ private:
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
 
+    //Service.
+    rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr client_;
 
-    // [CORREÇÃO] Duas interfaces, uma para o braço, outra para a garra
+    //Timer.
+    rclcpp::TimerBase::SharedPtr init_timer_;
+
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
 
     std::string yaml_file;
-    rclcpp::TimerBase::SharedPtr init_timer_;
 
     std::unordered_map<std::string, std::vector<geometry_msgs::msg::Pose>> pick_and_place_poses;
 
@@ -140,7 +140,6 @@ private:
 
                 std::vector<geometry_msgs::msg::Pose> locations;
 
-                // locations_node é uma LISTA
                 for (const auto &loc_item : locations_node)
                 {
                     if (!loc_item.IsMap() || loc_item.size() != 1)
@@ -202,18 +201,15 @@ private:
     }
 
 
-    // [CORREÇÃO] Inicializa AMBOS os grupos
     void initMoveGroup() {
         try 
         {
-            // Grupo para o braço (do SRDF)
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                this->shared_from_this(), "panda_arm"); 
+                this->shared_from_this(), "panda_arm_hand"); 
             
-            // Grupo para a garra (do SRDF)
             move_group_gripper = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
                 this->shared_from_this(), "hand");
-               
+
             
             RCLCPP_INFO(this->get_logger(), "MoveGroup (arm e gripper) inicializados com sucesso.");
 
@@ -233,51 +229,38 @@ private:
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface não inicializado.");
             return;
         }
-
+        
+        move_group_arm->setWorkspace(-1.5, -1.5, 0.08, 1.5, 1.5, 1.5);
         
         move_group_arm->setStartStateToCurrentState();
-        
-        // [MUDANÇA 1] Deixe o MoveIt usar o planejador padrão (o mesmo do RViz)
-        // move_group_arm->setPlannerId("RRTConnect"); 
-        
-        // Esta linha agora funciona, pois o SRDF está correto
-        move_group_arm->setPoseTarget(target_pose); 
-
-        // [MUDANÇA 2] Aumente o tempo de planejamento (o padrão do RViz é 5s)
-        move_group_arm->setPlanningTime(5.0);
-        move_group_arm->setNumPlanningAttempts(10); // Menos tentativas, mas com mais tempo
-
+        move_group_arm->setPlannerId("RRTConnectkConfigDefault");
+        move_group_arm->setPoseTarget(target_pose, "panda_link8"); 
+        move_group_arm->setPlanningTime(4.0);
+        move_group_arm->setNumPlanningAttempts(200); 
         move_group_arm->setMaxVelocityScalingFactor(1.0);
         move_group_arm->setMaxAccelerationScalingFactor(1.0);
+        move_group_arm->setGoalTolerance(0.01);
+        move_group_arm->setGoalJointTolerance(0.01);
+        move_group_arm->setGoalPositionTolerance(0.01);
+        move_group_arm->setGoalOrientationTolerance(0.01);
 
-        move_group_arm->setGoalTolerance(0.002);
-        move_group_arm->setGoalJointTolerance(0.002);
-        move_group_arm->setGoalPositionTolerance(0.002);
-        move_group_arm->setGoalOrientationTolerance(0.002);
-
-        moveit::planning_interface::MoveGroupInterface::Plan plan;
-        auto result = move_group_arm->plan(plan);
+        auto result = move_group_arm->move();
 
         if (result == moveit::core::MoveItErrorCode::SUCCESS) {
-            move_group_arm->execute(plan);
-            rclcpp::sleep_for(std::chrono::milliseconds(50));
+            RCLCPP_INFO(this->get_logger(), "Movimento para a pose concluído.");
+        } 
+        else 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Falha ao mover o braço para a pose.");
         }
-
-        if (plan.trajectory.joint_trajectory.points.empty()) {
-            RCLCPP_WARN(this->get_logger(), "Trajetória vazia retornada pelo planejador");
-            return;
-        }
-
     }
 
-    // [CORREÇÃO] Usa move_group_arm e define APENAS as 7 juntas do braço
     void return_to_origin()
     {
         if (!move_group_arm) {
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do arm não inicializado.");
             return;
         }
-
         
         move_group_arm->setJointValueTarget({
             {"panda_joint1", 0.0},
@@ -287,52 +270,47 @@ private:
             {"panda_joint5", 0.0},
             {"panda_joint6", 1.5707963267948966},
             {"panda_joint7", 0.7853981633974483},
-            // A junta da garra foi removida daqui
         });
 
-        moveit::planning_interface::MoveGroupInterface::Plan plan;
-        auto result = move_group_arm->plan(plan);
+        auto result = move_group_arm->move();
 
         if (result == moveit::core::MoveItErrorCode::SUCCESS) 
         {
-            auto exec_result = move_group_arm->execute(plan);
-            rclcpp::sleep_for(std::chrono::milliseconds(100));
-            if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
-            {
-                RCLCPP_INFO(this->get_logger(), "Braço retornou à origem.");
-            }
+            RCLCPP_INFO(this->get_logger(), "Braço retornou à origem.");
+        } 
+        else 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Falha ao retornar o braço à origem.");
         }
     }
 
-   // [CORREÇÃO] Usa move_group_GRIPPER
-   void close_gripper() 
+    void close_gripper() 
     {
         if (!move_group_gripper) {
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do GRIPPER não inicializado.");
             return;
         }
-
         move_group_gripper->setStartStateToCurrentState();
         
-        // Define o alvo pelo nome da junta
         move_group_gripper->setJointValueTarget({
-            {"panda_finger_joint1", 0.005},
+            {"panda_finger_joint1", 0.003},
+            {"panda_finger_joint2", 0.003},
         });
-        
-        // Ou, melhor ainda, use o 'named target' do SRDF
-        // move_group_gripper->setNamedTarget("closed");
 
-        // Use 'move()' que é mais simples para alvos de junta
-        auto exec_result = move_group_gripper->move();
-            
-        if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
+        move_group_gripper->allowReplanning(true);
+        
+        auto result = move_group_gripper->move();
+
+        if (result == moveit::core::MoveItErrorCode::SUCCESS) 
         {
-            rclcpp::sleep_for(std::chrono::milliseconds(50));
             RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+        } 
+        else 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Falha ao fechar o gripper.");
         }
     }
 
-    // [CORREÇÃO] Usa move_group_GRIPPER
     void open_gripper() 
     {
         if (!move_group_gripper) {
@@ -342,25 +320,61 @@ private:
 
         move_group_gripper->setStartStateToCurrentState();
 
-        // Define o alvo pelo nome da junta
-        move_group_gripper->setJointValueTarget({
-            {"panda_finger_joint1", 0.035},
+       move_group_gripper->setJointValueTarget({
+             {"panda_finger_joint1", 0.038},
+             {"panda_finger_joint2", 0.038},
         });
+        move_group_gripper->allowReplanning(true);
 
-        // Ou, melhor ainda, use o 'named target' do SRDF
-        // move_group_gripper->setNamedTarget("open");
 
-        auto exec_result = move_group_gripper->move();
+        auto result = move_group_gripper->move();
 
-        if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
+        if (result == moveit::core::MoveItErrorCode::SUCCESS) 
         {
-            rclcpp::sleep_for(std::chrono::milliseconds(50));
-            RCLCPP_INFO(this->get_logger(), "Gripper abriu (MoveIt).");
+            RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+        } 
+        else 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Falha ao fechar o gripper.");
         }
     }
-    
+
+    geometry_msgs::msg::Pose random_pose(double x_min, double x_max, double y_min, double y_max, double z_min, double z_max)
+    {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+
+        std::uniform_real_distribution<double> dist_x(x_min, x_max);
+        std::uniform_real_distribution<double> dist_y(y_min, y_max);
+        std::uniform_real_distribution<double> dist_z(z_min, z_max);
+        std::uniform_real_distribution<double> dist_angle(0.0, 2 * M_PI);
+
+        geometry_msgs::msg::Pose pose;
+
+        // posição
+        pose.position.x = dist_x(gen);
+        pose.position.y = dist_y(gen);
+        pose.position.z = dist_z(gen);
+
+        // orientação aleatória (quaternion normalizado)
+        tf2::Quaternion q;
+        q.setRPY(dist_angle(gen), dist_angle(gen), dist_angle(gen));
+        q.normalize();
+
+        pose.orientation.x = 1.0;
+        pose.orientation.y = 0.0;
+        pose.orientation.z = 0.0;
+        pose.orientation.w = 0.0;
+
+        return pose;
+    }
         
+        
+    /*
     
+        PUBLISHERS.
+    
+    */
 
     void publish_velocity(float velocity)
     {
@@ -379,6 +393,8 @@ private:
         publisher_1->publish(message);
 
     }
+
+    
 
 
     /*
@@ -418,9 +434,11 @@ private:
             }
 
 
-            if(det.bbox.center.position.y < 0.1 && det.bbox.center.position.y > -0.1  && det.bbox.center.position.x > 0.0 && stopped == true && pick_and_place_id == det.results[0].hypothesis.class_id)
+            if(det.bbox.center.position.y < 0.1 && det.bbox.center.position.y > -0.1  && det.bbox.center.position.x > 0.25 && stopped == true && pick_and_place_id == det.results[0].hypothesis.class_id)
             {
-                
+                send_request(true);
+                geometry_msgs::msg::Pose adjust_pose;
+
                 if (pick_and_place_poses.find(id) != pick_and_place_poses.end())  
                 {
                     const auto &poses = pick_and_place_poses[id];  
@@ -434,6 +452,7 @@ private:
                             pose_local.position.y,
                             pose_local.position.z);
 
+                            
                         const auto &bbox_pose = det.bbox.center;
 
                         tf2::Quaternion q(
@@ -447,44 +466,34 @@ private:
                             bbox_pose.position.x,
                             bbox_pose.position.y,
                             bbox_pose.position.z);
+                        
 
+                        // tf2::Vector3 world_corner = rot * local_corner + translation;
                         tf2::Vector3 world_corner = rot * local_corner + translation;
-
                         geometry_msgs::msg::Pose target_pose;
                         target_pose.position.x = world_corner.x();
                         target_pose.position.y = world_corner.y();
                         target_pose.position.z = world_corner.z();
 
                         target_pose.orientation = pose_local.orientation;
-
-                        // [CORREÇÃO] Adiciona verificação de NaN/Inf para evitar segfault
-                        if (!std::isfinite(target_pose.position.x) ||
-                            !std::isfinite(target_pose.position.y) ||
-                            !std::isfinite(target_pose.position.z) ||
-                            !std::isfinite(target_pose.orientation.x) ||
-                            !std::isfinite(target_pose.orientation.y) ||
-                            !std::isfinite(target_pose.orientation.z) ||
-                            !std::isfinite(target_pose.orientation.w))
-                        {
-                            RCLCPP_WARN(this->get_logger(), "Pose %zu inválida (NaN/Inf) descartada.", i);
-                            continue;
-                        }
-
+                        
+                        adjust_pose = target_pose;
 
                         RCLCPP_INFO(this->get_logger(),
-                                    "Pose %zu - ponto global: x=%.3f, y=%.3f, z=%.3f",
+                                    "Pose %zu - global point: x=%.3f, y=%.3f, z=%.3f",
                                     i, world_corner.x(), world_corner.y(), world_corner.z());
-
-                        std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
-              
-                        move_group_arm->attachObject(det.results[0].hypothesis.class_id, "", touch_links);
+                       
                         
-                        rclcpp::sleep_for(std::chrono::milliseconds(200));
                         open_gripper();
-                        positions_for_arm(target_pose);
                         rclcpp::sleep_for(std::chrono::milliseconds(200));
-                        close_gripper();
+                        positions_for_arm(target_pose);
                         
+                        
+                        rclcpp::sleep_for(std::chrono::milliseconds(300));
+                        std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
+                        move_group_arm->attachObject(det.results[0].hypothesis.class_id, "panda_link8", touch_links);
+                        close_gripper();
+                        rclcpp::sleep_for(std::chrono::milliseconds(1000));
                         
                         
                         
@@ -498,28 +507,63 @@ private:
                 welding_done = true;
                 stopped = false;
                 
-                return_to_origin();
+                rclcpp::sleep_for(std::chrono::milliseconds(2000));
+                
+                auto pose = random_pose(0.0, 0.1, 0.4, 0.6, 0.2, 0.4);
+                adjust_pose.position.z = adjust_pose.position.z + 0.2;
+                positions_for_arm(adjust_pose);
+                rclcpp::sleep_for(std::chrono::milliseconds(400));
+                positions_for_arm(pose);
+                
+                rclcpp::sleep_for(std::chrono::milliseconds(1000));
                 open_gripper();
-                // move_group_arm->detachObject(det.results[0].hypothesis.class_id);
+                
+                move_group_arm->detachObject(det.results[0].hypothesis.class_id);
+                rclcpp::sleep_for(std::chrono::milliseconds(300));
+                send_request(false);
                 publish_velocity(0.2);
                 publish_angular_velocity(0.4);
                 rclcpp::sleep_for(std::chrono::milliseconds(50));
             }
-            else if(det.bbox.center.position.y < 0.1 && det.bbox.center.position.y > -0.1 && det.bbox.center.position.x > 0.0 && stopped == false && pick_and_place_id != det.results[0].hypothesis.class_id)
+            else if(det.bbox.center.position.y < 0.1 && det.bbox.center.position.y > -0.1 && det.bbox.center.position.x > 0.25 && stopped == false && pick_and_place_id != det.results[0].hypothesis.class_id)
             {
                 publish_velocity(0.0);
                 publish_angular_velocity(0.0);
-                rclcpp::sleep_for(std::chrono::milliseconds(1000));
+                rclcpp::sleep_for(std::chrono::milliseconds(4000));
                 pick_and_place_id = det.results[0].hypothesis.class_id;
                 welding_done = false;
                 stopped = true;
+                
+                
             }
 
+            // if(stopped)
+            // {
+            //     break;
+            // }
         }
     }
 
+    void send_request(bool stop_flag)
+    {
+        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
+        request->stop = stop_flag;
 
-        
+      
+        client_->async_send_request(request,
+            [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) {
+                auto response = future_response.get();  
+                if (response->success) {
+                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+                }
+            }
+        );
+    }
+
+
+            
 
 public:
     PickAndPlaceConveyor()
@@ -535,13 +579,16 @@ public:
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,
             std::bind(&PickAndPlaceConveyor::detectionCallback, this, std::placeholders::_1));
-        
-        loadLocationsFromYaml(yaml_file);
+
+        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>(
+            "/object_collision");
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
             std::bind(&PickAndPlaceConveyor::initMoveGroup, this));
 
+
+        loadLocationsFromYaml(yaml_file);
     }   
 };
 
