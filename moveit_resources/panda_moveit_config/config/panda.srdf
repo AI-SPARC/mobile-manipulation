@@ -1,16 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <robot name="panda">
 
-    <!-- 
-      MUDANÇA 1: O grupo 'panda_arm' agora contém APENAS a cadeia do braço. 
-    -->
+  
     <group name="panda_arm">
         <chain base_link="panda_link0" tip_link="panda_link8"/>
     </group>
 
-    <!-- 
-      MUDANÇA 2: Um NOVO grupo 'hand' foi criado APENAS para a garra. 
-    -->
+ 
     <group name="hand">
         <link name="panda_hand"/>
         <link name="panda_leftfinger"/>
@@ -19,16 +15,7 @@
         <joint name="panda_finger_joint2"/>
     </group>
 
-    <!-- <group name="panda_arm_hand">
-      <group name="panda_arm"/>
-      <group name="hand"/>
-    </group> -->
-
-    <!-- 
-      MUDANÇA 3: A tag <end_effector> foi ADICIONADA.
-      Ela diz ao MoveIt que o grupo 'hand' é um end-effector 
-      conectado ao 'panda_link8' do grupo 'panda_arm'.
-    -->
+   
     <end_effector name="hand_eef" parent_link="panda_link8" group="hand" parent_group="panda_arm"/>
     
    <group name="panda_arm_hand">

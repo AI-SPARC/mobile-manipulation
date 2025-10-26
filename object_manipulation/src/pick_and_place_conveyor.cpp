@@ -229,30 +229,52 @@ private:
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface não inicializado.");
             return;
         }
-        
-        move_group_arm->setWorkspace(-1.5, -1.5, 0.08, 1.5, 1.5, 1.5);
-        
-        move_group_arm->setStartStateToCurrentState();
-        move_group_arm->setPlannerId("RRTConnectkConfigDefault");
-        move_group_arm->setPoseTarget(target_pose, "panda_link8"); 
-        move_group_arm->setPlanningTime(4.0);
-        move_group_arm->setNumPlanningAttempts(200); 
-        move_group_arm->setMaxVelocityScalingFactor(1.0);
-        move_group_arm->setMaxAccelerationScalingFactor(1.0);
-        move_group_arm->setGoalTolerance(0.01);
-        move_group_arm->setGoalJointTolerance(0.01);
-        move_group_arm->setGoalPositionTolerance(0.01);
-        move_group_arm->setGoalOrientationTolerance(0.01);
 
-        auto result = move_group_arm->move();
+        const int MAX_PLANNING_CYCLES = 25;
+        bool overall_success = false;
 
-        if (result == moveit::core::MoveItErrorCode::SUCCESS) {
-            RCLCPP_INFO(this->get_logger(), "Movimento para a pose concluído.");
-        } 
-        else 
+        for (int cycle = 1; cycle <= MAX_PLANNING_CYCLES; ++cycle)
         {
-            RCLCPP_ERROR(this->get_logger(), "Falha ao mover o braço para a pose.");
+            RCLCPP_INFO(this->get_logger(), "Ciclo de Planejamento Externo: Tentativa %d de %d", cycle, MAX_PLANNING_CYCLES);
+
+        
+            move_group_arm->setWorkspace(-1.5, -1.5, 0.08, 1.5, 1.5, 1.5);
+            move_group_arm->setStartStateToCurrentState(); 
+            move_group_arm->setPlannerId("RRTConnectkConfigDefault");
+            move_group_arm->setPoseTarget(target_pose, "panda_link8"); 
+            move_group_arm->setPlanningTime(4.0);
+            move_group_arm->setNumPlanningAttempts(10); 
+            move_group_arm->setMaxVelocityScalingFactor(1.0);
+            move_group_arm->setMaxAccelerationScalingFactor(1.0);
+            move_group_arm->setGoalTolerance(0.001);
+
+
+            moveit::planning_interface::MoveGroupInterface::Plan my_plan;
+            auto plan_result = move_group_arm->plan(my_plan);
+
+           
+            if (plan_result != moveit::core::MoveItErrorCode::SUCCESS) 
+            {
+                
+                
+                continue; 
+            }
+
+            
+            auto exec_result = move_group_arm->execute(my_plan);
+
+            if (exec_result != moveit::core::MoveItErrorCode::SUCCESS)
+            {
+                continue; 
+            }
+
+            
+            overall_success = true;
+            break; 
         }
+
+      
+        
     }
 
     void return_to_origin()
@@ -351,12 +373,10 @@ private:
 
         geometry_msgs::msg::Pose pose;
 
-        // posição
         pose.position.x = dist_x(gen);
         pose.position.y = dist_y(gen);
         pose.position.z = dist_z(gen);
 
-        // orientação aleatória (quaternion normalizado)
         tf2::Quaternion q;
         q.setRPY(dist_angle(gen), dist_angle(gen), dist_angle(gen));
         q.normalize();
@@ -489,11 +509,11 @@ private:
                         positions_for_arm(target_pose);
                         
                         
-                        rclcpp::sleep_for(std::chrono::milliseconds(300));
+                        rclcpp::sleep_for(std::chrono::milliseconds(1000));
                         std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
                         move_group_arm->attachObject(det.results[0].hypothesis.class_id, "panda_link8", touch_links);
                         close_gripper();
-                        rclcpp::sleep_for(std::chrono::milliseconds(1000));
+                        rclcpp::sleep_for(std::chrono::milliseconds(100));
                         
                         
                         
@@ -507,7 +527,7 @@ private:
                 welding_done = true;
                 stopped = false;
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(2000));
+                rclcpp::sleep_for(std::chrono::milliseconds(500));
                 
                 auto pose = random_pose(0.0, 0.1, 0.4, 0.6, 0.2, 0.4);
                 adjust_pose.position.z = adjust_pose.position.z + 0.2;
@@ -529,7 +549,7 @@ private:
             {
                 publish_velocity(0.0);
                 publish_angular_velocity(0.0);
-                rclcpp::sleep_for(std::chrono::milliseconds(4000));
+                rclcpp::sleep_for(std::chrono::milliseconds(1000));
                 pick_and_place_id = det.results[0].hypothesis.class_id;
                 welding_done = false;
                 stopped = true;
