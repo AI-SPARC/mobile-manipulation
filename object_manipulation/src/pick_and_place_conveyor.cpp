@@ -231,14 +231,14 @@ private:
         }
 
         const int MAX_PLANNING_CYCLES = 25;
-        bool overall_success = false;
+    
 
         for (int cycle = 1; cycle <= MAX_PLANNING_CYCLES; ++cycle)
         {
             RCLCPP_INFO(this->get_logger(), "Ciclo de Planejamento Externo: Tentativa %d de %d", cycle, MAX_PLANNING_CYCLES);
 
         
-            move_group_arm->setWorkspace(-1.5, -1.5, 0.08, 1.5, 1.5, 1.5);
+            move_group_arm->setWorkspace(-1.5, -1.5, 0.1, 1.5, 1.5, 1.5);
             move_group_arm->setStartStateToCurrentState(); 
             move_group_arm->setPlannerId("RRTConnectkConfigDefault");
             move_group_arm->setPoseTarget(target_pose, "panda_link8"); 
@@ -268,8 +268,6 @@ private:
                 continue; 
             }
 
-            
-            overall_success = true;
             break; 
         }
 
@@ -513,7 +511,7 @@ private:
                         std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
                         move_group_arm->attachObject(det.results[0].hypothesis.class_id, "panda_link8", touch_links);
                         close_gripper();
-                        rclcpp::sleep_for(std::chrono::milliseconds(100));
+                        rclcpp::sleep_for(std::chrono::milliseconds(400));
                         
                         
                         
@@ -529,10 +527,10 @@ private:
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(500));
                 
-                auto pose = random_pose(0.0, 0.1, 0.4, 0.6, 0.2, 0.4);
+                auto pose = random_pose(0.0, 0.1, 0.4, 0.6, 0.5, 0.75);
                 adjust_pose.position.z = adjust_pose.position.z + 0.2;
                 positions_for_arm(adjust_pose);
-                rclcpp::sleep_for(std::chrono::milliseconds(400));
+                rclcpp::sleep_for(std::chrono::milliseconds(500));
                 positions_for_arm(pose);
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(1000));

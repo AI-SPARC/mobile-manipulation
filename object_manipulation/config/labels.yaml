@@ -6,6 +6,7 @@ authorized_labels:
   - eletricheater_
   - drum_
   - cardbox_
+  - box_
 
 unauthorized_labels:
   - camera

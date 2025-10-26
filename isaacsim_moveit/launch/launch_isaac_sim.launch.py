@@ -16,7 +16,7 @@ def generate_launch_description():
     gui = os.path.join(
         get_package_share_directory("isaacsim_moveit"),
         "maps",
-        "pick_and_place_conveyor.usd",
+        "pick_and_place_with_generated_cubes.usd",
     )
 
     return LaunchDescription(
