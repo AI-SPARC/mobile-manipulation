@@ -181,7 +181,9 @@ private:
     void initMoveGroup() {
         try {
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                shared_from_this(), move_group);  
+                shared_from_this(), move_group);
+            
+                add_ground_plane();
 
             RCLCPP_INFO(this->get_logger(), "MoveGroupInterface inicializado com sucesso.");
 
@@ -200,7 +202,7 @@ private:
 
         shape_msgs::msg::SolidPrimitive primitive;
         primitive.type = primitive.BOX;
-        primitive.dimensions = {10.0, 10.0, 0.01}; 
+        primitive.dimensions = {10.0, 10.0, 0.001}; 
 
         geometry_msgs::msg::Pose pose;
         pose.position.x = 0.0;
@@ -347,7 +349,7 @@ public:
             std::chrono::seconds(1),
             std::bind(&AddCollision::initMoveGroup, this));
         
-        add_ground_plane();
+        
         load_labels_from_yaml(labels_path);
     }   
 };

@@ -6,10 +6,10 @@
         <chain base_link="panda_link0" tip_link="suction_tip"/>
     </group>
 
-    <end_effector name="suction_eef"
+    <!-- <end_effector name="suction_eef"
                 parent_link="suction_tip"
                 parent_group="panda_arm"
-                child_link="suction_tip"/>
+                child_link="suction_tip"/> -->
 
     <group_state group="panda_arm" name="ready">
         <joint name="panda_joint1" value="0"/>
@@ -40,7 +40,7 @@
     </group_state>
 
 
-    <virtual_joint child_link="panda_link0" name="virtual_joint" parent_frame="world" type="floating"/>
+    <virtual_joint name="fixed_joint" type="fixed" parent_frame="world" child_link="panda_link0"/>
     
     <disable_collisions link1="panda_link0" link2="panda_link1" reason="Adjacent"/>
     <disable_collisions link1="panda_link0" link2="panda_link2" reason="Never"/>

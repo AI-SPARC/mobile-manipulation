@@ -151,6 +151,22 @@ def generate_launch_description():
         arguments=["panda_arm_controller", "-c", "/controller_manager"],
     )
 
+    world2robot_tf_node = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="static_transform_publisher_world_to_robot",
+        output="log",
+        arguments=[
+            "0.0",
+            "0.0",
+            "0.0",
+            "0.0",
+            "0.0",
+            "0.0",
+            "world",
+            "panda_link0"],
+        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+    )
  
     pkg_name = 'object_manipulation'
 
@@ -224,7 +240,7 @@ def generate_launch_description():
             ros2_control_hardware_type,
             use_sim_time,  # Declare use_sim_time argument here
             # rviz_node,
-            # world2robot_tf_node,
+            world2robot_tf_node,
             # hand2camera_tf_node,
             robot_state_publisher,
             move_group_node,

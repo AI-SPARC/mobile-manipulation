@@ -200,6 +200,28 @@ ament_target_dependencies(pick_and_place_conveyor
   "object_manipulation_interfaces"
 )
 
+add_executable(pick_and_place_suction_gripper src/pick_and_place_suction_gripper.cpp)
+
+ament_target_dependencies(pick_and_place_suction_gripper
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+  "object_manipulation_interfaces"
+)
+
 target_link_libraries(add_collision
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -249,6 +271,14 @@ target_link_libraries(pick_and_place_conveyor
   yaml-cpp
 )
 
+target_link_libraries(pick_and_place_suction_gripper
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
 target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
 
 
@@ -271,6 +301,7 @@ install(TARGETS
   rounded_points
   rl_trainer_node
   pick_and_place_conveyor
+  pick_and_place_suction_gripper
   DESTINATION lib/${PROJECT_NAME}
 )
 

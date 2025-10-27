@@ -73,7 +73,6 @@ install(DIRECTORY
   launch
   maps
   rviz
-  scripts
   DESTINATION share/${PROJECT_NAME})
 
 install(TARGETS

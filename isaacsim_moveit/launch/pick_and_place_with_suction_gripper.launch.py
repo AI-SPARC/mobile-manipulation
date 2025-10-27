@@ -151,13 +151,21 @@ def generate_launch_description():
         arguments=["panda_arm_controller", "-c", "/controller_manager"],
     )
 
- 
-    pkg_name = 'object_manipulation'
-
-    yaml_file = os.path.join(
-        get_package_share_directory(pkg_name),
-        'suction_gripper_config',
-        'pick_and_place_poses.yaml'
+    world2robot_tf_node = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="static_transform_publisher_world_to_robot",
+        output="log",
+        arguments=[
+            "0.0",
+            "0.0",
+            "0.0",
+            "0.0",
+            "0.0",
+            "0.0",
+            "world",
+            "panda_link0"],
+        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
     )
 
     robot_description_joint_limits = {
@@ -166,10 +174,18 @@ def generate_launch_description():
         )
     }
 
-    pick_and_place_conveyor = Node(
+    pkg_name = 'object_manipulation'
+
+    yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'pick_and_place_poses.yaml'
+    )
+
+    pick_and_place_suction_gripper = Node(
         package="object_manipulation",
-        executable="pick_and_place_conveyor",
-        name="pick_and_place_conveyor",
+        executable="pick_and_place_suction_gripper",
+        name="pick_and_place_suction_gripper",
         output="screen",
         parameters=[
             moveit_config.robot_description,
@@ -218,28 +234,29 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    
    
     return LaunchDescription(
         [
             ros2_control_hardware_type,
             use_sim_time,  # Declare use_sim_time argument here
             rviz_node,
-            # world2robot_tf_node,
+            world2robot_tf_node,
             # hand2camera_tf_node,
             robot_state_publisher,
             move_group_node,
             ros2_control_node,
             joint_state_broadcaster_spawner,
             panda_arm_controller_spawner,
-            # pick_and_place_conveyor,
-            # add_collision,
+            pick_and_place_suction_gripper,
+            add_collision,
 
-            # Node(
-            #     package='isaacsim_moveit',
-            #     executable='synchronize_isaac_sim_labels',
-            #     name='synchronize_isaac_sim_labels',
-            #     output='screen',
-            # ),
+            Node(
+                package='isaacsim_moveit',
+                executable='synchronize_isaac_sim_labels',
+                name='synchronize_isaac_sim_labels',
+                output='screen',
+            ),
         ]
     )
 
