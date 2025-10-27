@@ -61,10 +61,16 @@
     <disable_collisions link1="panda_link4" link2="panda_link7" reason="Never"/>
     <disable_collisions link1="panda_link5" link2="panda_link6" reason="Adjacent"/>
     <disable_collisions link1="panda_link6" link2="panda_link7" reason="Adjacent"/>
+    <disable_collisions link1="panda_link5" link2="panda_link7" reason="Adjacent"/>
 
+    <disable_collisions link1="suction_gripper" link2="panda_link0" reason="Never"/>
+    <disable_collisions link1="suction_gripper" link2="panda_link1" reason="Never"/>
+    <disable_collisions link1="suction_gripper" link2="panda_link2" reason="Never"/>
     <disable_collisions link1="suction_gripper" link2="panda_link3" reason="Never"/>
     <disable_collisions link1="suction_gripper" link2="panda_link4" reason="Never"/>
+    <disable_collisions link1="suction_gripper" link2="panda_link5" reason="Never"/>
     <disable_collisions link1="suction_gripper" link2="panda_link6" reason="Never"/>
-    <disable_collisions link1="suction_gripper" link2="panda_link7" reason="Adjacent"/>
+    <disable_collisions link1="suction_gripper" link2="panda_link7" reason="Never"/>
+    <disable_collisions link1="suction_gripper" link2="suction_tip" reason="Never"/>
 
 </robot>
