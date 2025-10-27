@@ -104,6 +104,12 @@ class PickAndPlaceConveyor : public rclcpp::Node {
 
 private:
 
+    struct LocationData
+    {
+        geometry_msgs::msg::Pose pose;
+        geometry_msgs::msg::Vector3 size;
+    };
+
     //Publishers.
     rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
@@ -122,10 +128,10 @@ private:
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
 
-    std::string yaml_file;
+    std::string yaml_file, storages_yaml_file;
 
     std::unordered_map<std::string, std::vector<geometry_msgs::msg::Pose>> pick_and_place_poses;
-
+    std::unordered_map<std::string, std::vector<LocationData>> storages;
 
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
@@ -200,6 +206,97 @@ private:
         }
     }
 
+    void loadStoragesLocationsFromYaml(const std::string &yaml_path)
+    {
+        try
+        {
+            YAML::Node config = YAML::LoadFile(yaml_path);
+
+            for (const auto &label_node : config)
+            {
+                const std::string label = label_node.first.as<std::string>();
+                const YAML::Node &locations_node = label_node.second;
+
+                
+                std::vector<LocationData> locations;
+
+                if (!locations_node.IsSequence())
+                {
+                    RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
+                                "[%s] A entrada não é uma sequência (lista). Ignorando.", label.c_str());
+                    continue;
+                }
+
+                for (const auto &loc_item : locations_node)
+                {
+                    if (!loc_item.IsMap() || loc_item.size() != 1)
+                    {
+                        RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
+                                    "[%s] Ignorando entrada inválida de localização.", label.c_str());
+                        continue;
+                    }
+
+                    const auto &loc_name = loc_item.begin()->first.as<std::string>();
+                    const YAML::Node &loc_data = loc_item.begin()->second;
+
+                    if (!loc_data["position"] || !loc_data["orientation"] || !loc_data["size"])
+                    {
+                        RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
+                                    "[%s] '%s' não possui 'position', 'orientation' ou 'size'",
+                                    label.c_str(), loc_name.c_str());
+                        continue;
+                    }
+
+                    const YAML::Node &pos = loc_data["position"];
+                    const YAML::Node &ori = loc_data["orientation"];
+                    const YAML::Node &size = loc_data["size"];
+
+                    // Valida os tamanhos dos vetores
+                    if (!pos.IsSequence() || pos.size() != 3 ||
+                        !ori.IsSequence() || ori.size() != 4 ||
+                        !size.IsSequence() || size.size() != 3) 
+                    {
+                        RCLCPP_WARN(rclcpp::get_logger("yaml_loader"),
+                                    "[%s] '%s' tamanho inválido para 'position'(3), 'orientation'(4) ou 'size'(3)",
+                                    label.c_str(), loc_name.c_str());
+                        continue;
+                    }
+
+                    LocationData current_data;
+                    current_data.pose.position.x = pos[0].as<double>();
+                    current_data.pose.position.y = pos[1].as<double>();
+                    current_data.pose.position.z = pos[2].as<double>();
+                    current_data.pose.orientation.x = ori[0].as<double>();
+                    current_data.pose.orientation.y = ori[1].as<double>();
+                    current_data.pose.orientation.z = ori[2].as<double>();
+                    current_data.pose.orientation.w = ori[3].as<double>();
+                    
+                    current_data.size.x = size[0].as<double>();
+                    current_data.size.y = size[1].as<double>();
+                    current_data.size.z = size[2].as<double>();
+
+                    locations.push_back(current_data);
+
+                    RCLCPP_INFO(rclcpp::get_logger("yaml_loader"),
+                                "Carregado [%s - %s] -> pos:[%.2f, %.2f, %.2f], ori:[%.2f, %.2f, %.2f, %.2f], size:[%.2f, %.2f, %.2f]",
+                                label.c_str(), loc_name.c_str(),
+                                current_data.pose.position.x, current_data.pose.position.y, current_data.pose.position.z,
+                                current_data.pose.orientation.x, current_data.pose.orientation.y,
+                                current_data.pose.orientation.z, current_data.pose.orientation.w,
+                                current_data.size.x, current_data.size.y, current_data.size.z);
+                }
+
+              
+                storages[label] = locations;
+            }
+        }
+        catch (const YAML::Exception &e)
+        {
+            RCLCPP_ERROR(rclcpp::get_logger("yaml_loader"),
+                        "Falha ao carregar o arquivo YAML '%s': %s", yaml_path.c_str(), e.what());
+        }
+    }
+
 
     void initMoveGroup() {
         try 
@@ -227,7 +324,7 @@ private:
             return;
         }
 
-        const int MAX_PLANNING_CYCLES = 200;
+        const int MAX_PLANNING_CYCLES = 100;
     
 
         for (int cycle = 1; cycle <= MAX_PLANNING_CYCLES; ++cycle)
@@ -239,8 +336,8 @@ private:
             move_group_arm->setStartStateToCurrentState(); 
             move_group_arm->setPlannerId("RRTConnectkConfigDefault");
             move_group_arm->setPoseTarget(target_pose, "suction_tip"); 
-            move_group_arm->setPlanningTime(1.0);
-            move_group_arm->setNumPlanningAttempts(10); 
+            move_group_arm->setPlanningTime(2.0);
+            move_group_arm->setNumPlanningAttempts(100); 
             move_group_arm->setMaxVelocityScalingFactor(1.0);
             move_group_arm->setMaxAccelerationScalingFactor(1.0);
             move_group_arm->setGoalTolerance(0.001);
@@ -330,6 +427,11 @@ private:
 
         return pose;
     }
+
+    // void calculate_pose()
+    // {
+       
+    // }
         
         
     /*
@@ -369,6 +471,7 @@ private:
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
+        bool encerrado = false;
         std::string id;
         for (const auto &det : msg->detections)
         {
@@ -469,8 +572,10 @@ private:
                 
                 
                 auto pose = random_pose(0.0, 0.1, 0.4, 0.6, 0.2, 0.4);
-               
                 positions_for_arm(pose);
+                // calculate_pose();
+
+                
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(1000));
 
@@ -481,6 +586,9 @@ private:
                 send_request(false);
                 publish_velocity(0.2);
                 rclcpp::sleep_for(std::chrono::milliseconds(50));
+
+                //sim, eu fiz isso.
+                encerrado = true;
             }
             else if(det.bbox.center.position.y < 0.1 && det.bbox.center.position.y > -0.1 && det.bbox.center.position.x > 0.25 && stopped == false && pick_and_place_id != det.results[0].hypothesis.class_id)
             {
@@ -493,6 +601,10 @@ private:
                 
             }
 
+            if(encerrado)
+            {
+                break;
+            }
            
         }
     }
@@ -523,8 +635,10 @@ public:
      : Node("pick_and_place_suction_gripper")
     {
         this->declare_parameter<std::string>("yaml_file", "");
-   
+        this->declare_parameter<std::string>("storages_yaml_file", "");
+
         yaml_file = this->get_parameter("yaml_file").as_string();
+        storages_yaml_file = this->get_parameter("storages_yaml_file").as_string();
         
         publisher_ = this->create_publisher<std_msgs::msg::Float32>("/conveyor_velocity", 10);
         publisher_2 = this->create_publisher<std_msgs::msg::Bool>("/surface_gripper", 10);
@@ -542,6 +656,7 @@ public:
 
 
         loadLocationsFromYaml(yaml_file);
+        loadStoragesLocationsFromYaml(storages_yaml_file);
     }   
 };
 

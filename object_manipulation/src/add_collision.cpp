@@ -202,7 +202,7 @@ private:
 
         shape_msgs::msg::SolidPrimitive primitive;
         primitive.type = primitive.BOX;
-        primitive.dimensions = {10.0, 10.0, 0.001}; 
+        primitive.dimensions = {10.0, 10.0, 0.01}; 
 
         geometry_msgs::msg::Pose pose;
         pose.position.x = 0.0;

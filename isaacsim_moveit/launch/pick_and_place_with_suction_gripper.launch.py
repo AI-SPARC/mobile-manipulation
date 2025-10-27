@@ -182,6 +182,12 @@ def generate_launch_description():
         'pick_and_place_poses.yaml'
     )
 
+    storages_yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'storages.yaml'
+    )
+
     pick_and_place_suction_gripper = Node(
         package="object_manipulation",
         executable="pick_and_place_suction_gripper",
@@ -197,6 +203,7 @@ def generate_launch_description():
             robot_description_kinematics,
             moveit_config.planning_scene_monitor,
             {'yaml_file': yaml_file},
+            {'storages_yaml_file': storages_yaml_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         arguments=["--ros-args", "--log-level", "info"],

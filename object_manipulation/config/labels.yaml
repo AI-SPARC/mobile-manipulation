@@ -7,6 +7,8 @@ authorized_labels:
   - drum_
   - cardbox_
   - box_
+  - conveyor_
+  - storage_
 
 unauthorized_labels:
   - camera
