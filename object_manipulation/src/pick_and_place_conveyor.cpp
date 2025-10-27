@@ -230,7 +230,7 @@ private:
             return;
         }
 
-        const int MAX_PLANNING_CYCLES = 25;
+        const int MAX_PLANNING_CYCLES = 200;
     
 
         for (int cycle = 1; cycle <= MAX_PLANNING_CYCLES; ++cycle)

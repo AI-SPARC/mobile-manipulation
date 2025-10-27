@@ -309,8 +309,8 @@ def generate_launch_description():
             ros2_control_node,
             joint_state_broadcaster_spawner,
             denso_arm_controller,
-            welding_with_trajectory,
-            add_collision_objects,
+            # welding_with_trajectory,
+            # add_collision_objects,
 
             Node(
                 package='isaacsim_moveit',
