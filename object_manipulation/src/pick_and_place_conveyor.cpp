@@ -23,7 +23,7 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
-#include "object_manipulation_interfaces/srv/object_collision.hpp"
+#include "object_manipulation_interfaces/srv/picked_object.hpp"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <std_msgs/msg/float32.hpp>
@@ -104,17 +104,8 @@ class PickAndPlaceConveyor : public rclcpp::Node {
 
 private:
 
-    //Publishers.
-    rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
-    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
-    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_1;
-
-    //Subscriptions.
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
-
     //Service.
-    rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr client_;
+    rclcpp::Service<object_manipulation_interfaces::srv::PickedObject>::SharedPtr service_;
 
     //Timer.
     rclcpp::TimerBase::SharedPtr init_timer_;
@@ -386,33 +377,88 @@ private:
 
         return pose;
     }
-        
-        
-    /*
-    
-        PUBLISHERS.
-    
-    */
 
-    void publish_velocity(float velocity)
+    void calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose)
     {
-        auto message = std_msgs::msg::Float32();
-        message.data = velocity;
+        std::string storage_id, id;
+        geometry_msgs::msg::Pose adjust_pose;
 
-        publisher_->publish(message);
+        size_t pos = received_id.find('_');
+         
+        if (pos != std::string::npos) 
+        {
+            id = received_id.substr(0, pos);  
+        } 
+        else
+        {
+            id = received_id;  
+        }
 
+      
+        if (pick_and_place_poses.find(id) != pick_and_place_poses.end())  
+        {
+            const auto &poses = pick_and_place_poses[id]; 
+
+            for (size_t i = 0; i < poses.size(); ++i)
+            {
+                const auto &pose_local = poses[i];
+
+                tf2::Vector3 local_corner(
+                    pose_local.position.x,
+                    pose_local.position.y,
+                    pose_local.position.z);
+
+                tf2::Quaternion q(
+                    pose.orientation.x,
+                    pose.orientation.y,
+                    pose.orientation.z,
+                    pose.orientation.w);
+
+                tf2::Matrix3x3 rot(q);
+                tf2::Vector3 translation(
+                    pose.position.x,
+                    pose.position.y,
+                    pose.position.z);
+
+                tf2::Vector3 world_corner = rot * local_corner + translation;
+
+                geometry_msgs::msg::Pose target_pose;
+                target_pose.position.x = world_corner.x();
+                target_pose.position.y = world_corner.y();
+                target_pose.position.z = world_corner.z();
+                target_pose.orientation = pose_local.orientation;
+
+                adjust_pose = target_pose;
+
+                RCLCPP_INFO(this->get_logger(),
+                            "Pose %zu - global point: x=%.3f, y=%.3f, z=%.3f",
+                            i, world_corner.x(), world_corner.y(), world_corner.z());
+                
+                open_gripper();
+                rclcpp::sleep_for(std::chrono::milliseconds(100));
+                positions_for_arm(target_pose);
+                
+                rclcpp::sleep_for(std::chrono::milliseconds(1000));
+
+                std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
+                move_group_arm->attachObject(received_id, "panda_link8", touch_links);
+
+                close_gripper();
+                rclcpp::sleep_for(std::chrono::milliseconds(150));
+            }
+
+            auto pose = random_pose(0.0, 0.1, 0.4, 0.6, 0.2, 0.5);
+
+            positions_for_arm(pose);
+
+            rclcpp::sleep_for(std::chrono::milliseconds(1000));
+            open_gripper();
+            move_group_arm->detachObject(received_id);
+
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+        }
     }
-
-    void publish_angular_velocity(float velocity)
-    {
-        auto message = std_msgs::msg::Float32();
-        message.data = velocity;
-
-        publisher_1->publish(message);
-
-    }
-
-    
+        
 
 
     /*
@@ -421,166 +467,25 @@ private:
 
     */
     
-    std::string pick_and_place_id;
-    bool stopped = false, welding_done = false;
 
-    void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
+    void handle_request(const std::shared_ptr<object_manipulation_interfaces::srv::PickedObject::Request> request, std::shared_ptr<object_manipulation_interfaces::srv::PickedObject::Response> response)
     {
-        std::string id;
-        for (const auto &det : msg->detections)
+
+        calculate_global_pose(request->id, request->pose);
+
+        bool success = true;  
+
+        response->success = success;
+
+        if (success)
         {
-
-            size_t pos = det.results[0].hypothesis.class_id.find('_'); 
-            if (pos != std::string::npos) 
-            {
-                id = det.results[0].hypothesis.class_id.substr(0, pos);  
-            } 
-            else
-            {
-                id = det.results[0].hypothesis.class_id;  
-            }
-
-            if (det.results.empty() || pick_and_place_poses.find(id) == pick_and_place_poses.end())
-            {
-                continue;
-            }
-            
-            if(stopped == false)
-            {
-                publish_velocity(0.2);
-                publish_angular_velocity(0.4);
-            }
-
-
-            if(det.bbox.center.position.y < 0.1 && det.bbox.center.position.y > -0.1  && det.bbox.center.position.x > 0.25 && stopped == true && pick_and_place_id == det.results[0].hypothesis.class_id)
-            {
-                send_request(true);
-                geometry_msgs::msg::Pose adjust_pose;
-
-                if (pick_and_place_poses.find(id) != pick_and_place_poses.end())  
-                {
-                    const auto &poses = pick_and_place_poses[id];  
-
-                    for (size_t i = 0; i < poses.size(); ++i)
-                    {
-                        const auto &pose_local = poses[i];
-
-                        tf2::Vector3 local_corner(
-                            pose_local.position.x,
-                            pose_local.position.y,
-                            pose_local.position.z);
-
-                            
-                        const auto &bbox_pose = det.bbox.center;
-
-                        tf2::Quaternion q(
-                            bbox_pose.orientation.x,
-                            bbox_pose.orientation.y,
-                            bbox_pose.orientation.z,
-                            bbox_pose.orientation.w);
-
-                        tf2::Matrix3x3 rot(q);
-                        tf2::Vector3 translation(
-                            bbox_pose.position.x,
-                            bbox_pose.position.y,
-                            bbox_pose.position.z);
-                        
-
-                        // tf2::Vector3 world_corner = rot * local_corner + translation;
-                        tf2::Vector3 world_corner = rot * local_corner + translation;
-                        geometry_msgs::msg::Pose target_pose;
-                        target_pose.position.x = world_corner.x();
-                        target_pose.position.y = world_corner.y();
-                        target_pose.position.z = world_corner.z();
-
-                        target_pose.orientation = pose_local.orientation;
-                        
-                        adjust_pose = target_pose;
-
-                        RCLCPP_INFO(this->get_logger(),
-                                    "Pose %zu - global point: x=%.3f, y=%.3f, z=%.3f",
-                                    i, world_corner.x(), world_corner.y(), world_corner.z());
-                       
-                        
-                        open_gripper();
-                        rclcpp::sleep_for(std::chrono::milliseconds(200));
-                        positions_for_arm(target_pose);
-                        
-                        
-                        rclcpp::sleep_for(std::chrono::milliseconds(1000));
-                        std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
-                        move_group_arm->attachObject(det.results[0].hypothesis.class_id, "panda_link8", touch_links);
-                        close_gripper();
-                        rclcpp::sleep_for(std::chrono::milliseconds(400));
-                        
-                        
-                        
-                    }
-                }
-                else
-                {
-                    RCLCPP_WARN(this->get_logger(), "ID '%s' não encontrado em pick_and_place_poses", det.results[0].hypothesis.class_id.c_str());
-                }
-
-                welding_done = true;
-                stopped = false;
-                
-                rclcpp::sleep_for(std::chrono::milliseconds(500));
-                
-                auto pose = random_pose(0.0, 0.1, 0.4, 0.6, 0.5, 0.75);
-                adjust_pose.position.z = adjust_pose.position.z + 0.2;
-                positions_for_arm(adjust_pose);
-                rclcpp::sleep_for(std::chrono::milliseconds(500));
-                positions_for_arm(pose);
-                
-                rclcpp::sleep_for(std::chrono::milliseconds(1000));
-                open_gripper();
-                
-                move_group_arm->detachObject(det.results[0].hypothesis.class_id);
-                rclcpp::sleep_for(std::chrono::milliseconds(300));
-                send_request(false);
-                publish_velocity(0.2);
-                publish_angular_velocity(0.4);
-                rclcpp::sleep_for(std::chrono::milliseconds(50));
-            }
-            else if(det.bbox.center.position.y < 0.1 && det.bbox.center.position.y > -0.1 && det.bbox.center.position.x > 0.25 && stopped == false && pick_and_place_id != det.results[0].hypothesis.class_id)
-            {
-                publish_velocity(0.0);
-                publish_angular_velocity(0.0);
-                rclcpp::sleep_for(std::chrono::milliseconds(1000));
-                pick_and_place_id = det.results[0].hypothesis.class_id;
-                welding_done = false;
-                stopped = true;
-                
-                
-            }
-
-            // if(stopped)
-            // {
-            //     break;
-            // }
+            RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
+        }
+        else
+        {
+            RCLCPP_WARN(this->get_logger(), "Falha ao processar o pedido!");
         }
     }
-
-    void send_request(bool stop_flag)
-    {
-        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
-        request->stop = stop_flag;
-
-      
-        client_->async_send_request(request,
-            [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) {
-                auto response = future_response.get();  
-                if (response->success) {
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                } else {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
-    }
-
-
             
 
 public:
@@ -591,15 +496,7 @@ public:
    
         yaml_file = this->get_parameter("yaml_file").as_string();
         
-        publisher_ = this->create_publisher<std_msgs::msg::Float32>("/conveyor_velocity", 10);
-        publisher_1 = this->create_publisher<std_msgs::msg::Float32>("/conveyor_angular_velocity", 10);
-       
-        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-            "/bbox_3d_with_labels", 10,
-            std::bind(&PickAndPlaceConveyor::detectionCallback, this, std::placeholders::_1));
-
-        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>(
-            "/object_collision");
+        service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&PickAndPlaceConveyor::handle_request, this, std::placeholders::_1, std::placeholders::_2));
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),

@@ -100,7 +100,7 @@ struct TupleEqual {
 };
 
 
-class PickAndPlaceConveyor : public rclcpp::Node {
+class PickAndPlaceSuctionGripper : public rclcpp::Node {
 
 private:
 
@@ -449,7 +449,7 @@ private:
             
 
 public:
-    PickAndPlaceConveyor()
+    PickAndPlaceSuctionGripper()
      : Node("pick_and_place_suction_gripper")
     {
         this->declare_parameter<std::string>("yaml_file", "");
@@ -458,11 +458,11 @@ public:
         
         publisher_2 = this->create_publisher<std_msgs::msg::Bool>("/surface_gripper", 10);
 
-        service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&PickAndPlaceConveyor::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+        service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&PickAndPlaceSuctionGripper::handle_request, this, std::placeholders::_1, std::placeholders::_2));
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
-            std::bind(&PickAndPlaceConveyor::initMoveGroup, this));
+            std::bind(&PickAndPlaceSuctionGripper::initMoveGroup, this));
 
 
         loadLocationsFromYaml(yaml_file);
@@ -472,7 +472,7 @@ public:
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<PickAndPlaceConveyor>());
+  rclcpp::spin(std::make_shared<PickAndPlaceSuctionGripper>());
   rclcpp::shutdown();
   return 0;
 }

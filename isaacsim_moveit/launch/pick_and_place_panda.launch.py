@@ -202,6 +202,25 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    control_isaacsim_conveyor = Node(
+        package="object_manipulation",
+        executable="control_isaacsim_conveyor",
+        name="control_isaacsim_conveyor",
+        output="screen",
+        parameters=[
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            robot_description_joint_limits,  
+            moveit_config.trajectory_execution,
+            robot_description_kinematics,
+            moveit_config.planning_scene_monitor,
+            {'yaml_file': yaml_file},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
 
     labels_yaml_file = os.path.join(
         get_package_share_directory(pkg_name),
@@ -249,6 +268,7 @@ def generate_launch_description():
             panda_arm_controller_spawner,
             pick_and_place_conveyor,
             add_collision,
+            control_isaacsim_conveyor,
 
             Node(
                 package='isaacsim_moveit',
