@@ -431,22 +431,6 @@ private:
 
         return pose;
     }
-        
-    /*
-    
-        PUBLISHERS.
-    
-    */
-
- 
-
-    void publish_suction_activation(bool activation)
-    {
-        auto msg = std_msgs::msg::Bool();
-        msg.data = activation;
-
-        publisher_2->publish(msg);
-    }
 
     void calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose)
     {
@@ -496,7 +480,7 @@ private:
                     pose.position.y,
                     pose.position.z);
 
-                tf2::Vector3 world_corner = rot * local_corner + translation;
+                tf2::Vector3 world_corner = local_corner + translation;
 
                 geometry_msgs::msg::Pose target_pose;
                 target_pose.position.x = world_corner.x();
@@ -536,6 +520,24 @@ private:
             move_group_arm->detachObject(received_id);
         }
     }
+        
+    /*
+    
+        PUBLISHERS.
+    
+    */
+
+ 
+
+    void publish_suction_activation(bool activation)
+    {
+        auto msg = std_msgs::msg::Bool();
+        msg.data = activation;
+
+        publisher_2->publish(msg);
+    }
+
+    
 
     /*
     
@@ -575,11 +577,11 @@ public:
     
         publisher_2 = this->create_publisher<std_msgs::msg::Bool>("/surface_gripper", 10);
     
+        service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&PickAndOrganize::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+        
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
             std::bind(&PickAndOrganize::initMoveGroup, this));
-
-        service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&PickAndOrganize::handle_request, this, std::placeholders::_1, std::placeholders::_2));
         
         loadLocationsFromYaml(yaml_file);
         loadStoragesLocationsFromYaml(storages_yaml_file);
