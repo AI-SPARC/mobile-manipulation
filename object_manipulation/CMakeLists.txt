@@ -222,6 +222,50 @@ ament_target_dependencies(pick_and_place_suction_gripper
   "object_manipulation_interfaces"
 )
 
+add_executable(pick_and_organize src/pick_and_organize.cpp)
+
+ament_target_dependencies(pick_and_organize
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+  "object_manipulation_interfaces"
+)
+
+add_executable(control_isaacsim_conveyor src/control_isaacsim_conveyor.cpp)
+
+ament_target_dependencies(control_isaacsim_conveyor
+  "rclcpp"
+  "sensor_msgs"
+  "vision_msgs"
+  "geometry_msgs"
+  "nav_msgs"
+  "message_filters"
+  "pcl_conversions"
+  "tf2"
+  "tf2_ros"
+  "tf2_eigen"
+  "tf2_geometry_msgs"
+  "tf2_sensor_msgs"
+  "moveit_ros_planning_interface"
+  "object_manipulation_interfaces"
+  "control_msgs"
+  "trajectory_msgs"
+  "object_manipulation_interfaces"
+)
+
 target_link_libraries(add_collision
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -279,6 +323,22 @@ target_link_libraries(pick_and_place_suction_gripper
   yaml-cpp
 )
 
+target_link_libraries(pick_and_organize
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
+target_link_libraries(control_isaacsim_conveyor
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  yaml-cpp
+)
+
 target_link_libraries(rl_trainer_node "${TORCH_LIBRARIES}")
 
 
@@ -302,6 +362,8 @@ install(TARGETS
   rl_trainer_node
   pick_and_place_conveyor
   pick_and_place_suction_gripper
+  pick_and_organize
+  control_isaacsim_conveyor
   DESTINATION lib/${PROJECT_NAME}
 )
 
