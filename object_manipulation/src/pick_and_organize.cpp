@@ -29,6 +29,8 @@
 #include <std_msgs/msg/float32.hpp>
 #include <cmath> 
 #include "std_msgs/msg/bool.hpp"
+#include <thread> 
+
 using namespace std::chrono_literals;
 
 namespace std 
@@ -110,7 +112,16 @@ private:
         geometry_msgs::msg::Vector3 size;
     };
 
-
+    struct StorageData
+    {
+        int max_x_objects, max_y_objects, max_z_objects;
+        int x;
+        int y;
+        int z = 0;
+        int direction;
+        geometry_msgs::msg::Pose pose;
+        geometry_msgs::msg::Vector3 size;
+    };
 
     //Publishers.
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
@@ -121,12 +132,17 @@ private:
     //Timer.
     rclcpp::TimerBase::SharedPtr init_timer_;
 
-    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
+   
+    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
+
+    rclcpp::Node::SharedPtr moveit_node_;
+    rclcpp::Executor::SharedPtr executor_;
+    std::thread executor_thread_;
 
     std::string yaml_file, storages_yaml_file;
-
     std::unordered_map<std::string, std::pair<std::string, std::vector<geometry_msgs::msg::Pose>>> pick_and_place_poses;
     std::unordered_map<std::string, LocationData> storages;
+    std::unordered_map<std::string, StorageData> storage_axis_counts;
 
 
     void loadLocationsFromYaml(const std::string &yaml_path)
@@ -315,71 +331,164 @@ private:
     {
         try 
         {
-            move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                this->shared_from_this(), "panda_arm"); 
+           
+            move_group_arm = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
+                moveit_node_, "panda_arm"); 
             
+            
+            move_group_arm->startStateMonitor(); 
 
-            RCLCPP_INFO(this->get_logger(), "MoveGroup (arm e gripper) inicializados com sucesso.");
+            RCLCPP_INFO(this->get_logger(), "MoveGroup (arm) inicializados com sucesso.");
 
             init_timer_->cancel();  
         } 
         catch (const std::exception &e) 
         {
-            RCLCPP_WARN(this->get_logger(), "Ainda não consegui inicializar MoveGroupInterface: %s", e.what());
+            RCLCPP_WARN(this->get_logger(), "Ainda não consegui inicializar MoveGroupInterface: %s. Tentando novamente...", e.what());
         }
 
     }
 
-    void positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
+    
+    void ready()
+    {
+        if (!move_group_arm) {
+            RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do arm não inicializado.");
+            return;
+        }
+
+        
+        move_group_arm->setJointValueTarget({
+            {"panda_joint1", 0.0},
+            {"panda_joint2", -0.750},
+            {"panda_joint3", 0.0},
+            {"panda_joint4", -2.827},
+            {"panda_joint5", 0.0},
+            {"panda_joint6", 2.077},
+            {"panda_joint7", 0.785},
+        
+        });
+
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        auto result = move_group_arm->plan(plan);
+
+        if (result == moveit::core::MoveItErrorCode::SUCCESS) 
+        {
+            auto exec_result = move_group_arm->execute(plan);
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+            if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
+            {
+                RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+            }
+        }
+    }
+
+   
+    void positions_for_arm(const geometry_msgs::msg::Pose &target_pose, float maxVelocity, bool computeCartesian) 
     {
         if (!move_group_arm) {
             RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface não inicializado.");
             return;
         }
 
-        const int MAX_PLANNING_CYCLES = 100;
     
+        const int MAX_PLANNING_CYCLES = 100; 
+        const int MAX_CARTESIAN_ATTEMPTS = 5; 
+        const double MIN_CARTESIAN_FRACTION = 0.99; 
 
+   
         for (int cycle = 1; cycle <= MAX_PLANNING_CYCLES; ++cycle)
         {
             RCLCPP_INFO(this->get_logger(), "Ciclo de Planejamento Externo: Tentativa %d de %d", cycle, MAX_PLANNING_CYCLES);
 
-        
-            // move_group_arm->setWorkspace(-1.5, -1.5, 0.1, 1.5, 1.5, 1.5);
+            bool task_success = false; 
+
+            
+            if (computeCartesian)
+            {
+                RCLCPP_INFO(this->get_logger(), "Tentando planejamento Cartesiano...");
+                
+                std::vector<geometry_msgs::msg::Pose> waypoints;
+                waypoints.push_back(target_pose); 
+
+                moveit_msgs::msg::RobotTrajectory trajectory;
+                const double eef_step = 0.01;     
+
+                move_group_arm->setStartStateToCurrentState();
+                move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
+                move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
+
+                for (int cart_attempt = 1; cart_attempt <= MAX_CARTESIAN_ATTEMPTS; ++cart_attempt)
+                {
+                    double fraction = move_group_arm->computeCartesianPath(waypoints, eef_step, trajectory);
+
+                    if (fraction >= MIN_CARTESIAN_FRACTION) 
+                    {
+                        RCLCPP_INFO(this->get_logger(), "Planejamento Cartesiano bem-sucedido (%.1f%%). Executando...", fraction * 100.0);
+                        auto exec_result = move_group_arm->execute(trajectory);
+
+                        if (exec_result == moveit::core::MoveItErrorCode::SUCCESS)
+                        {
+                            task_success = true;
+                            break;
+                        }
+                        else 
+                        {
+                            RCLCPP_WARN(this->get_logger(), "Execução Cartesiana falhou. Tentando novamente...");
+                        }
+                    }
+                    else {
+                        RCLCPP_WARN(this->get_logger(), "Planejamento Cartesiano falhou (fração: %.2f). Tentativa %d/%d", fraction, cart_attempt, MAX_CARTESIAN_ATTEMPTS);
+                    }
+                } 
+
+                if (!task_success) 
+                {
+                    RCLCPP_ERROR(this->get_logger(), "Falha no planejamento Cartesiano após %d tentativas. Recorrendo ao planejamento normal.", MAX_CARTESIAN_ATTEMPTS);
+                }
+            }
+
+            if (task_success) 
+            {
+                break; 
+            }
+
+           
+
+            RCLCPP_INFO(this->get_logger(), "Tentando planejamento normal (free-space)...");
+            
             move_group_arm->setStartStateToCurrentState(); 
             move_group_arm->setPlannerId("RRTConnectkConfigDefault");
             move_group_arm->setPoseTarget(target_pose, "suction_tip"); 
-            move_group_arm->setPlanningTime(2.0);
+            move_group_arm->setPlanningTime(4.0);
             move_group_arm->setNumPlanningAttempts(100); 
-            move_group_arm->setMaxVelocityScalingFactor(1.0);
-            move_group_arm->setMaxAccelerationScalingFactor(1.0);
-            move_group_arm->setGoalTolerance(0.001);
-
+            move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
+            move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
+            move_group_arm->setGoalPositionTolerance(0.0001);   
+            move_group_arm->setGoalOrientationTolerance(0.0001);
 
             moveit::planning_interface::MoveGroupInterface::Plan my_plan;
             auto plan_result = move_group_arm->plan(my_plan);
 
-           
             if (plan_result != moveit::core::MoveItErrorCode::SUCCESS) 
             {
-                
-                
+                RCLCPP_WARN(this->get_logger(), "Planejamento normal falhou nesta tentativa.");
                 continue; 
             }
 
-            
+            RCLCPP_INFO(this->get_logger(), "Planejamento normal bem-sucedido. Executando...");
             auto exec_result = move_group_arm->execute(my_plan);
 
             if (exec_result != moveit::core::MoveItErrorCode::SUCCESS)
             {
+                RCLCPP_WARN(this->get_logger(), "Execução normal falhou nesta tentativa.");
                 continue; 
             }
 
+            RCLCPP_INFO(this->get_logger(), "Execução normal bem-sucedida.");
             break; 
-        }
-
-      
         
+        } 
     }
 
    
@@ -432,6 +541,7 @@ private:
             const auto &storage_and_poses = pick_and_place_poses.at(id);
             storage_id = storage_and_poses.first;
             const auto &poses = storage_and_poses.second;
+            geometry_msgs::msg::Pose target_pose;
 
             RCLCPP_INFO(this->get_logger(),
                         "Iniciando pick-and-place para '%s' (storage: %s)",
@@ -460,27 +570,32 @@ private:
 
                 tf2::Vector3 world_corner = local_corner + translation;
 
-                geometry_msgs::msg::Pose target_pose;
+                
                 target_pose.position.x = world_corner.x();
                 target_pose.position.y = world_corner.y();
                 target_pose.position.z = world_corner.z();
                 target_pose.orientation = pose_local.orientation;
 
                 RCLCPP_INFO(this->get_logger(),
-                            "Pose %zu - global point: x=%.3f, y=%.3f, z=%.3f",
+                            "Pose %zu - global point: x=%.6f, y=%.6f, z=%.6f",
                             i, world_corner.x(), world_corner.y(), world_corner.z());
                 
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(100));
-                positions_for_arm(target_pose);
+                positions_for_arm(target_pose, 0.25, false);
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(1000));
+                rclcpp::sleep_for(std::chrono::milliseconds(500));
                 publish_suction_activation(true);
 
                 move_group_arm->attachObject(received_id, "suction_tip");
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(150));
             }
+            target_pose.position.z += 0.25;
+
+            positions_for_arm(target_pose, 0.25, false);
+
+            rclcpp::sleep_for(std::chrono::milliseconds(300));
 
             geometry_msgs::msg::Pose storage_pose = storages[storage_id].pose;
             geometry_msgs::msg::Vector3 storage_size;
@@ -488,105 +603,154 @@ private:
             storage_size.y = static_cast<float>(storages[storage_id].size.y);
             storage_size.z = static_cast<float>(storages[storage_id].size.z);
 
-         
+            geometry_msgs::msg::Vector3 object_size = size;
 
-            moveit::planning_interface::PlanningSceneInterface psi;
-            auto objects = psi.getObjects({received_id});
-            double x, y, z;
 
-            if (!objects.empty())
-            {
-                const auto &obj = objects.at(received_id);
-                if (!obj.primitives.empty())
-                {
-                    const shape_msgs::msg::SolidPrimitive &primitive = obj.primitives[0];
-                    if (primitive.type == shape_msgs::msg::SolidPrimitive::BOX)
-                    {
-                        x = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_X];
-                        y = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Y];
-                        z = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Z];
-
-                        RCLCPP_INFO(this->get_logger(), "Tamanho do objeto: %.3f, %.3f, %.3f", x, y, z);
-                    }
-                }
-            }
-
-            // geometry_msgs::msg::Pose object_pose = pose;
-            geometry_msgs::msg::Vector3 object_size;
-            object_size.x = static_cast<float>(x);
-            object_size.y = static_cast<float>(y);
-            object_size.z = static_cast<float>(z);
-
-           
-        
-
-            geometry_msgs::msg::Pose final_pose = placeObjectInBox(storage_pose, storage_size, object_size);
+            geometry_msgs::msg::Pose final_pose = placeObjectInBox(storage_id, storage_pose, storage_size, pose.orientation, object_size);
 
             RCLCPP_INFO(this->get_logger(),
                             "Pose - global point: x=%.3f, y=%.3f, z=%.3f, orientation.x=%.3f, orientation.y=%.3f, orientation.z=%.3f, orientation.w=%.3f",
             final_pose.position.x, final_pose.position.y, final_pose.position.z, final_pose.orientation.x, final_pose.orientation.y, final_pose.orientation.z, final_pose.orientation.w);
 
-            positions_for_arm(final_pose);
+            geometry_msgs::msg::Pose temp_pose = final_pose;
+            temp_pose.position.z += 0.1;
+            positions_for_arm(temp_pose, 0.25, false);
 
-            rclcpp::sleep_for(std::chrono::milliseconds(1000));
+            rclcpp::sleep_for(std::chrono::milliseconds(300));
+
+            positions_for_arm(final_pose, 0.25, true);
+            publish_suction_activation(false);
+            move_group_arm->detachObject(received_id);
+            rclcpp::sleep_for(std::chrono::milliseconds(750));
+
+           
+            
+            rclcpp::sleep_for(std::chrono::milliseconds(50));
+
+            
             RCLCPP_INFO(this->get_logger(), "Objeto '%s' será armazenado em: %s",
                         received_id.c_str(),
                         storage_id.c_str());
-            publish_suction_activation(false);
+            
 
-            move_group_arm->detachObject(received_id);
+            
+
+            positions_for_arm(temp_pose, 0.25, true);
+            // ready();
+
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+
+            
         }
     }
 
 
+    
 
-
-    std::pair<geometry_msgs::msg::Pose, geometry_msgs::msg::Vector3> last_object;
-    int contador = 0;
-
-    geometry_msgs::msg::Pose placeObjectInBox(const geometry_msgs::msg::Pose &box_pose, const geometry_msgs::msg::Vector3 &box_size,
-        const geometry_msgs::msg::Vector3 &obj_size)
+    geometry_msgs::msg::Pose placeObjectInBox(
+        const std::string &storage_id,
+        const geometry_msgs::msg::Pose &storage_pose,
+        const geometry_msgs::msg::Vector3 &storage_size,
+        const geometry_msgs::msg::Quaternion &object_orientation,
+        const geometry_msgs::msg::Vector3 &object_size)
     {
         geometry_msgs::msg::Pose object_pose;
 
-        if(contador == 0)
+        float compensation = 0.025;
+    
+        if (storage_axis_counts.find(storage_id) == storage_axis_counts.end() || storage_axis_counts[storage_id].z >= 1)
         {
-            object_pose.position.x = box_pose.position.x - (box_size.x / 2.0);
-            object_pose.position.y = box_pose.position.y - (box_size.y / 2.0);
-            object_pose.position.z = 0.1;
+            object_pose.position.x = storage_pose.position.x - (storage_size.x / 2.0);
+            object_pose.position.y = storage_pose.position.y - (storage_size.y / 2.0);
+            object_pose.position.z = object_size.z * (2.5 + storage_axis_counts[storage_id].z);
+
+
+            storage_axis_counts[storage_id].max_x_objects = storage_size.x / (object_size.x + (compensation / 2));
+            storage_axis_counts[storage_id].max_y_objects = storage_size.y / (object_size.y + (compensation / 2));
+            storage_axis_counts[storage_id].max_z_objects = 1.0 / (object_size.z + (compensation / 2));
+            storage_axis_counts[storage_id].x = 1;
+            storage_axis_counts[storage_id].y = 1;
+            storage_axis_counts[storage_id].z += 0;
+            storage_axis_counts[storage_id].direction = 1;
+            storage_axis_counts[storage_id].pose = object_pose;
+            storage_axis_counts[storage_id].size = object_size;
+
             
-            std::get<0>(last_object) = object_pose;
-            std::get<1>(last_object) = obj_size;
-            contador = 1;
         }
         else
         {
-            object_pose.position.x = std::get<0>(last_object).position.x + (std::get<1>(last_object).x / 2.0) + (obj_size.x / 2.0) + 0.02;
-            object_pose.position.y = std::get<0>(last_object).position.y + (std::get<1>(last_object).y / 2.0) + (obj_size.y / 2.0) + 0.02;
-            object_pose.position.z = 0.1;
-            
-            std::cout << std::get<0>(last_object).position.x << " " << std::get<0>(last_object).position.y << std::endl;
-            std::cout << "size" << std::get<1>(last_object).x << " " << std::get<1>(last_object).y << std::endl;
-            std::get<0>(last_object) = object_pose;
-            std::get<1>(last_object) = obj_size;
+            if(storage_axis_counts[storage_id].x < storage_axis_counts[storage_id].max_x_objects)
+            {
+                object_pose.position.x = storage_axis_counts[storage_id].pose.position.x + (((storage_axis_counts[storage_id].size.x / 2.0) + (object_size.x / 2.0) + compensation) * storage_axis_counts[storage_id].direction);
+                object_pose.position.y = storage_axis_counts[storage_id].pose.position.y;
+                object_pose.position.z = object_size.z * (2.5 + storage_axis_counts[storage_id].z);
+
+                storage_axis_counts[storage_id].x += 1;
+
+                storage_axis_counts[storage_id].pose = object_pose;
+                storage_axis_counts[storage_id].size = object_size;
+            }
+            else if(storage_axis_counts[storage_id].y < storage_axis_counts[storage_id].max_y_objects)
+            {
+                object_pose.position.x = storage_axis_counts[storage_id].pose.position.x;
+                object_pose.position.y = storage_axis_counts[storage_id].pose.position.y + (storage_axis_counts[storage_id].size.y / 2.0) + (object_size.y / 2.0) + compensation;
+                object_pose.position.z = object_size.z * (2.5 + storage_axis_counts[storage_id].z);
+                storage_axis_counts[storage_id].y += 1;
+                
+                if(storage_axis_counts[storage_id].direction == 1)
+                {
+                    storage_axis_counts[storage_id].direction = -1;
+                }
+                else
+                {
+                    storage_axis_counts[storage_id].direction = 1;
+                }
+                
+                storage_axis_counts[storage_id].pose = object_pose;
+                storage_axis_counts[storage_id].size = object_size;
+
+                storage_axis_counts[storage_id].x = 1;
+            }
+            else if(storage_axis_counts[storage_id].z < storage_axis_counts[storage_id].max_z_objects)
+            {
+                storage_axis_counts[storage_id].z += 1;
+                object_pose.position.x = storage_axis_counts[storage_id].pose.position.x;
+                object_pose.position.y = storage_axis_counts[storage_id].pose.position.y + (storage_axis_counts[storage_id].size.y / 2.0) + (object_size.y / 2.0) + compensation;
+                object_pose.position.z = object_size.z * (2.5 + storage_axis_counts[storage_id].z);
+                storage_axis_counts[storage_id].z += 1;
+              
+        
+                storage_axis_counts[storage_id].x = 1;
+                storage_axis_counts[storage_id].y = 1;
+               
+            }
+           
         }
-     
-        
-    
-    
-    
 
-        
-        
+        tf2::Quaternion q_obj(
+            object_orientation.x,
+            object_orientation.y,
+            object_orientation.z,
+            object_orientation.w);
 
-        object_pose.orientation.x = 1.0;
-        object_pose.orientation.y = 0.0;
-        object_pose.orientation.z = 0.0;
-        object_pose.orientation.w = 0.0;
-        
+        double roll_obj, pitch_obj, yaw_obj;
+        tf2::Matrix3x3(q_obj).getRPY(roll_obj, pitch_obj, yaw_obj);
+
+      
+        double roll = M_PI;
+        double pitch = 0.0;
+        double yaw = -yaw_obj;  
+
+        tf2::Quaternion q_final;
+        q_final.setRPY(roll, pitch, yaw);
+        q_final.normalize();
+
+        object_pose.orientation = tf2::toMsg(q_final);
 
         return object_pose;
     }
+
+
 
         
     /*
@@ -643,10 +807,20 @@ public:
         yaml_file = this->get_parameter("yaml_file").as_string();
         storages_yaml_file = this->get_parameter("storages_yaml_file").as_string();
     
+        moveit_node_ = std::make_shared<rclcpp::Node>("pick_and_organize_moveit_node");
+
+        executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
+        
+        executor_->add_node(moveit_node_);
+        executor_thread_ = std::thread([this]() { this->executor_->spin(); });
+      
+
+
         publisher_2 = this->create_publisher<std_msgs::msg::Bool>("/surface_gripper", 10);
     
         service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&PickAndOrganize::handle_request, this, std::placeholders::_1, std::placeholders::_2));
         
+    
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
             std::bind(&PickAndOrganize::initMoveGroup, this));
@@ -654,6 +828,15 @@ public:
         loadLocationsFromYaml(yaml_file);
         loadStoragesLocationsFromYaml(storages_yaml_file);
     }   
+
+    ~PickAndOrganize()
+    {
+        executor_->cancel();
+        if (executor_thread_.joinable())
+        {
+            executor_thread_.join();
+        }
+    }
 };
 
 int main(int argc, char * argv[])
@@ -663,4 +846,3 @@ int main(int argc, char * argv[])
   rclcpp::shutdown();
   return 0;
 }
-

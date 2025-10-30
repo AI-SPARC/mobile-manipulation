@@ -254,7 +254,7 @@ private:
                 publish_velocity(0.0);
                 publish_angular_velocity(0.0);
 
-                rclcpp::sleep_for(std::chrono::milliseconds(1000));
+                rclcpp::sleep_for(std::chrono::milliseconds(1100));
                 send_request(true);
                 
                 pick_and_place_id = det.results[0].hypothesis.class_id;
