@@ -7,3 +7,5 @@
 [Screencast from 2025-10-28 05-58-23.webm](https://github.com/user-attachments/assets/8590593b-5bc3-425c-91a4-bb4a6d69bb20)
 
 [Screencast from 2025-10-28 06-01-25.webm](https://github.com/user-attachments/assets/7d516bc7-7506-485a-a434-be543558c292)
+
+[Screencast from 2025-10-30 13-41-37.webm](https://github.com/user-attachments/assets/6861e085-2cf6-4582-87d7-9411e732cc24)
