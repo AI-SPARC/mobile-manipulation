@@ -238,7 +238,13 @@ private:
                 pose.orientation.y = det.bbox.center.orientation.y;
                 pose.orientation.z = det.bbox.center.orientation.z;
                 pose.orientation.w = det.bbox.center.orientation.w;
-                send_picked_object(det.results[0].hypothesis.class_id, pose);
+
+                geometry_msgs::msg::Vector3 size;
+                size.x = det.bbox.size.x;
+                size.y = det.bbox.size.y;
+                size.z = det.bbox.size.z;
+
+                send_picked_object(det.results[0].hypothesis.class_id, pose, size);
                 pick_and_place_id = ' ';
             }
            
@@ -290,12 +296,12 @@ private:
         );
     }
     
-    void send_picked_object(std::string received_id, geometry_msgs::msg::Pose received_pose)
+    void send_picked_object(std::string received_id, geometry_msgs::msg::Pose received_pose, geometry_msgs::msg::Vector3 received_size)
     {
         auto request = std::make_shared<object_manipulation_interfaces::srv::PickedObject::Request>();
         request->id = received_id;
         request->pose = received_pose;
-
+        request->size = received_size;
       
         client_1->async_send_request(request,
             [this](rclcpp::Client<object_manipulation_interfaces::srv::PickedObject>::SharedFuture future_response) 
