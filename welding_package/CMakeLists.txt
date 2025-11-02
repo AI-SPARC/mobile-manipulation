@@ -184,6 +184,7 @@ target_link_libraries(welding_with_trajectory
 )
 
 install(DIRECTORY
+launch
   config
   DESTINATION share/${PROJECT_NAME}
 )
