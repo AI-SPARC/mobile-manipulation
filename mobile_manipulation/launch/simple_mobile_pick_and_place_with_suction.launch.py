@@ -216,6 +216,20 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    controller = Node(
+        package="mobile_manipulation",
+        executable="controller",
+        name="controller",
+        output="screen",
+        parameters=[
+            {'yaml_file': occupancy_grid_yaml},
+            {'path_resolution': 0.05},
+            {'iterations_before_verification': 20},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
     server_node = Node(
         package="mobile_manipulation",
         executable="server_node",
@@ -278,6 +292,7 @@ def generate_launch_description():
             add_collision,
             server_node,
             a_star,
+            controller,
 
             Node(
                 package='isaacsim_moveit',
