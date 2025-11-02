@@ -258,17 +258,17 @@ def generate_launch_description():
         [
             ros2_control_hardware_type,
             use_sim_time,  # Declare use_sim_time argument here
-            # rviz_node,
-            world2robot_tf_node,
+            rviz_node,
+            # world2robot_tf_node,
             # hand2camera_tf_node,
             robot_state_publisher,
             move_group_node,
             ros2_control_node,
             joint_state_broadcaster_spawner,
             panda_arm_controller_spawner,
-            pick_and_place_conveyor,
+            # pick_and_place_conveyor,
             add_collision,
-            control_isaacsim_conveyor,
+            # control_isaacsim_conveyor,
 
             Node(
                 package='isaacsim_moveit',

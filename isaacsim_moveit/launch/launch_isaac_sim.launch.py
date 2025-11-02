@@ -16,7 +16,7 @@ def generate_launch_description():
     gui = os.path.join(
         get_package_share_directory("isaacsim_moveit"),
         "maps",
-        "mobile_manipulation_with_suction_gripper.usd",
+        "simple_mobile_manipulation_with_suction_gripper.usd",
     )
 
     return LaunchDescription(
