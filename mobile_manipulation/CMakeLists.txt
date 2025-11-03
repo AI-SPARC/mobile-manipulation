@@ -132,6 +132,30 @@ ament_target_dependencies(controller
   object_manipulation_interfaces
 )
 
+add_executable(simple_manipulation_with_suction_gripper src/simple_manipulation_with_suction_gripper.cpp)
+
+ament_target_dependencies(simple_manipulation_with_suction_gripper 
+  trajectory_msgs 
+  rclcpp 
+  nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  std_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+  object_manipulation_interfaces
+)
+
 target_link_libraries(add_collision
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -170,6 +194,15 @@ target_link_libraries(controller
   yaml-cpp
 )
 
+target_link_libraries(simple_manipulation_with_suction_gripper
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  yaml-cpp
+)
+
 install(DIRECTORY
   launch
   config
@@ -181,6 +214,7 @@ install(TARGETS
   server_node
   a_star
   controller
+  simple_manipulation_with_suction_gripper
   DESTINATION lib/${PROJECT_NAME}
 )
 

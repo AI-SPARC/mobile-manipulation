@@ -181,26 +181,26 @@ def generate_launch_description():
         'storages.yaml'
     )
 
-    # pick_and_place_suction_gripper = Node(
-    #     package="mobile_manipulation",
-    #     executable="pick_and_place_suction_gripper",
-    #     name="pick_and_place_suction_gripper",
-    #     output="screen",
-    #     parameters=[
-    #         moveit_config.robot_description,
-    #         moveit_config.robot_description_semantic,
-    #         moveit_config.robot_description_kinematics,
-    #         moveit_config.planning_pipelines,
-    #         robot_description_joint_limits,  
-    #         moveit_config.trajectory_execution,
-    #         robot_description_kinematics,
-    #         moveit_config.planning_scene_monitor,
-    #         {'yaml_file': yaml_file},
-    #         {'storages_yaml_file': storages_yaml_file},
-    #         {"use_sim_time": LaunchConfiguration("use_sim_time")},
-    #     ],
-    #     arguments=["--ros-args", "--log-level", "info"],
-    # )
+    simple_manipulation_with_suction_gripper = Node(
+        package="mobile_manipulation",
+        executable="simple_manipulation_with_suction_gripper",
+        name="simple_manipulation_with_suction_gripper",
+        output="screen",
+        parameters=[
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            robot_description_joint_limits,  
+            moveit_config.trajectory_execution,
+            robot_description_kinematics,
+            moveit_config.planning_scene_monitor,
+            {'yaml_file': yaml_file},
+            {'storages_yaml_file': storages_yaml_file},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
 
     a_star = Node(
         package="mobile_manipulation",
@@ -289,7 +289,7 @@ def generate_launch_description():
             ros2_control_node,
             joint_state_broadcaster_spawner,
             panda_arm_controller_spawner,
-            # pick_and_place_suction_gripper,
+            simple_manipulation_with_suction_gripper,
             add_collision,
             server_node,
             a_star,

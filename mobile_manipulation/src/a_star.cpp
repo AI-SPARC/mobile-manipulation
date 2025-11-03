@@ -45,7 +45,7 @@
 #include <utility>
 #include <string>
 #include <filesystem>
-#include "object_manipulation_interfaces/srv/picked_object.hpp"
+#include "object_manipulation_interfaces/srv/goal_pose.hpp"
 
 using namespace std::chrono_literals;
 
@@ -159,7 +159,7 @@ private:
     };
     
     //Service.
-    rclcpp::Service<object_manipulation_interfaces::srv::PickedObject>::SharedPtr service_;
+    rclcpp::Service<object_manipulation_interfaces::srv::GoalPose>::SharedPtr service_;
     
     //Publishers.
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr publisher_path_;
@@ -828,7 +828,7 @@ private:
 
     // Service
 
-    void handle_request(const std::shared_ptr<object_manipulation_interfaces::srv::PickedObject::Request> request, std::shared_ptr<object_manipulation_interfaces::srv::PickedObject::Response> response)
+    void handle_request(const std::shared_ptr<object_manipulation_interfaces::srv::GoalPose::Request> request, std::shared_ptr<object_manipulation_interfaces::srv::GoalPose::Response> response)
     {
         std::pair<float, float> initial_pose, goal_pose;
 
@@ -847,7 +847,7 @@ private:
 
         response->success = success;
 
-        if (success)
+        if (!success)
         {
             RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
         }
@@ -874,7 +874,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "path_resolution is set to: %f", distanceToObstacle_);
         RCLCPP_INFO(this->get_logger(), "iterations_before_verification is set to: %d", iterations_before_verification);
 
-        service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&AStar::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+        service_ = this->create_service<object_manipulation_interfaces::srv::GoalPose>("/goal_pose",std::bind(&AStar::handle_request, this, std::placeholders::_1, std::placeholders::_2));
 
         decimals = count_decimals(distanceToObstacle_);
 

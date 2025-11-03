@@ -5,5 +5,5 @@ cardbox:
 
 box:
   - location1:
-      position: [0.0, 0.0, 0.05]
+      position: [0.0, 0.0, 0.06]
       orientation: [1.0, 0.0, 0.0, 0.0]

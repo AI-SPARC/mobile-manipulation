@@ -25,6 +25,7 @@
 #include <shape_msgs/msg/solid_primitive.hpp>
 #include "object_manipulation_interfaces/srv/object_collision.hpp"
 #include "object_manipulation_interfaces/srv/picked_object.hpp"
+#include "object_manipulation_interfaces/srv/goal_pose.hpp"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <std_msgs/msg/float32.hpp>
@@ -47,6 +48,7 @@ private:
     //Service.
     rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr client_;
     rclcpp::Client<object_manipulation_interfaces::srv::PickedObject>::SharedPtr client_1;
+    rclcpp::Client<object_manipulation_interfaces::srv::GoalPose>::SharedPtr client_2;
     
     //Timer.
     rclcpp::TimerBase::SharedPtr init_timer_;
@@ -123,6 +125,7 @@ private:
 
 
                 send_picked_object(det.results[0].hypothesis.class_id, pose, size);
+                send_goal_pose(pose);
                 send_request(true);
 
                 picked.insert(id);
@@ -183,6 +186,31 @@ private:
         );
     }
 
+    void send_goal_pose(geometry_msgs::msg::Pose received_pose)
+    {
+        auto request = std::make_shared<object_manipulation_interfaces::srv::GoalPose::Request>();
+    
+        request->pose = received_pose;
+     
+      
+        client_2->async_send_request(request,
+            [this](rclcpp::Client<object_manipulation_interfaces::srv::GoalPose>::SharedFuture future_response) 
+            {
+                auto response = future_response.get();  
+
+                if (response->success) 
+                {
+                  
+                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                } 
+                else 
+                {
+                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+                }
+            }
+        );
+    }
+
 
             
 
@@ -203,6 +231,9 @@ public:
 
         client_1 = this->create_client<object_manipulation_interfaces::srv::PickedObject>(
             "/picked_object");
+
+        client_2 = this->create_client<object_manipulation_interfaces::srv::GoalPose>(
+            "/goal_pose");
 
         loadLocationsFromYaml(yaml_file);
     }   
