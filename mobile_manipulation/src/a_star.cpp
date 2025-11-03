@@ -178,7 +178,7 @@ private:
 
     size_t i_ = 0; 
     float pose_x_ = 3.24, pose_y_ = 8.22, pose_z_ = 0.0;
-    float distanceToObstacle_;
+    float distanceToObstacle_, security_distance = 0.5;
     int decimals = 0, iterations_before_verification = 10;
 
     std::vector<VertexDijkstra> verticesDestino_;
@@ -239,7 +239,7 @@ private:
         };
     }
     
-    std::vector<std::pair<float, float>> run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
+    std::pair<std::vector<std::pair<float, float>>, bool> run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
     {
         std::vector<std::pair<float, float>> initial_path = straight_line(start_tuple, goal_tuple);
 
@@ -248,7 +248,7 @@ private:
             initial_path.push_back(start_tuple);
             initial_path.push_back(goal_tuple);
 
-            return initial_path;
+            return std::make_pair(initial_path, true);
         }
 
     
@@ -404,7 +404,7 @@ private:
                     path.insert(path.begin(), current_vertex);
                 }
                 
-                return path;
+                return std::make_pair(path, false);
             }
             
             if(iterations == iterations_before_verification) 
@@ -412,7 +412,9 @@ private:
                 iterations = 0;
                 
                 std::vector<std::pair<float, float>> path1 = straight_line(current, goal_tuple);
-                if(!path1.empty()) {
+
+                if(!path1.empty()) 
+                {
                     std::vector<std::pair<float, float>> path;
                     
                     std::vector<std::pair<float, float>> path_to_current;
@@ -429,7 +431,7 @@ private:
                     
                     path.insert(path.end(), path1.begin(), path1.end());
                     
-                    return path;
+                    return std::make_pair(path, true);
                 }
             }
            
@@ -522,7 +524,7 @@ private:
         }
     }
 
-    void store_edges_in_path(std::vector<std::pair<float, float>>& path) 
+    void store_edges_in_path(std::vector<std::pair<float, float>>& path, bool straight_line) 
     {
         verticesDijkstra.clear();
         
@@ -532,6 +534,35 @@ private:
 
         auto start_time1_ = std::chrono::high_resolution_clock::now();
         int k = 0;
+
+        if (straight_line == false && path.size() >= 2)
+        {
+            auto goal = path.back();
+
+            for (int i = static_cast<int>(path.size()) - 2; i >= 0; --i)
+            {
+                float dx = goal.first  - path[i].first;
+                float dy = goal.second - path[i].second;
+                float dist = std::sqrt(dx * dx + dy * dy);
+
+                if (dist >= security_distance)
+                {
+                    float ux = dx / dist;
+                    float uy = dy / dist;
+
+                    std::pair<float, float> new_goal = {
+                        goal.first  - ux * security_distance,
+                        goal.second - uy * security_distance
+                    };
+
+                    path.erase(path.begin() + i + 1, path.end());
+                    path.push_back(new_goal);
+                    break;
+                }
+            }
+        }
+
+
      
         while (k < static_cast<int>(path.size()) - 1) 
         {
@@ -614,7 +645,26 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "A* filter execution time: %.10f", duration1.count());
 
-       
+
+        if (straight_line == true) 
+        {
+            auto& last = path.back();
+            auto& second_last = path[path.size() - 2];
+
+            float dx = last.first - second_last.first;
+            float dy = last.second - second_last.second;
+            float dist = std::sqrt(dx * dx + dy * dy);
+
+            if (dist > security_distance)  
+            {
+                float ux = dx / dist;
+                float uy = dy / dist;
+
+                last.first  -= ux * security_distance;
+                last.second -= uy * security_distance;
+            }
+        }
+        
 
         for (size_t i = 0; i < path.size(); i++) 
         {
@@ -788,9 +838,10 @@ private:
 
         goal_pose = std::make_pair(pose.position.x, pose.position.y);
 
-        std::vector<std::pair<float, float>> shortestPath = run_a_star(initial_pose, goal_pose);
-
-        store_edges_in_path(shortestPath);
+        std::pair<std::vector<std::pair<float, float>>, bool> a_star_result = run_a_star(initial_pose, goal_pose);
+        std::vector<std::pair<float, float>> shortestPath = std::get<0>(a_star_result);
+        bool straight_line = std::get<1>(a_star_result);
+        store_edges_in_path(shortestPath, straight_line);
 
         bool success = true;  
 
@@ -812,10 +863,12 @@ public:
     {
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<double>("path_resolution", 0.05);
+        this->declare_parameter<double>("security_distance", 0.50);
         this->declare_parameter<int>("iterations_before_verification", 10);
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
+        security_distance = static_cast<float>(this->get_parameter("security_distance").get_parameter_value().get<double>());
         iterations_before_verification = this->get_parameter("iterations_before_verification").get_parameter_value().get<int>();
 
         RCLCPP_INFO(this->get_logger(), "path_resolution is set to: %f", distanceToObstacle_);

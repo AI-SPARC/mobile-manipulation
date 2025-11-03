@@ -29,10 +29,9 @@ public:
             std::chrono::milliseconds(50),
             std::bind(&DijkstraController3D::control_loop, this));
 
-        // Parâmetros de controle
         linear_speed_ = 0.8;
         angular_speed_ = 2.0;
-        waypoint_tolerance_ = 0.15; // Única tolerância agora
+        waypoint_tolerance_ = 0.15; 
         angle_tolerance_ = 0.1;
 
         RCLCPP_INFO(this->get_logger(), "DijkstraController3D iniciado!");
@@ -117,7 +116,6 @@ private:
 
         geometry_msgs::msg::Twist cmd;
         
-        // Lógica de controle "Gire e Ande"
         if (std::fabs(angle_error) > angle_tolerance_) {
             cmd.linear.x = 0.0;
             cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
@@ -128,8 +126,7 @@ private:
             cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
         }
 
-        // *** MODIFICAÇÃO SOLICITADA ***
-        // Inverte a velocidade angular para corresponder ao seu robô
+
         cmd.angular.z = -cmd.angular.z;
 
         cmd_vel_pub_->publish(cmd);

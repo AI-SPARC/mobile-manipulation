@@ -210,6 +210,7 @@ def generate_launch_description():
         parameters=[
             {'yaml_file': occupancy_grid_yaml},
             {'path_resolution': 0.05},
+            {'security_distance': 0.5},
             {'iterations_before_verification': 20},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
