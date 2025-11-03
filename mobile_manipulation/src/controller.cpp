@@ -6,7 +6,8 @@
 #include <cmath>
 #include <mutex>
 #include <vector>
-#include <algorithm> // Para std::clamp e std::min
+#include <algorithm> 
+#include "object_manipulation_interfaces/srv/goal_reached.hpp"
 
 class DijkstraController3D : public rclcpp::Node
 {
@@ -25,6 +26,9 @@ public:
         vertex_sub_ = this->create_subscription<geometry_msgs::msg::PoseArray>(
             "/path", 10, std::bind(&DijkstraController3D::vertex_callback, this, std::placeholders::_1));
 
+        client_1 = this->create_client<object_manipulation_interfaces::srv::GoalReached>(
+            "/goal_reached");
+
         control_timer_ = this->create_wall_timer(
             std::chrono::milliseconds(50),
             std::bind(&DijkstraController3D::control_loop, this));
@@ -41,6 +45,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr vertex_sub_;
+    rclcpp::Client<object_manipulation_interfaces::srv::GoalReached>::SharedPtr client_1;
     rclcpp::TimerBase::SharedPtr control_timer_;
 
     geometry_msgs::msg::Pose current_pose_;
@@ -116,11 +121,13 @@ private:
 
         geometry_msgs::msg::Twist cmd;
         
-        if (std::fabs(angle_error) > angle_tolerance_) {
+        if (std::fabs(angle_error) > angle_tolerance_) 
+        {
             cmd.linear.x = 0.0;
             cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
         } 
-        else {
+        else 
+        {
             cmd.linear.x = std::min(linear_speed_, distance * 1.5); 
             cmd.linear.x = std::clamp(cmd.linear.x, 0.0, linear_speed_);
             cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
@@ -132,7 +139,7 @@ private:
         cmd_vel_pub_->publish(cmd);
 
         if (distance < waypoint_tolerance_) {
-            RCLCPP_INFO(this->get_logger(), "Chegou ao waypoint %zu.", current_waypoint_idx_);
+            RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu.", current_waypoint_idx_);
             current_waypoint_idx_++; 
 
             if (current_waypoint_idx_ >= current_path_.size()) {
@@ -140,9 +147,34 @@ private:
                 executing_path_ = false;
                 path_received_ = false; 
                 current_path_.clear();
-                RCLCPP_INFO(this->get_logger(), "Trajetória concluída.");
+                goal_reached();
+                RCLCPP_INFO(this->get_logger(), "Goal Reached.");
             }
         }
+    }
+
+    void goal_reached()
+    {
+        auto request = std::make_shared<object_manipulation_interfaces::srv::GoalReached::Request>();
+        request->reached = true;
+        
+      
+        client_1->async_send_request(request,
+            [this](rclcpp::Client<object_manipulation_interfaces::srv::GoalReached>::SharedFuture future_response) 
+            {
+                auto response = future_response.get();  
+
+                if (response->success) 
+                {
+                   
+                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                } 
+                else 
+                {
+                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+                }
+            }
+        );
     }
 
     void publish_zero_velocity()
