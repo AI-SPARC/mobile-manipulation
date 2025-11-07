@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_68267d1309a1af8e8297ef4c3efbcdba" kind="dir">
+    <compoundname>src</compoundname>
+    <innerfile refid="add__collision__objects_8cpp">add_collision_objects.cpp</innerfile>
+    <innerfile refid="welding_8cpp">welding.cpp</innerfile>
+    <innerfile refid="welding__multiple__objects_8cpp">welding_multiple_objects.cpp</innerfile>
+    <innerfile refid="welding__with__circular__conveyor__belt_8cpp">welding_with_circular_conveyor_belt.cpp</innerfile>
+    <innerfile refid="welding__with__trajectory_8cpp">welding_with_trajectory.cpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="src/"/>
+  </compounddef>
+</doxygen>

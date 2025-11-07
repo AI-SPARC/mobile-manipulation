@@ -1,0 +1,449 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classWeldingWithTrajectory" kind="class" language="C++" prot="public">
+    <compoundname>WeldingWithTrajectory</compoundname>
+    <basecompoundref prot="public" virt="non-virtual">rclcpp::Node</basecompoundref>
+    <innerclass refid="structWeldingWithTrajectory_1_1WeldingPoseData" prot="private">WeldingWithTrajectory::WeldingPoseData</innerclass>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1a10a673bad77066022e11a323346f6aa4" prot="private" static="no" mutable="no">
+        <type>rclcpp::Publisher&lt; std_msgs::msg::Float32 &gt;::SharedPtr</type>
+        <definition>rclcpp::Publisher&lt;std_msgs::msg::Float32&gt;::SharedPtr WeldingWithTrajectory::publisher_</definition>
+        <argsstring></argsstring>
+        <name>publisher_</name>
+        <qualifiedname>WeldingWithTrajectory::publisher_</qualifiedname>
+        <briefdescription>
+<para>Publisher para a velocidade linear da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="176" column="35" bodyfile="src/welding_with_trajectory.cpp" bodystart="176" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1a32b9f4d80a412bef254992d055e29e66" prot="private" static="no" mutable="no">
+        <type>rclcpp::Publisher&lt; std_msgs::msg::Float32 &gt;::SharedPtr</type>
+        <definition>rclcpp::Publisher&lt;std_msgs::msg::Float32&gt;::SharedPtr WeldingWithTrajectory::publisher_1</definition>
+        <argsstring></argsstring>
+        <name>publisher_1</name>
+        <qualifiedname>WeldingWithTrajectory::publisher_1</qualifiedname>
+        <briefdescription>
+<para>Publisher para a velocidade angular da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="178" column="35" bodyfile="src/welding_with_trajectory.cpp" bodystart="178" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1af090f8630abecd78bd6834ebcd99e0be" prot="private" static="no" mutable="no">
+        <type>rclcpp::Subscription&lt; vision_msgs::msg::Detection3DArray &gt;::SharedPtr</type>
+        <definition>rclcpp::Subscription&lt;vision_msgs::msg::Detection3DArray&gt;::SharedPtr WeldingWithTrajectory::sub_</definition>
+        <argsstring></argsstring>
+        <name>sub_</name>
+        <qualifiedname>WeldingWithTrajectory::sub_</qualifiedname>
+        <briefdescription>
+<para>Subscriber para as detecções 3D de objetos. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="180" column="38" bodyfile="src/welding_with_trajectory.cpp" bodystart="180" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1a4299715e6efd25fcb56428adaa0daf99" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; moveit::planning_interface::MoveGroupInterface &gt;</type>
+        <definition>std::unique_ptr&lt;moveit::planning_interface::MoveGroupInterface&gt; WeldingWithTrajectory::move_group_arm</definition>
+        <argsstring></argsstring>
+        <name>move_group_arm</name>
+        <qualifiedname>WeldingWithTrajectory::move_group_arm</qualifiedname>
+        <briefdescription>
+<para>Interface MoveIt2 para controle do grupo de juntas do braço robótico. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="182" column="21" bodyfile="src/welding_with_trajectory.cpp" bodystart="182" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1a66ea90a1e06de012b3867e06e9bdbb05" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string WeldingWithTrajectory::yaml_file</definition>
+        <argsstring></argsstring>
+        <name>yaml_file</name>
+        <qualifiedname>WeldingWithTrajectory::yaml_file</qualifiedname>
+        <briefdescription>
+<para>Caminho para o arquivo YAML de configuração das poses e trajetórias. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="184" column="17" bodyfile="src/welding_with_trajectory.cpp" bodystart="184" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1a832b6b876b5d531b013cec99efe194dd" prot="private" static="no" mutable="no">
+        <type>rclcpp::TimerBase::SharedPtr</type>
+        <definition>rclcpp::TimerBase::SharedPtr WeldingWithTrajectory::init_timer_</definition>
+        <argsstring></argsstring>
+        <name>init_timer_</name>
+        <qualifiedname>WeldingWithTrajectory::init_timer_</qualifiedname>
+        <briefdescription>
+<para>Temporizador para a inicialização assíncrona do MoveGroupInterface. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="186" column="34" bodyfile="src/welding_with_trajectory.cpp" bodystart="186" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1ae6a1b76d9362e8da8105d919d2a0a028" prot="private" static="no" mutable="no">
+        <type>std::unordered_map&lt; std::string, std::vector&lt; <ref refid="structWeldingWithTrajectory_1_1WeldingPoseData" kindref="compound">WeldingPoseData</ref> &gt; &gt;</type>
+        <definition>std::unordered_map&lt;std::string, std::vector&lt;WeldingPoseData&gt; &gt; WeldingWithTrajectory::welding_poses</definition>
+        <argsstring></argsstring>
+        <name>welding_poses</name>
+        <qualifiedname>WeldingWithTrajectory::welding_poses</qualifiedname>
+        <briefdescription>
+<para>Mapa que associa o ID de um objeto a um vetor de operações de soldagem. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="188" column="24" bodyfile="src/welding_with_trajectory.cpp" bodystart="188" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1a513000098e39c3a57e482df11053bfde" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string WeldingWithTrajectory::welding_id</definition>
+        <argsstring></argsstring>
+        <name>welding_id</name>
+        <qualifiedname>WeldingWithTrajectory::welding_id</qualifiedname>
+        <briefdescription>
+<para>Variáveis de estado para controlar o processo de soldagem. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="190" column="17" bodyfile="src/welding_with_trajectory.cpp" bodystart="190" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1aa22915ef390e12293f635cb2ce4c1f3b" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool WeldingWithTrajectory::stopped</definition>
+        <argsstring></argsstring>
+        <name>stopped</name>
+        <qualifiedname>WeldingWithTrajectory::stopped</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="191" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="191" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithTrajectory_1a20ce21d2d2b4c0630bbdd4d16b5ab98b" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool WeldingWithTrajectory::welding_done</definition>
+        <argsstring></argsstring>
+        <name>welding_done</name>
+        <qualifiedname>WeldingWithTrajectory::welding_done</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="191" column="19" bodyfile="src/welding_with_trajectory.cpp" bodystart="191" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classWeldingWithTrajectory_1a4681f2563fb3948f89b6c87c95aa487a" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithTrajectory::loadLocationsFromYaml</definition>
+        <argsstring>(const std::string &amp;yaml_path)</argsstring>
+        <name>loadLocationsFromYaml</name>
+        <qualifiedname>WeldingWithTrajectory::loadLocationsFromYaml</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>yaml_path</declname>
+        </param>
+        <briefdescription>
+<para>Carrega as poses e os dados de trajetória de um arquivo YAML. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><itemizedlist>
+<listitem></listitem></itemizedlist>
+</para>
+<para>Este método processa um arquivo YAML, extraindo não apenas a posição e orientação, mas também o tipo de trajetória (<computeroutput>normal</computeroutput>, <computeroutput>line</computeroutput>, <computeroutput>circle</computeroutput>) e seus parâmetros associados. Os dados são armazenados no mapa <computeroutput>welding_poses</computeroutput>, usando o rótulo do objeto como chave.<itemizedlist>
+<listitem><para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>yaml_path</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Caminho do arquivo YAML a ser carregado. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+</listitem></itemizedlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="201" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="201" bodyend="292"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithTrajectory_1a1d98b4d1e7aa40e947fb4020fb12d44b" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithTrajectory::initMoveGroup</definition>
+        <argsstring>()</argsstring>
+        <name>initMoveGroup</name>
+        <qualifiedname>WeldingWithTrajectory::initMoveGroup</qualifiedname>
+        <briefdescription>
+<para>Inicializa a interface MoveGroup do MoveIt2 de forma assíncrona. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Tenta criar a instância <computeroutput>move_group_arm</computeroutput> e cancela o temporizador em caso de sucesso. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="299" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="299" bodyend="315"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithTrajectory_1a5f71615eaf3b5399905e59d49b153245" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithTrajectory::return_to_welding_position</definition>
+        <argsstring>()</argsstring>
+        <name>return_to_welding_position</name>
+        <qualifiedname>WeldingWithTrajectory::return_to_welding_position</qualifiedname>
+        <briefdescription>
+<para>Retorna o braço robótico à sua posição inicial de prontidão. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="320" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="320" bodyend="349"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithTrajectory_1a7f73952c1d5b8e3a557e5c25b8620347" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithTrajectory::positions_for_arm</definition>
+        <argsstring>(const geometry_msgs::msg::Pose &amp;target_pose)</argsstring>
+        <name>positions_for_arm</name>
+        <qualifiedname>WeldingWithTrajectory::positions_for_arm</qualifiedname>
+        <param>
+          <type>const geometry_msgs::msg::Pose &amp;</type>
+          <declname>target_pose</declname>
+        </param>
+        <briefdescription>
+<para>Move o robô para uma única pose alvo (trajetória &apos;normal&apos;). </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Configura e executa um plano do MoveIt2 para mover o efetuador final até uma <computeroutput>target_pose</computeroutput> específica. Usado para operações de soldagem em um único ponto. <parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>target_pose</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>A pose de destino para o efetuador final. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="357" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="357" bodyend="394"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithTrajectory_1a7ce7651e9f95a238612ba1d940e492e3" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithTrajectory::publish_velocity</definition>
+        <argsstring>(float velocity)</argsstring>
+        <name>publish_velocity</name>
+        <qualifiedname>WeldingWithTrajectory::publish_velocity</qualifiedname>
+        <param>
+          <type>float</type>
+          <declname>velocity</declname>
+        </param>
+        <briefdescription>
+<para>Publica a velocidade linear da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>velocity</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Valor da velocidade linear. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="400" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="400" bodyend="407"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithTrajectory_1a25e0d46b6debb5a88ba075a9018d1d6e" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithTrajectory::publish_angular_velocity</definition>
+        <argsstring>(float velocity)</argsstring>
+        <name>publish_angular_velocity</name>
+        <qualifiedname>WeldingWithTrajectory::publish_angular_velocity</qualifiedname>
+        <param>
+          <type>float</type>
+          <declname>velocity</declname>
+        </param>
+        <briefdescription>
+<para>Publica a velocidade angular da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>velocity</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Valor da velocidade angular. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="413" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="413" bodyend="420"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithTrajectory_1ac22a6f6a51d664aa91d766c7d4003f30" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithTrajectory::detectionCallback</definition>
+        <argsstring>(const vision_msgs::msg::Detection3DArray::SharedPtr msg)</argsstring>
+        <name>detectionCallback</name>
+        <qualifiedname>WeldingWithTrajectory::detectionCallback</qualifiedname>
+        <param>
+          <type>const vision_msgs::msg::Detection3DArray::SharedPtr</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+<para>Callback principal que processa detecções 3D e orquestra a soldagem. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><itemizedlist>
+<listitem></listitem></itemizedlist>
+</para>
+<para>Acionado a cada nova mensagem em <computeroutput>/bbox_3d_with_labels</computeroutput>. A lógica principal é:<orderedlist>
+<listitem><para>Extrai o ID do objeto detectado.</para>
+</listitem><listitem><para>Se a esteira está em movimento, mantém a velocidade.</para>
+</listitem><listitem><para>Se um novo objeto chega à zona de solda, para a esteira.</para>
+</listitem><listitem><para>Recupera as operações de solda para esse ID do mapa <computeroutput>welding_poses</computeroutput>.</para>
+</listitem><listitem><para>Para cada operação, transforma a pose local em global usando a pose do objeto detectado.</para>
+</listitem><listitem><para>Executa a trajetória correspondente: &apos;normal&apos; (ponto único), &apos;line&apos; (caminho cartesiano linear) ou &apos;circle&apos; (gera waypoints em arco e usa caminho cartesiano).</para>
+</listitem><listitem><para>Após concluir todas as operações, retorna o robô à posição inicial e reinicia a esteira.</para>
+</listitem></orderedlist>
+<itemizedlist>
+<listitem><para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>msg</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Ponteiro compartilhado para a mensagem <computeroutput>Detection3DArray</computeroutput> recebida. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+</listitem></itemizedlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="444" column="10" bodyfile="src/welding_with_trajectory.cpp" bodystart="444" bodyend="636"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classWeldingWithTrajectory_1a20ffd3274d247bb38a044b1777dc9e0b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>WeldingWithTrajectory::WeldingWithTrajectory</definition>
+        <argsstring>()</argsstring>
+        <name>WeldingWithTrajectory</name>
+        <qualifiedname>WeldingWithTrajectory::WeldingWithTrajectory</qualifiedname>
+        <briefdescription>
+<para>Construtor da classe <ref refid="classWeldingWithTrajectory" kindref="compound">WeldingWithTrajectory</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><itemizedlist>
+<listitem></listitem></itemizedlist>
+</para>
+<para>Inicializa o nó ROS2, configurando todos os componentes necessários para o funcionamento do sistema de soldagem automatizada com trajetórias complexas.<itemizedlist>
+<listitem><para><mdash/> </para>
+</listitem></itemizedlist>
+</para>
+<sect3 id="classWeldingWithTrajectory_1autotoc_md21">
+<title>&lt;strong&gt;Responsabilidades principais&lt;/strong&gt;</title>
+<para><itemizedlist>
+<listitem><para><bold>Declaração de parâmetros</bold>: Declara e lê o parâmetro <computeroutput>yaml_file</computeroutput> para a configuração das trajetórias.</para>
+</listitem><listitem><para><bold>Configuração de publishers</bold>: Cria publishers para controlar as velocidades linear e angular da esteira.</para>
+</listitem><listitem><para><bold>Assinatura de tópicos</bold>: Cria um subscriber para <computeroutput>/bbox_3d_with_labels</computeroutput>, que aciona o callback <computeroutput>detectionCallback</computeroutput> para iniciar o processo de soldagem.</para>
+</listitem><listitem><para><bold>Carregamento de Configuração</bold>: Chama <computeroutput>loadLocationsFromYaml</computeroutput> para carregar as operações de solda do arquivo YAML.</para>
+</listitem><listitem><para><bold>Inicialização do MoveIt2</bold>: Inicia um temporizador que chama <computeroutput><ref refid="classWeldingWithTrajectory_1a1d98b4d1e7aa40e947fb4020fb12d44b" kindref="member">initMoveGroup()</ref></computeroutput> para garantir que a interface com o MoveIt2 seja estabelecida de forma robusta.</para>
+</listitem><listitem><para><mdash/> <simplesect kind="see"><para><ref refid="classWeldingWithTrajectory_1a4681f2563fb3948f89b6c87c95aa487a" kindref="member">loadLocationsFromYaml()</ref>, <ref refid="classWeldingWithTrajectory_1a1d98b4d1e7aa40e947fb4020fb12d44b" kindref="member">initMoveGroup()</ref>, <ref refid="classWeldingWithTrajectory_1ac22a6f6a51d664aa91d766c7d4003f30" kindref="member">detectionCallback()</ref> </para>
+</simplesect>
+</para>
+</listitem></itemizedlist>
+</para>
+</sect3>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="657" column="5" bodyfile="src/welding_with_trajectory.cpp" bodystart="657" bodyend="677"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Classe principal que gerencia o processo de soldagem automatizada com trajetórias complexas. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><itemizedlist>
+<listitem></listitem></itemizedlist>
+</para>
+<para>Esta classe implementa o nó ROS2 que integra a detecção de objetos, o controle da esteira circular e a execução de trajetórias de solda (ponto, linha, arco) com o MoveIt2 no ambiente Isaac Sim. Ela é responsável por carregar configurações de um arquivo YAML, reagir a detecções de objetos, controlar a esteira e comandar o braço robótico para executar as operações de soldagem. </para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>WeldingWithTrajectory</label>
+        <link refid="classWeldingWithTrajectory"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>WeldingWithTrajectory</label>
+        <link refid="classWeldingWithTrajectory"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </collaborationgraph>
+    <location file="src/welding_with_trajectory.cpp" line="164" column="1" bodyfile="src/welding_with_trajectory.cpp" bodystart="164" bodyend="678"/>
+    <listofallmembers>
+      <member refid="classWeldingWithTrajectory_1ac22a6f6a51d664aa91d766c7d4003f30" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>detectionCallback</name></member>
+      <member refid="classWeldingWithTrajectory_1a832b6b876b5d531b013cec99efe194dd" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>init_timer_</name></member>
+      <member refid="classWeldingWithTrajectory_1a1d98b4d1e7aa40e947fb4020fb12d44b" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>initMoveGroup</name></member>
+      <member refid="classWeldingWithTrajectory_1a4681f2563fb3948f89b6c87c95aa487a" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>loadLocationsFromYaml</name></member>
+      <member refid="classWeldingWithTrajectory_1a4299715e6efd25fcb56428adaa0daf99" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>move_group_arm</name></member>
+      <member refid="classWeldingWithTrajectory_1a7f73952c1d5b8e3a557e5c25b8620347" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>positions_for_arm</name></member>
+      <member refid="classWeldingWithTrajectory_1a25e0d46b6debb5a88ba075a9018d1d6e" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>publish_angular_velocity</name></member>
+      <member refid="classWeldingWithTrajectory_1a7ce7651e9f95a238612ba1d940e492e3" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>publish_velocity</name></member>
+      <member refid="classWeldingWithTrajectory_1a10a673bad77066022e11a323346f6aa4" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>publisher_</name></member>
+      <member refid="classWeldingWithTrajectory_1a32b9f4d80a412bef254992d055e29e66" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>publisher_1</name></member>
+      <member refid="classWeldingWithTrajectory_1a5f71615eaf3b5399905e59d49b153245" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>return_to_welding_position</name></member>
+      <member refid="classWeldingWithTrajectory_1aa22915ef390e12293f635cb2ce4c1f3b" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>stopped</name></member>
+      <member refid="classWeldingWithTrajectory_1af090f8630abecd78bd6834ebcd99e0be" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>sub_</name></member>
+      <member refid="classWeldingWithTrajectory_1a20ce21d2d2b4c0630bbdd4d16b5ab98b" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>welding_done</name></member>
+      <member refid="classWeldingWithTrajectory_1a513000098e39c3a57e482df11053bfde" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>welding_id</name></member>
+      <member refid="classWeldingWithTrajectory_1ae6a1b76d9362e8da8105d919d2a0a028" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>welding_poses</name></member>
+      <member refid="classWeldingWithTrajectory_1a20ffd3274d247bb38a044b1777dc9e0b" prot="public" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>WeldingWithTrajectory</name></member>
+      <member refid="classWeldingWithTrajectory_1a66ea90a1e06de012b3867e06e9bdbb05" prot="private" virt="non-virtual"><scope>WeldingWithTrajectory</scope><name>yaml_file</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

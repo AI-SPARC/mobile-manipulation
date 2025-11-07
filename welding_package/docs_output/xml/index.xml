@@ -1,0 +1,172 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygenindex xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="index.xsd" version="1.9.8" xml:lang="en-US">
+  <compound refid="classAddCollision" kind="class"><name>AddCollision</name>
+    <member refid="classAddCollision_1a9368de18a2a6010959bb4c5544aa4bfb" kind="variable"><name>sub_</name></member>
+    <member refid="classAddCollision_1a4710c15672605bcecb768fb87101ff28" kind="variable"><name>planning_scene_interface</name></member>
+    <member refid="classAddCollision_1a5066710b057d883e656ec2a7dc14353d" kind="variable"><name>move_group_arm</name></member>
+    <member refid="classAddCollision_1a409b0a749bf45ad7f52a448d80803bd1" kind="variable"><name>init_timer_</name></member>
+    <member refid="classAddCollision_1af4694f0554323602873664e1697277c0" kind="variable"><name>move_group</name></member>
+    <member refid="classAddCollision_1a4ec019c140ddccf0c6861a1f1eec9a9c" kind="variable"><name>added</name></member>
+    <member refid="classAddCollision_1a29437e0ed53d03150165758e471efa29" kind="variable"><name>authorized_labels_</name></member>
+    <member refid="classAddCollision_1a583658f873dfbec524ead9fc60221cb2" kind="variable"><name>unauthorized_labels_</name></member>
+    <member refid="classAddCollision_1a007a937935c292c437d247750f09f703" kind="function"><name>load_labels_from_yaml</name></member>
+    <member refid="classAddCollision_1ae71cb1663df137d76be97c3a7e94d6ff" kind="function"><name>initMoveGroup</name></member>
+    <member refid="classAddCollision_1a1a33193c5d4e6c053b0f235d1ad57f76" kind="function"><name>add_ground_plane</name></member>
+    <member refid="classAddCollision_1ac48e26b9890707e02066610e00bf6f7e" kind="function"><name>add_collision_box</name></member>
+    <member refid="classAddCollision_1a5be62bc61b71ffac46b8c49e4acad319" kind="function"><name>move_collision_box</name></member>
+    <member refid="classAddCollision_1a7ceab7e1368f9a45619945d2cf796267" kind="function"><name>is_authorized</name></member>
+    <member refid="classAddCollision_1a243aa00379704c6156276a2a6546280e" kind="function"><name>detectionCallback</name></member>
+    <member refid="classAddCollision_1ad23f7265cb6336be6c1b23bdc520fee4" kind="function"><name>AddCollision</name></member>
+  </compound>
+  <compound refid="classBasicWelding" kind="class"><name>BasicWelding</name>
+    <member refid="classBasicWelding_1a684fbb8fe1850b5134db56296aee2642" kind="variable"><name>joint_trajectory_pub</name></member>
+    <member refid="classBasicWelding_1aec74a72d70ffc482f94c82c4c9470fd3" kind="variable"><name>publisher_</name></member>
+    <member refid="classBasicWelding_1a1e899a7df636fb4a37a96df118ae4656" kind="variable"><name>sub_</name></member>
+    <member refid="classBasicWelding_1a880c952e466e027bdd35dc8eda0d6b0a" kind="variable"><name>sub_1</name></member>
+    <member refid="classBasicWelding_1ae3d9cbb126010f41c1589fed4c105e61" kind="variable"><name>move_group_arm</name></member>
+    <member refid="classBasicWelding_1add6ab1dfdeb6cf23a421745531b7d51a" kind="variable"><name>locations</name></member>
+    <member refid="classBasicWelding_1a24d8c60febf1f517ff2adbc5235e2774" kind="variable"><name>yaml_file</name></member>
+    <member refid="classBasicWelding_1a9b7399cc4f670cd358a7ad3b63ee378d" kind="variable"><name>init_timer_</name></member>
+    <member refid="classBasicWelding_1a253c97c9c4ef74f05cd1fd9b497e0c22" kind="variable"><name>welding_done</name></member>
+    <member refid="classBasicWelding_1a97d68d24a0b1cb41efc9a62077ae84ab" kind="variable"><name>stopped</name></member>
+    <member refid="classBasicWelding_1aa24772aae3d6b5605a0c70d4353dbb2e" kind="function"><name>loadLocationsFromYaml</name></member>
+    <member refid="classBasicWelding_1ab168d5735be5a7800f0a95abb16a8c17" kind="function"><name>initMoveGroup</name></member>
+    <member refid="classBasicWelding_1a06c11f7e44efef1c9ef3f3cc41e67aa7" kind="function"><name>return_to_welding_position</name></member>
+    <member refid="classBasicWelding_1a9655fff7bac85dce0e144f9e2f70052e" kind="function"><name>positions_for_arm</name></member>
+    <member refid="classBasicWelding_1a1b3399f462b19fed356dbf7a0a47b670" kind="function"><name>publish_velocity</name></member>
+    <member refid="classBasicWelding_1a55216cf7b1055af356d7f6afa08d4311" kind="function"><name>detectionCallback</name></member>
+    <member refid="classBasicWelding_1a6cd8c785f71fbcc5de6cf0406549e1a4" kind="function"><name>BasicWelding</name></member>
+  </compound>
+  <compound refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4" kind="struct"><name>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;</name>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" kind="function"><name>operator()</name></member>
+  </compound>
+  <compound refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4" kind="struct"><name>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</name>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" kind="function"><name>operator()</name></member>
+    <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" kind="function"><name>operator()</name></member>
+  </compound>
+  <compound refid="structLabelRule" kind="struct"><name>LabelRule</name>
+    <member refid="structLabelRule_1a14393fbb705873544744c4181b4ef7f9" kind="variable"><name>label</name></member>
+    <member refid="structLabelRule_1a9f6d1ce45c0113b3d575c082e124c8ea" kind="variable"><name>is_prefix</name></member>
+  </compound>
+  <compound refid="structpair__hash" kind="struct"><name>pair_hash</name>
+    <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" kind="function"><name>operator()</name></member>
+    <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" kind="function"><name>operator()</name></member>
+    <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" kind="function"><name>operator()</name></member>
+    <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" kind="function"><name>operator()</name></member>
+    <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" kind="function"><name>operator()</name></member>
+  </compound>
+  <compound refid="structTupleEqual" kind="struct"><name>TupleEqual</name>
+    <member refid="structTupleEqual_1a751f3560a0d9bc5b68fd86607ae69e26" kind="function"><name>operator()</name></member>
+    <member refid="structTupleEqual_1a751f3560a0d9bc5b68fd86607ae69e26" kind="function"><name>operator()</name></member>
+    <member refid="structTupleEqual_1a751f3560a0d9bc5b68fd86607ae69e26" kind="function"><name>operator()</name></member>
+    <member refid="structTupleEqual_1a751f3560a0d9bc5b68fd86607ae69e26" kind="function"><name>operator()</name></member>
+    <member refid="structTupleEqual_1a751f3560a0d9bc5b68fd86607ae69e26" kind="function"><name>operator()</name></member>
+  </compound>
+  <compound refid="structTupleHash" kind="struct"><name>TupleHash</name>
+    <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" kind="function"><name>operator()</name></member>
+    <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" kind="function"><name>operator()</name></member>
+    <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" kind="function"><name>operator()</name></member>
+    <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" kind="function"><name>operator()</name></member>
+    <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" kind="function"><name>operator()</name></member>
+  </compound>
+  <compound refid="classWelding" kind="class"><name>Welding</name>
+    <member refid="classWelding_1adfda2a8510c799f3c2699ac99e5468c1" kind="variable"><name>publisher_</name></member>
+    <member refid="classWelding_1a19fa2943d4fcc02c038686c280bce184" kind="variable"><name>publisher_1</name></member>
+    <member refid="classWelding_1a5dbf3724fab3fca9df622a73d2a486d4" kind="variable"><name>sub_</name></member>
+    <member refid="classWelding_1a77e92d6a79908cbea394a394526c5783" kind="variable"><name>move_group_arm</name></member>
+    <member refid="classWelding_1acda7829aaab39b8fe36f4b9064b6e525" kind="variable"><name>yaml_file</name></member>
+    <member refid="classWelding_1ab5b71ade482caee12344ed4efe29cd48" kind="variable"><name>init_timer_</name></member>
+    <member refid="classWelding_1ac90f42d27aaa0852ab89c5bdaf78262f" kind="variable"><name>welding_poses</name></member>
+    <member refid="classWelding_1a456d442509931ead17ed7c264674c4a6" kind="variable"><name>welding_id</name></member>
+    <member refid="classWelding_1ac963adf903ef3d91b206c93750400187" kind="variable"><name>stopped</name></member>
+    <member refid="classWelding_1a67de48f82e2c4a838689abc481e2f382" kind="variable"><name>welding_done</name></member>
+    <member refid="classWelding_1a5159367a4c2ab41513d81bb339c07709" kind="function"><name>loadLocationsFromYaml</name></member>
+    <member refid="classWelding_1a24258dea10218f8834c8a000221f6410" kind="function"><name>initMoveGroup</name></member>
+    <member refid="classWelding_1a8420c61171c026d4870b88426cb8215f" kind="function"><name>return_to_welding_position</name></member>
+    <member refid="classWelding_1a77e45df07f337bb83dbe9b869001b33c" kind="function"><name>positions_for_arm</name></member>
+    <member refid="classWelding_1aee46de4c5dce5208fa029bc7a7098d0e" kind="function"><name>publish_velocity</name></member>
+    <member refid="classWelding_1ad0c0392480e99aadc14c15761b5cc399" kind="function"><name>publish_angular_velocity</name></member>
+    <member refid="classWelding_1a7342d4cbb06a41d54ceea6ebc3135753" kind="function"><name>detectionCallback</name></member>
+    <member refid="classWelding_1a5c4c64ce080b7b85f559eedd483ce498" kind="function"><name>Welding</name></member>
+  </compound>
+  <compound refid="structWeldingWithTrajectory_1_1WeldingPoseData" kind="struct"><name>WeldingWithTrajectory::WeldingPoseData</name>
+    <member refid="structWeldingWithTrajectory_1_1WeldingPoseData_1ab7f8248b53e44f7bd30e771f06164a7c" kind="variable"><name>pose</name></member>
+    <member refid="structWeldingWithTrajectory_1_1WeldingPoseData_1a38d3b70536a871cdd955ffb0df4dda85" kind="variable"><name>trajectory_type</name></member>
+    <member refid="structWeldingWithTrajectory_1_1WeldingPoseData_1a2b691ad42956c3182850ea002f8613d9" kind="variable"><name>trajectory_data</name></member>
+  </compound>
+  <compound refid="classWeldingWithCircularConveyorBelt" kind="class"><name>WeldingWithCircularConveyorBelt</name>
+    <member refid="classWeldingWithCircularConveyorBelt_1a540435baad7e132941ea2282a4c126f5" kind="variable"><name>publisher_</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a169b428c5919ca9cc756dfdf050f8bd2" kind="variable"><name>publisher_1</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a4c2e800f7f5e15611812c7c30f72e334" kind="variable"><name>sub_</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a904f307492b0180435b951c8f8839f2d" kind="variable"><name>move_group_arm</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1adcff645ce53e7b33f652c51c8bf9a3b0" kind="variable"><name>locations</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a3c7923acce90f55323ff98103aeab7d1" kind="variable"><name>yaml_file</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1ae6792bc72dea595674afe02289d76f0d" kind="variable"><name>init_timer_</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a552c5763e0195a2a0e8f974c50dcbcaf" kind="variable"><name>welding_id</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1aa8067e0464f5244e8c8074f534a04eb5" kind="variable"><name>stopped</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a43e892da6c5476d5022a4323da370cd2" kind="variable"><name>welding_done</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1acd842a4506ee817c36b678526725e382" kind="function"><name>loadLocationsFromYaml</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a005f435019c2c8379dd43c1365cbabe5" kind="function"><name>initMoveGroup</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1aca3bc9914238ed309c9f9d11d1cc349a" kind="function"><name>return_to_welding_position</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a6d0866ce848ecc1d2b578980f8fed575" kind="function"><name>positions_for_arm</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1af843d86b53163d3f3b99971d822a764b" kind="function"><name>publish_velocity</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a6518cf0684e8df463f969ef876b681e8" kind="function"><name>publish_angular_velocity</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1a7ed15a04ed394330761216c27b572e17" kind="function"><name>detectionCallback</name></member>
+    <member refid="classWeldingWithCircularConveyorBelt_1ab51200482cd539bae5b014ec7c593e8e" kind="function"><name>WeldingWithCircularConveyorBelt</name></member>
+  </compound>
+  <compound refid="classWeldingWithTrajectory" kind="class"><name>WeldingWithTrajectory</name>
+    <member refid="classWeldingWithTrajectory_1a10a673bad77066022e11a323346f6aa4" kind="variable"><name>publisher_</name></member>
+    <member refid="classWeldingWithTrajectory_1a32b9f4d80a412bef254992d055e29e66" kind="variable"><name>publisher_1</name></member>
+    <member refid="classWeldingWithTrajectory_1af090f8630abecd78bd6834ebcd99e0be" kind="variable"><name>sub_</name></member>
+    <member refid="classWeldingWithTrajectory_1a4299715e6efd25fcb56428adaa0daf99" kind="variable"><name>move_group_arm</name></member>
+    <member refid="classWeldingWithTrajectory_1a66ea90a1e06de012b3867e06e9bdbb05" kind="variable"><name>yaml_file</name></member>
+    <member refid="classWeldingWithTrajectory_1a832b6b876b5d531b013cec99efe194dd" kind="variable"><name>init_timer_</name></member>
+    <member refid="classWeldingWithTrajectory_1ae6a1b76d9362e8da8105d919d2a0a028" kind="variable"><name>welding_poses</name></member>
+    <member refid="classWeldingWithTrajectory_1a513000098e39c3a57e482df11053bfde" kind="variable"><name>welding_id</name></member>
+    <member refid="classWeldingWithTrajectory_1aa22915ef390e12293f635cb2ce4c1f3b" kind="variable"><name>stopped</name></member>
+    <member refid="classWeldingWithTrajectory_1a20ce21d2d2b4c0630bbdd4d16b5ab98b" kind="variable"><name>welding_done</name></member>
+    <member refid="classWeldingWithTrajectory_1a4681f2563fb3948f89b6c87c95aa487a" kind="function"><name>loadLocationsFromYaml</name></member>
+    <member refid="classWeldingWithTrajectory_1a1d98b4d1e7aa40e947fb4020fb12d44b" kind="function"><name>initMoveGroup</name></member>
+    <member refid="classWeldingWithTrajectory_1a5f71615eaf3b5399905e59d49b153245" kind="function"><name>return_to_welding_position</name></member>
+    <member refid="classWeldingWithTrajectory_1a7f73952c1d5b8e3a557e5c25b8620347" kind="function"><name>positions_for_arm</name></member>
+    <member refid="classWeldingWithTrajectory_1a7ce7651e9f95a238612ba1d940e492e3" kind="function"><name>publish_velocity</name></member>
+    <member refid="classWeldingWithTrajectory_1a25e0d46b6debb5a88ba075a9018d1d6e" kind="function"><name>publish_angular_velocity</name></member>
+    <member refid="classWeldingWithTrajectory_1ac22a6f6a51d664aa91d766c7d4003f30" kind="function"><name>detectionCallback</name></member>
+    <member refid="classWeldingWithTrajectory_1a20ffd3274d247bb38a044b1777dc9e0b" kind="function"><name>WeldingWithTrajectory</name></member>
+  </compound>
+  <compound refid="namespacerclcpp" kind="namespace"><name>rclcpp</name>
+  </compound>
+  <compound refid="namespacestd" kind="namespace"><name>std</name>
+  </compound>
+  <compound refid="namespacestd_1_1chrono__literals" kind="namespace"><name>std::chrono_literals</name>
+  </compound>
+  <compound refid="add__collision__objects_8cpp" kind="file"><name>add_collision_objects.cpp</name>
+    <member refid="add__collision__objects_8cpp_1acd1c775ffe27f83c098ab92b3a64965f" kind="function"><name>operator&lt;&lt;</name></member>
+    <member refid="add__collision__objects_8cpp_1a3c04138a5bfe5d72780bb7e82a18e627" kind="function"><name>main</name></member>
+  </compound>
+  <compound refid="welding_8cpp" kind="file"><name>welding.cpp</name>
+    <member refid="welding_8cpp_1acd1c775ffe27f83c098ab92b3a64965f" kind="function"><name>operator&lt;&lt;</name></member>
+    <member refid="welding_8cpp_1a0ddf1224851353fc92bfbff6f499fa97" kind="function"><name>main</name></member>
+  </compound>
+  <compound refid="welding__multiple__objects_8cpp" kind="file"><name>welding_multiple_objects.cpp</name>
+    <member refid="welding__multiple__objects_8cpp_1acd1c775ffe27f83c098ab92b3a64965f" kind="function"><name>operator&lt;&lt;</name></member>
+    <member refid="welding__multiple__objects_8cpp_1a0ddf1224851353fc92bfbff6f499fa97" kind="function"><name>main</name></member>
+  </compound>
+  <compound refid="welding__with__circular__conveyor__belt_8cpp" kind="file"><name>welding_with_circular_conveyor_belt.cpp</name>
+    <member refid="welding__with__circular__conveyor__belt_8cpp_1acd1c775ffe27f83c098ab92b3a64965f" kind="function"><name>operator&lt;&lt;</name></member>
+    <member refid="welding__with__circular__conveyor__belt_8cpp_1a0ddf1224851353fc92bfbff6f499fa97" kind="function"><name>main</name></member>
+  </compound>
+  <compound refid="welding__with__trajectory_8cpp" kind="file"><name>welding_with_trajectory.cpp</name>
+    <member refid="welding__with__trajectory_8cpp_1acd1c775ffe27f83c098ab92b3a64965f" kind="function"><name>operator&lt;&lt;</name></member>
+    <member refid="welding__with__trajectory_8cpp_1a0ddf1224851353fc92bfbff6f499fa97" kind="function"><name>main</name></member>
+  </compound>
+  <compound refid="dir_68267d1309a1af8e8297ef4c3efbcdba" kind="dir"><name>src</name>
+  </compound>
+</doxygenindex>

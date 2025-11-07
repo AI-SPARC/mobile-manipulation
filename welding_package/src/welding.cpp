@@ -1,3 +1,24 @@
+/**
+ * @file welding.cpp
+ * @brief Nó ROS2 responsável pelo controle automatizado de soldagem básica em esteira linear.
+ * * @details
+ * Este arquivo implementa a classe `BasicWelding`, responsável por controlar um braço robótico
+ * e uma **esteira linear** no ambiente de simulação **Isaac Sim**.  
+ * * A arquitetura integra **ROS2**, **MoveIt2** e **YAML-CPP**. O nó monitora detecções 3D de 
+ * objetos (ex: "firecabinet"), para a esteira quando o objeto está na posição correta,
+ * executa uma sequência de pontos de solda pré-configurada, e então retoma o movimento da esteira.
+ * * Diferente de implementações com esteiras circulares ou trajetórias complexas, este nó
+ * foca em uma operação linear simples:
+ * 1. Detecta objeto.
+ * 2. Para esteira.
+ * 3. Executa *toda* a lista de poses do YAML.
+ * 4. Marca objeto como feito (para não soldar de novo).
+ * 5. Continua esteira.
+ * 
+ * @version 1.0
+ * @date 07-11-2025
+ * @author Lucas Momesso
+ */
 #include <memory>
 #include <vector>
 #include <tuple>
@@ -98,26 +119,52 @@ struct TupleEqual {
     }
 };
 
-
-class Welding : public rclcpp::Node {
+/**
+ * @class BasicWelding
+ * @brief Classe principal para o controle de soldagem básica em esteira linear.
+ * * @details
+ * Implementa o nó ROS2 que monitora detecções 3D, controla uma esteira linear 
+ * (publicando em `/conveyor_velocity`) e comanda o braço robótico (via MoveIt2) 
+ * para executar uma sequência de solda fixa carregada de um arquivo YAML.
+ */
+class BasicWelding : public rclcpp::Node {
 
 private:
 
-    //Publishers.
+    /// Publisher de trajetória de juntas (declarado mas não inicializado/usado neste nó).
     rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
+    /// Publisher de velocidade linear da esteira.
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
 
-    //Subscriptions.
+    /// Subscriber principal de detecções 3D (para /bbox_3d_with_labels).
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
+    /// Subscriber secundário de detecções 3D (declarado mas não inicializado/usado).
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
 
+    /// Interface MoveIt2 para controle do braço robótico.
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
 
+    /// Vetor de poses locais de soldagem (relativas ao objeto) carregadas do YAML.
     std::vector<geometry_msgs::msg::Pose> locations;
+    /// Caminho do arquivo YAML de poses.
     std::string yaml_file;
 
+    /// Temporizador para inicialização assíncrona do MoveGroup.
     rclcpp::TimerBase::SharedPtr init_timer_;
 
+    /// Conjunto para rastrear IDs de objetos que já foram soldados.
+    std::unordered_set<std::string> welding_done;
+    /// Flag de estado para indicar se a esteira está parada para soldagem.
+    bool stopped = false;
+
+    /**
+     * @brief Carrega uma lista de poses de solda de um arquivo YAML.
+     * * @details
+     * Processa o arquivo YAML especificado, esperando uma estrutura de lista simples
+     * de poses (posição e orientação), e as armazena no vetor `locations`.
+     * * @param yaml_path Caminho do arquivo YAML a ser carregado.
+     * @return Vetor de `geometry_msgs::msg::Pose` contendo as poses de solda locais.
+     */
     std::vector<geometry_msgs::msg::Pose> loadLocationsFromYaml(const std::string &yaml_path)
     {
         
@@ -178,7 +225,12 @@ private:
     }
 
 
-
+    /**
+     * @brief Inicializa a interface MoveGroup do MoveIt2 de forma assíncrona.
+     * * @details
+     * Tenta criar a instância `move_group_arm` para o grupo "denso_arm".
+     * Se for bem-sucedido, cancela o temporizador `init_timer_`.
+     */
     void initMoveGroup() {
         try 
         {
@@ -198,6 +250,12 @@ private:
 
     }
 
+    /**
+     * @brief Retorna o braço robótico à sua posição inicial (home).
+     * * @details
+     * Planeja e executa um movimento para a configuração de juntas predefinida
+     * de "home" ou "pronto para soldar".
+     */
     void return_to_welding_position()
     {
          if (!move_group_arm) {
@@ -224,11 +282,18 @@ private:
             rclcpp::sleep_for(std::chrono::milliseconds(100));
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
-                RCLCPP_INFO(this->get_logger(), "Returned to welding position.");
+                RCLCPP_INFO(this->get_logger(), "Returned to BasicWelding position.");
             }
         }
     }
     
+    /**
+     * @brief Move o braço robótico até uma pose alvo.
+     * * @details
+     * Configura o planejador MoveIt2 e tenta encontrar e executar um plano
+     * para mover o efetuador final até a `target_pose` fornecida.
+     * * @param target_pose A pose de destino para o efetuador final (em coordenadas globais).
+     */
     void positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
     {
         if (!move_group_arm) {
@@ -268,6 +333,10 @@ private:
 
     }
 
+    /**
+     * @brief Publica a velocidade linear da esteira.
+     * @param velocity Valor da velocidade linear.
+     */
     void publish_velocity(float velocity)
     {
         auto message = std_msgs::msg::Float32();
@@ -284,9 +353,25 @@ private:
 
     */
     
-    std::unordered_set<std::string> welding_done;
-    bool stopped = false;
-
+ 
+    /**
+     * @brief Callback de detecção de objetos 3D.
+     * * @details
+     * Este é o núcleo da lógica de controle.
+     * 1. Filtra detecções para a classe "firecabinet".
+     * 2. Verifica se o objeto está na zona de solda (`y < 0.2 && y > 0.0`).
+     * 3. Verifica se o objeto já foi soldado (usando `welding_done`).
+     * 4. Se está na zona, não foi soldado, e a esteira está se movendo (`stopped == false`):
+     * - Para a esteira (`publish_velocity(0.0)`) e marca `stopped = true`.
+     * 5. Se a esteira está parada (`stopped == true`) e o objeto ainda não foi soldado:
+     * - Executa *toda* a sequência de poses de `locations`, transformando cada
+     * pose local em global usando a pose do objeto detectado.
+     * - Após o loop, marca o ID do objeto como soldado (`welding_done.insert`).
+     * - Retorna o robô à posição inicial.
+     * - Libera a esteira (`stopped = false`) e define a velocidade para continuar.
+     * 6. Se nenhuma condição for atendida (ex: objeto fora da zona), apenas continua a esteira.
+     * * @param msg Mensagem `Detection3DArray` recebida do tópico `/bbox_3d_with_labels`.
+     */
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         for (const auto &det : msg->detections)
@@ -350,8 +435,33 @@ private:
         
 
 public:
-    Welding()
-     : Node("welding")
+    /**
+     * @brief Construtor da classe BasicWelding.
+     * * @details
+     * Inicializa o nó ROS2, configurando os componentes para o processo de soldagem em esteira linear.
+     * * ---
+     * ### Responsabilidades principais
+     * - **Declaração de parâmetros**
+     * - Declara e lê o parâmetro `yaml_file` contendo o caminho para o arquivo YAML
+     * com a sequência *única* de poses locais de solda.
+     * * - **Configuração de publishers**
+     * - `publisher_` → Cria o publisher para o tópico `/conveyor_velocity`, controlando a
+     * **velocidade linear da esteira**.
+     * * - **Assinatura de tópicos**
+     * - `sub_` → Cria o subscriber para o tópico `/bbox_3d_with_labels`, que recebe detecções 3D.
+     * O callback associado (`detectionCallback`) orquestra a parada da esteira,
+     * a execução da sequência de solda e a retomada da esteira.
+     * * - **Leitura e carregamento das poses de solda**
+     * - Chama o método `loadLocationsFromYaml(yaml_file)` para carregar a lista
+     * de poses locais de solda.
+     * * - **Inicialização do MoveIt2**
+     * - Cria o temporizador `init_timer_`, que chama periodicamente `initMoveGroup()`
+     * até que a interface `MoveGroupInterface` seja inicializada com sucesso.
+     * * ---
+     * @see loadLocationsFromYaml(), initMoveGroup(), detectionCallback()
+     */
+    BasicWelding()
+     : Node("basic_welding")
     {
         this->declare_parameter<std::string>("yaml_file", "");
    
@@ -361,13 +471,13 @@ public:
        
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,
-            std::bind(&Welding::detectionCallback, this, std::placeholders::_1));
+            std::bind(&BasicWelding::detectionCallback, this, std::placeholders::_1));
         
         loadLocationsFromYaml(yaml_file);
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
-            std::bind(&Welding::initMoveGroup, this));
+            std::bind(&BasicWelding::initMoveGroup, this));
 
     }   
 };
@@ -375,7 +485,7 @@ public:
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<Welding>());
+  rclcpp::spin(std::make_shared<BasicWelding>());
   rclcpp::shutdown();
   return 0;
 }

@@ -1,0 +1,457 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classAddCollision" kind="class" language="C++" prot="public">
+    <compoundname>AddCollision</compoundname>
+    <basecompoundref prot="public" virt="non-virtual">rclcpp::Node</basecompoundref>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classAddCollision_1a9368de18a2a6010959bb4c5544aa4bfb" prot="private" static="no" mutable="no">
+        <type>rclcpp::Subscription&lt; vision_msgs::msg::Detection3DArray &gt;::SharedPtr</type>
+        <definition>rclcpp::Subscription&lt;vision_msgs::msg::Detection3DArray&gt;::SharedPtr AddCollision::sub_</definition>
+        <argsstring></argsstring>
+        <name>sub_</name>
+        <qualifiedname>AddCollision::sub_</qualifiedname>
+        <briefdescription>
+<para>Assinatura para mensagens de detecção 3D (topic: <computeroutput>/boxes_detection_array</computeroutput>). </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="146" column="38" bodyfile="src/add_collision_objects.cpp" bodystart="146" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classAddCollision_1a4710c15672605bcecb768fb87101ff28" prot="private" static="no" mutable="no">
+        <type>moveit::planning_interface::PlanningSceneInterface</type>
+        <definition>moveit::planning_interface::PlanningSceneInterface AddCollision::planning_scene_interface</definition>
+        <argsstring></argsstring>
+        <name>planning_scene_interface</name>
+        <qualifiedname>AddCollision::planning_scene_interface</qualifiedname>
+        <briefdescription>
+<para>Interface para manipulação de objetos de colisão no MoveIt. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="151" column="56" bodyfile="src/add_collision_objects.cpp" bodystart="151" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classAddCollision_1a5066710b057d883e656ec2a7dc14353d" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; moveit::planning_interface::MoveGroupInterface &gt;</type>
+        <definition>std::unique_ptr&lt;moveit::planning_interface::MoveGroupInterface&gt; AddCollision::move_group_arm</definition>
+        <argsstring></argsstring>
+        <name>move_group_arm</name>
+        <qualifiedname>AddCollision::move_group_arm</qualifiedname>
+        <briefdescription>
+<para>Ponteiros para os grupo do braço no Moveit. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="156" column="21" bodyfile="src/add_collision_objects.cpp" bodystart="156" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classAddCollision_1a409b0a749bf45ad7f52a448d80803bd1" prot="private" static="no" mutable="no">
+        <type>rclcpp::TimerBase::SharedPtr</type>
+        <definition>rclcpp::TimerBase::SharedPtr AddCollision::init_timer_</definition>
+        <argsstring></argsstring>
+        <name>init_timer_</name>
+        <qualifiedname>AddCollision::init_timer_</qualifiedname>
+        <briefdescription>
+<para>Timer usado para tentar inicializar o MoveGroupInterface até que ele esteja disponível. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="161" column="34" bodyfile="src/add_collision_objects.cpp" bodystart="161" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classAddCollision_1af4694f0554323602873664e1697277c0" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string AddCollision::move_group</definition>
+        <argsstring></argsstring>
+        <name>move_group</name>
+        <qualifiedname>AddCollision::move_group</qualifiedname>
+        <briefdescription>
+<para>Nome do grupo MoveIt usado (padrão: &quot;denso_arm&quot;). </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="166" column="17" bodyfile="src/add_collision_objects.cpp" bodystart="166" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classAddCollision_1a4ec019c140ddccf0c6861a1f1eec9a9c" prot="private" static="no" mutable="no">
+        <type>std::unordered_set&lt; std::string &gt;</type>
+        <definition>std::unordered_set&lt;std::string&gt; AddCollision::added</definition>
+        <argsstring></argsstring>
+        <name>added</name>
+        <qualifiedname>AddCollision::added</qualifiedname>
+        <briefdescription>
+<para>Conjunto de IDs de objetos já adicionados à cena, para evitar duplicações. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="171" column="24" bodyfile="src/add_collision_objects.cpp" bodystart="171" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classAddCollision_1a29437e0ed53d03150165758e471efa29" prot="private" static="no" mutable="no">
+        <type>std::vector&lt; <ref refid="structLabelRule" kindref="compound">LabelRule</ref> &gt;</type>
+        <definition>std::vector&lt;LabelRule&gt; AddCollision::authorized_labels_</definition>
+        <argsstring></argsstring>
+        <name>authorized_labels_</name>
+        <qualifiedname>AddCollision::authorized_labels_</qualifiedname>
+        <briefdescription>
+<para>Vetores com labels autorizadas e não autorizadas. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="176" column="17" bodyfile="src/add_collision_objects.cpp" bodystart="176" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classAddCollision_1a583658f873dfbec524ead9fc60221cb2" prot="private" static="no" mutable="no">
+        <type>std::vector&lt; <ref refid="structLabelRule" kindref="compound">LabelRule</ref> &gt;</type>
+        <definition>std::vector&lt;LabelRule&gt; AddCollision::unauthorized_labels_</definition>
+        <argsstring></argsstring>
+        <name>unauthorized_labels_</name>
+        <qualifiedname>AddCollision::unauthorized_labels_</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="177" column="17" bodyfile="src/add_collision_objects.cpp" bodystart="177" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classAddCollision_1a007a937935c292c437d247750f09f703" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void AddCollision::load_labels_from_yaml</definition>
+        <argsstring>(const std::string &amp;file_path)</argsstring>
+        <name>load_labels_from_yaml</name>
+        <qualifiedname>AddCollision::load_labels_from_yaml</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>file_path</declname>
+        </param>
+        <briefdescription>
+<para>Lê as listas de labels autorizadas e não autorizadas de um arquivo YAML. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>file_path</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Caminho do arquivo YAML contendo os labels. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="184" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="184" bodyend="222"/>
+      </memberdef>
+      <memberdef kind="function" id="classAddCollision_1ae71cb1663df137d76be97c3a7e94d6ff" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void AddCollision::initMoveGroup</definition>
+        <argsstring>()</argsstring>
+        <name>initMoveGroup</name>
+        <qualifiedname>AddCollision::initMoveGroup</qualifiedname>
+        <briefdescription>
+<para>Inicializa o grupo MoveIt do braço (tenta várias vezes até conseguir). </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="227" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="227" bodyend="239"/>
+      </memberdef>
+      <memberdef kind="function" id="classAddCollision_1a1a33193c5d4e6c053b0f235d1ad57f76" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void AddCollision::add_ground_plane</definition>
+        <argsstring>()</argsstring>
+        <name>add_ground_plane</name>
+        <qualifiedname>AddCollision::add_ground_plane</qualifiedname>
+        <briefdescription>
+<para>Adiciona o plano de chão como objeto de colisão na cena. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="244" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="244" bodyend="265"/>
+      </memberdef>
+      <memberdef kind="function" id="classAddCollision_1ac48e26b9890707e02066610e00bf6f7e" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void AddCollision::add_collision_box</definition>
+        <argsstring>(const std::string &amp;id, const std::array&lt; double, 3 &gt; &amp;dimensions, const geometry_msgs::msg::Pose &amp;pose)</argsstring>
+        <name>add_collision_box</name>
+        <qualifiedname>AddCollision::add_collision_box</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>id</declname>
+        </param>
+        <param>
+          <type>const std::array&lt; double, 3 &gt; &amp;</type>
+          <declname>dimensions</declname>
+        </param>
+        <param>
+          <type>const geometry_msgs::msg::Pose &amp;</type>
+          <declname>pose</declname>
+        </param>
+        <briefdescription>
+<para>Adiciona uma caixa de colisão na cena MoveIt. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>id</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Identificador único do objeto. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>dimensions</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Dimensões da caixa [x, y, z]. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>pose</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Posição e orientação da caixa no frame &quot;world&quot;. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="273" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="273" bodyend="294"/>
+      </memberdef>
+      <memberdef kind="function" id="classAddCollision_1a5be62bc61b71ffac46b8c49e4acad319" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void AddCollision::move_collision_box</definition>
+        <argsstring>(const std::string &amp;id, const geometry_msgs::msg::Pose &amp;pose)</argsstring>
+        <name>move_collision_box</name>
+        <qualifiedname>AddCollision::move_collision_box</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>id</declname>
+        </param>
+        <param>
+          <type>const geometry_msgs::msg::Pose &amp;</type>
+          <declname>pose</declname>
+        </param>
+        <briefdescription>
+<para>Move (atualiza a posição) de uma caixa de colisão existente. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>id</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Identificador único do objeto. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>pose</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Nova pose do objeto. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="301" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="301" bodyend="311"/>
+      </memberdef>
+      <memberdef kind="function" id="classAddCollision_1a7ceab7e1368f9a45619945d2cf796267" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool AddCollision::is_authorized</definition>
+        <argsstring>(const std::string &amp;label)</argsstring>
+        <name>is_authorized</name>
+        <qualifiedname>AddCollision::is_authorized</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>label</declname>
+        </param>
+        <briefdescription>
+<para>Verifica se um label é autorizado de acordo com as listas carregadas. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>label</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Nome do label do objeto detectado. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><computeroutput>true</computeroutput> se o label for autorizado, <computeroutput>false</computeroutput> caso contrário. </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="318" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="318" bodyend="339"/>
+      </memberdef>
+      <memberdef kind="function" id="classAddCollision_1a243aa00379704c6156276a2a6546280e" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void AddCollision::detectionCallback</definition>
+        <argsstring>(const vision_msgs::msg::Detection3DArray::SharedPtr msg)</argsstring>
+        <name>detectionCallback</name>
+        <qualifiedname>AddCollision::detectionCallback</qualifiedname>
+        <param>
+          <type>const vision_msgs::msg::Detection3DArray::SharedPtr</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+<para>Callback acionado ao receber uma nova mensagem de detecção 3D. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Verifica cada objeto detectado, testa se o label é autorizado e adiciona/move a caixa de colisão correspondente na cena MoveIt.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>msg</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Ponteiro para a mensagem <computeroutput>vision_msgs::msg::Detection3DArray</computeroutput> recebida. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="349" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="349" bodyend="383"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classAddCollision_1ad23f7265cb6336be6c1b23bdc520fee4" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>AddCollision::AddCollision</definition>
+        <argsstring>()</argsstring>
+        <name>AddCollision</name>
+        <qualifiedname>AddCollision::AddCollision</qualifiedname>
+        <briefdescription>
+<para>Construtor da classe <ref refid="classAddCollision" kindref="compound">AddCollision</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Inicializa o nó ROS2 responsável por <bold>gerenciar objetos de colisão no ambiente MoveIt2</bold> com base nas <bold>detecções 3D recebidas de um tópico</bold>. <linebreak/>
+ Este nó integra dados de percepção com o sistema de planejamento de movimento, garantindo que o robô evite colisões com objetos detectados em tempo real.</para>
+<para><bold>Responsabilidades principais:</bold><itemizedlist>
+<listitem><para>Declara e lê o parâmetro <computeroutput>yaml_file</computeroutput>, que define o caminho do arquivo contendo as listas de <emphasis>labels</emphasis> autorizadas e não autorizadas.</para>
+</listitem><listitem><para>Declara e lê o parâmetro <computeroutput>move_group</computeroutput>, que define o nome do grupo MoveIt a ser controlado (ex.: <computeroutput>&quot;denso_arm&quot;</computeroutput>).</para>
+</listitem><listitem><para>Cria o <bold>subscriber</bold> para o tópico <computeroutput>/boxes_detection_array</computeroutput>, que fornece as detecções 3D dos objetos no ambiente.</para>
+</listitem><listitem><para>Inicializa um <bold>timer</bold> para tentar configurar o <computeroutput>MoveGroupInterface</computeroutput> de forma assíncrona, evitando erros caso o MoveIt ainda não esteja pronto na inicialização.</para>
+</listitem><listitem><para>Adiciona automaticamente um <bold>plano de chão (ground plane)</bold> como objeto de colisão.</para>
+</listitem><listitem><para>Carrega as <bold>regras de labels autorizadas e não autorizadas</bold> a partir do arquivo YAML especificado.</para>
+</listitem></itemizedlist>
+</para>
+<sect3 id="classAddCollision_1autotoc_md0">
+<title>Subscribers</title>
+<para><itemizedlist>
+<listitem><para><computeroutput>sub_</computeroutput> → Assina o tópico <computeroutput>/boxes_detection_array</computeroutput> com mensagens do tipo <computeroutput>vision_msgs::msg::Detection3DArray</computeroutput>. <linebreak/>
+ Cada detecção contém o ID do objeto (classe) e sua pose 3D no espaço. <linebreak/>
+ O callback associado (<computeroutput>detectionCallback</computeroutput>) adiciona ou move caixas de colisão correspondentes na cena MoveIt.</para>
+</listitem></itemizedlist>
+</para>
+</sect3>
+<sect3 id="classAddCollision_1autotoc_md1">
+<title>Timer</title>
+<para><itemizedlist>
+<listitem><para><computeroutput>init_timer_</computeroutput> → Cria um temporizador que chama periodicamente <computeroutput><ref refid="classAddCollision_1ae71cb1663df137d76be97c3a7e94d6ff" kindref="member">initMoveGroup()</ref></computeroutput> até que o <computeroutput>MoveGroupInterface</computeroutput> seja inicializado com sucesso. <linebreak/>
+ Esse método garante que o nó só tente manipular o MoveIt quando o contexto de ROS2 estiver totalmente inicializado.</para>
+</listitem></itemizedlist>
+</para>
+</sect3>
+<sect3 id="classAddCollision_1autotoc_md2">
+<title>Parâmetros ROS2</title>
+<para><itemizedlist>
+<listitem><para><computeroutput>yaml_file</computeroutput> (<computeroutput>std::string</computeroutput>) → Caminho do arquivo YAML contendo as listas de labels autorizadas e não autorizadas.</para>
+</listitem><listitem><para><computeroutput>move_group</computeroutput> (<computeroutput>std::string</computeroutput>) → Nome do grupo MoveIt2 (por padrão, <computeroutput>&quot;denso_arm&quot;</computeroutput>).</para>
+</listitem></itemizedlist>
+</para>
+<para><simplesect kind="note"><para>O construtor também chama internamente:<itemizedlist>
+<listitem><para><computeroutput><ref refid="classAddCollision_1a1a33193c5d4e6c053b0f235d1ad57f76" kindref="member">add_ground_plane()</ref></computeroutput> → adiciona o plano de chão como objeto fixo de colisão.</para>
+</listitem><listitem><para><computeroutput><ref refid="classAddCollision_1a007a937935c292c437d247750f09f703" kindref="member">load_labels_from_yaml()</ref></computeroutput> → carrega as listas de labels a partir do arquivo YAML configurado. </para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+</para>
+</sect3>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="430" column="5" bodyfile="src/add_collision_objects.cpp" bodystart="430" bodyend="450"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Classe principal do nó responsável por adicionar objetos de colisão no ambiente MoveIt. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>Esta classe herda de <computeroutput>rclcpp::Node</computeroutput> e implementa:<itemizedlist>
+<listitem><para>Assinatura de mensagens de detecção 3D.</para>
+</listitem><listitem><para>Leitura de labels autorizadas e não autorizadas de um arquivo YAML.</para>
+</listitem><listitem><para>Adição e atualização de objetos de colisão na cena MoveIt.</para>
+</listitem><listitem><para>Inicialização de MoveGroupInterface para manipulação de grupos robóticos. </para>
+</listitem></itemizedlist>
+</para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>AddCollision</label>
+        <link refid="classAddCollision"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>AddCollision</label>
+        <link refid="classAddCollision"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </collaborationgraph>
+    <location file="src/add_collision_objects.cpp" line="138" column="1" bodyfile="src/add_collision_objects.cpp" bodystart="138" bodyend="451"/>
+    <listofallmembers>
+      <member refid="classAddCollision_1ac48e26b9890707e02066610e00bf6f7e" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>add_collision_box</name></member>
+      <member refid="classAddCollision_1a1a33193c5d4e6c053b0f235d1ad57f76" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>add_ground_plane</name></member>
+      <member refid="classAddCollision_1ad23f7265cb6336be6c1b23bdc520fee4" prot="public" virt="non-virtual"><scope>AddCollision</scope><name>AddCollision</name></member>
+      <member refid="classAddCollision_1a4ec019c140ddccf0c6861a1f1eec9a9c" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>added</name></member>
+      <member refid="classAddCollision_1a29437e0ed53d03150165758e471efa29" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>authorized_labels_</name></member>
+      <member refid="classAddCollision_1a243aa00379704c6156276a2a6546280e" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>detectionCallback</name></member>
+      <member refid="classAddCollision_1a409b0a749bf45ad7f52a448d80803bd1" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>init_timer_</name></member>
+      <member refid="classAddCollision_1ae71cb1663df137d76be97c3a7e94d6ff" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>initMoveGroup</name></member>
+      <member refid="classAddCollision_1a7ceab7e1368f9a45619945d2cf796267" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>is_authorized</name></member>
+      <member refid="classAddCollision_1a007a937935c292c437d247750f09f703" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>load_labels_from_yaml</name></member>
+      <member refid="classAddCollision_1a5be62bc61b71ffac46b8c49e4acad319" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>move_collision_box</name></member>
+      <member refid="classAddCollision_1af4694f0554323602873664e1697277c0" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>move_group</name></member>
+      <member refid="classAddCollision_1a5066710b057d883e656ec2a7dc14353d" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>move_group_arm</name></member>
+      <member refid="classAddCollision_1a4710c15672605bcecb768fb87101ff28" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>planning_scene_interface</name></member>
+      <member refid="classAddCollision_1a9368de18a2a6010959bb4c5544aa4bfb" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>sub_</name></member>
+      <member refid="classAddCollision_1a583658f873dfbec524ead9fc60221cb2" prot="private" virt="non-virtual"><scope>AddCollision</scope><name>unauthorized_labels_</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

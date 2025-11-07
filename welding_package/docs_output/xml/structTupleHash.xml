@@ -1,0 +1,110 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structTupleHash" kind="struct" language="C++" prot="public">
+    <compoundname>TupleHash</compoundname>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t TupleHash::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>TupleHash::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="99" column="17" bodyfile="src/add_collision_objects.cpp" bodystart="99" bodyend="104"/>
+      </memberdef>
+      <memberdef kind="function" id="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t TupleHash::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>TupleHash::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding.cpp" line="105" column="17" bodyfile="src/welding.cpp" bodystart="105" bodyend="110"/>
+      </memberdef>
+      <memberdef kind="function" id="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t TupleHash::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>TupleHash::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="98" column="17" bodyfile="src/welding_multiple_objects.cpp" bodystart="98" bodyend="103"/>
+      </memberdef>
+      <memberdef kind="function" id="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t TupleHash::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>TupleHash::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="100" column="17" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="100" bodyend="105"/>
+      </memberdef>
+      <memberdef kind="function" id="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t TupleHash::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>TupleHash::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="137" column="17" bodyfile="src/welding_with_trajectory.cpp" bodystart="137" bodyend="142"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="src/add_collision_objects.cpp" line="98" column="1" bodyfile="src/add_collision_objects.cpp" bodystart="98" bodyend="105"/>
+    <listofallmembers>
+      <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" virt="non-virtual"><scope>TupleHash</scope><name>operator()</name></member>
+      <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" virt="non-virtual"><scope>TupleHash</scope><name>operator()</name></member>
+      <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" virt="non-virtual"><scope>TupleHash</scope><name>operator()</name></member>
+      <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" virt="non-virtual"><scope>TupleHash</scope><name>operator()</name></member>
+      <member refid="structTupleHash_1a0ae6112d3b05d7497dafde8e278e22e8" prot="public" virt="non-virtual"><scope>TupleHash</scope><name>operator()</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

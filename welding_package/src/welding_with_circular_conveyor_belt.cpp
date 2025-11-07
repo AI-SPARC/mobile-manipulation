@@ -1,3 +1,19 @@
+/**
+ * @file welding_with_circular_conveyor_belt.cpp
+ * @brief Nó ROS2 responsável pelo controle automatizado de soldagem.
+ * 
+ * @details
+ * Este arquivo implementa a classe `WeldingWithCircularConveyorBelt`, responsável por controlar o braço robótico e a esteira
+ * no ambiente de simulação **Isaac Sim**, além de processar detecções 3D de objetos e executar
+ * operações de soldagem automatizadas.  
+ * 
+ * A arquitetura integra **ROS2**, **MoveIt2** e **YAML-CPP**, realizando o planejamento de trajetórias,
+ * controle da esteira e execução de poses de solda configuradas externamente via arquivo YAML.
+ * 
+ * @version 1.0
+ * @date 07-11-2025
+ * @author Lucas Momesso
+ */
 #include <memory>
 #include <vector>
 #include <tuple>
@@ -98,27 +114,39 @@ struct TupleEqual {
     }
 };
 
-
-class Welding : public rclcpp::Node {
+/**
+ * @class WeldingWithCircularConveyorBelt
+ * @brief Classe principal responsável pelo controle automatizado de soldagem.
+ * 
+ * @details
+ * Implementa o nó ROS2 que controla a esteira e o braço robótico no ambiente
+ * de simulação Isaac Sim, executando a sequência de soldagem automaticamente.
+ */
+class WeldingWithCircularConveyorBelt : public rclcpp::Node {
 
 private:
 
-    //Publishers.
-    rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
+    /// Publisher de velocidade linear da esteira.
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
+    /// Publisher de velocidade angular da esteira.
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_1;
-
-    //Subscriptions.
+    /// Subscriber de detecções 3D.
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
-
+    /// Interface MoveIt2 para controle do braço robótico.
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
-
+    /// Vetor de poses locais de soldagem carregadas do YAML.
     std::vector<geometry_msgs::msg::Pose> locations;
+    /// Caminho do arquivo YAML de poses.
     std::string yaml_file;
-
+    /// Temporizador para inicialização assíncrona do MoveGroup.
     rclcpp::TimerBase::SharedPtr init_timer_;
 
+    /**
+     * @brief Carrega poses de solda a partir de um arquivo YAML.
+     * 
+     * @param yaml_path Caminho do arquivo YAML.
+     * @return Vetor de poses carregadas.
+     */
     std::vector<geometry_msgs::msg::Pose> loadLocationsFromYaml(const std::string &yaml_path)
     {
         
@@ -179,7 +207,12 @@ private:
     }
 
 
-
+    /**
+     * @brief Inicializa a interface MoveGroup do MoveIt2.
+     * 
+     * @details
+     * Tenta criar a instância `move_group_arm` de forma assíncrona até obter sucesso.
+     */
     void initMoveGroup() {
         try 
         {
@@ -199,6 +232,9 @@ private:
 
     }
 
+    /**
+     * @brief Retorna o braço robótico à posição inicial de soldagem.
+     */
     void return_to_welding_position()
     {
          if (!move_group_arm) {
@@ -225,11 +261,16 @@ private:
             rclcpp::sleep_for(std::chrono::milliseconds(100));
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
-                RCLCPP_INFO(this->get_logger(), "Returned to welding position.");
+                RCLCPP_INFO(this->get_logger(), "Returned to WeldingWithCircularConveyorBelt position.");
             }
         }
     }
     
+    /**
+     * @brief Move o braço robótico até uma pose alvo.
+     * 
+     * @param target_pose Pose de destino.
+     */
     void positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
     {
         if (!move_group_arm) {
@@ -269,6 +310,10 @@ private:
 
     }
 
+     /**
+     * @brief Publica a velocidade linear da esteira.
+     * @param velocity Valor da velocidade linear.
+     */
     void publish_velocity(float velocity)
     {
         auto message = std_msgs::msg::Float32();
@@ -278,6 +323,10 @@ private:
 
     }
 
+    /**
+     * @brief Publica a velocidade angular da esteira.
+     * @param velocity Valor da velocidade angular.
+     */
     void publish_angular_velocity(float velocity)
     {
         auto message = std_msgs::msg::Float32();
@@ -297,6 +346,13 @@ private:
     std::string welding_id;
     bool stopped = false, welding_done = false;
 
+     /**
+     * @brief Callback de detecção de objetos 3D.
+     * 
+     * @details
+     * Interpreta as mensagens do tópico `/bbox_3d_with_labels` e controla a esteira
+     * e o robô conforme a posição e identificação dos objetos detectados.
+     */
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         for (const auto &det : msg->detections)
@@ -369,8 +425,71 @@ private:
         
 
 public:
-    Welding()
-     : Node("welding")
+      /**
+     * @brief Construtor da classe WeldingWithCircularConveyorBelt.
+     * 
+     * @details
+     * Inicializa o nó ROS2 responsável pelo controle integrado da esteira circular e do braço robótico
+     * no ambiente de simulação **Isaac Sim**, coordenando o processo automatizado de soldagem.  
+     * 
+     * Este construtor configura todos os componentes ROS2 necessários para o funcionamento completo
+     * do sistema, desde a leitura das poses locais de solda até a publicação de comandos de velocidade
+     * da esteira e o recebimento de detecções 3D de objetos.
+     * 
+     * ---
+     * ### **Responsabilidades principais**
+     * - **Declaração de parâmetros**
+     *   - Declara e lê o parâmetro `yaml_file`, que define o caminho para o arquivo YAML contendo
+     *     as poses locais de solda (posição e orientação de cada ponto relativo à peça detectada).
+     * 
+     * - **Configuração de publishers**
+     *   - `publisher_` → Cria o publisher responsável por enviar mensagens do tipo `std_msgs::msg::Float32`
+     *     para o tópico `/conveyor_velocity`, controlando a **velocidade linear da esteira circular**.
+     *   - `publisher_1` → Cria o publisher para o tópico `/conveyor_angular_velocity`, enviando comandos
+     *     para ajustar a **velocidade angular** (rotação) da esteira.
+     * 
+     * - **Assinatura de tópicos**
+     *   - `sub_` → Cria o subscriber para o tópico `/bbox_3d_with_labels`, que recebe mensagens
+     *     do tipo `vision_msgs::msg::Detection3DArray`.  
+     *     Cada mensagem contém uma lista de objetos detectados com posição, orientação e identificador
+     *     da classe (ex: “firecabinet”).  
+     *     O callback associado (`detectionCallback`) é responsável por:
+     *     - Monitorar a posição do objeto detectado;
+     *     - Parar a esteira quando o objeto estiver na área de soldagem;
+     *     - Acionar o robô para realizar a sequência de solda com base nas poses carregadas do YAML;
+     *     - Retomar o movimento da esteira após o término da soldagem.
+     * 
+     * - **Leitura e carregamento das poses de solda**
+     *   - Chama o método `loadLocationsFromYaml(yaml_file)` para carregar as poses locais
+     *     de solda (coordenadas relativas à peça) definidas no arquivo de configuração YAML.
+     *     Essas poses são transformadas em coordenadas globais quando a peça é detectada,
+     *     permitindo que o robô realize a soldagem com precisão em cada ponto.
+     * 
+     * - **Inicialização do MoveIt2**
+     *   - Cria o temporizador `init_timer_`, que chama periodicamente o método `initMoveGroup()`
+     *     até que a interface `MoveGroupInterface` do MoveIt2 seja inicializada com sucesso.
+     *     Isso garante que o sistema não falhe caso o MoveIt2 ainda não esteja pronto
+     *     no momento em que o nó é iniciado.
+     * 
+     * ---
+     * ### **Fluxo resumido**
+     * 1. Declara o parâmetro `yaml_file`;
+     * 2. Cria os publishers de velocidade linear e angular da esteira;
+     * 3. Cria o subscriber de detecções 3D com callback inteligente;
+     * 4. Carrega poses de solda do arquivo YAML configurado;
+     * 5. Inicia o temporizador que tenta conectar o MoveIt2 até sucesso.
+     * 
+     * ---
+     * ### **Integração geral**
+     * - Integração direta com o **Isaac Sim** via tópicos `/conveyor_velocity` e `/conveyor_angular_velocity`;
+     * - Comunicação com o **MoveIt2** para planejamento e execução de trajetórias do braço robótico;
+     * - Compatibilidade com mensagens do tipo **vision_msgs** (usadas em pipelines de visão 3D);
+     * - Arquitetura modular, permitindo fácil substituição da esteira linear por circular sem alterar o restante do código.
+     * 
+     * @see loadLocationsFromYaml(), initMoveGroup(), detectionCallback()
+     */
+    WeldingWithCircularConveyorBelt()
+     : Node("welding_with_circular_conveyor_belt")
     {
         this->declare_parameter<std::string>("yaml_file", "");
    
@@ -381,13 +500,13 @@ public:
        
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,
-            std::bind(&Welding::detectionCallback, this, std::placeholders::_1));
+            std::bind(&WeldingWithCircularConveyorBelt::detectionCallback, this, std::placeholders::_1));
         
         loadLocationsFromYaml(yaml_file);
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
-            std::bind(&Welding::initMoveGroup, this));
+            std::bind(&WeldingWithCircularConveyorBelt::initMoveGroup, this));
 
     }   
 };
@@ -395,7 +514,7 @@ public:
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<Welding>());
+  rclcpp::spin(std::make_shared<WeldingWithCircularConveyorBelt>());
   rclcpp::shutdown();
   return 0;
 }

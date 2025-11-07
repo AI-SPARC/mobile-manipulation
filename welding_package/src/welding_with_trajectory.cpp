@@ -1,3 +1,56 @@
+/**
+ * @file welding_with_trajectory.cpp
+ * @brief Nó ROS2 responsável pela soldagem automatizada com trajetórias complexas usando MoveIt2 e Isaac Sim.
+ * * @details
+ * Este arquivo implementa o nó **WeldingWithTrajectory**, responsável por realizar o processo completo
+ * de soldagem de peças transportadas por uma **esteira circular** simulada no **Isaac Sim**, utilizando
+ * controle de trajetória do **MoveIt2** para o braço robótico.
+ * * O nó coordena de forma autônoma a movimentação do robô e da esteira, realizando diferentes tipos de
+ * trajetórias de soldagem — **normais, lineares ou circulares** — de acordo com os parâmetros definidos
+ * em um arquivo YAML.
+ * * ---
+ * ### Principais funcionalidades
+ * - Integração direta com **Isaac Sim** para controle de velocidade da esteira circular;
+ * - Planejamento e execução de **trajetórias cartesianas** com MoveIt2;
+ * - Leitura de **poses e trajetórias de solda** a partir de um arquivo YAML configurável;
+ * - Processamento de **detecções 3D** de objetos via tópico `/bbox_3d_with_labels`;
+ * - Controle sincronizado entre **detecção, parada da esteira e execução da solda**;
+ * - Suporte a **três tipos de trajetória**:
+ * - `"normal"`: movimento até uma única pose de soldagem;
+ * - `"line"`: soldagem linear entre o ponto atual e um ponto alvo;
+ * - `"circle"`: soldagem circular (definida por raio e ângulos);
+ * - Retorno automático do robô à posição inicial após a solda e retomada do movimento da esteira.
+ * * ---
+ * ### Fluxo geral de operação
+ * 1. O nó é iniciado e declara o parâmetro `yaml_file` contendo o caminho do arquivo de configuração;
+ * 2. O arquivo YAML é carregado pelo método `loadLocationsFromYaml()`, populando um mapa de operações de solda por objeto;
+ * 3. São criados publishers e subscribers ROS2 para comunicação com Isaac Sim e o sistema de visão;
+ * 4. Um temporizador (`init_timer_`) tenta inicializar o `MoveGroupInterface` de forma assíncrona;
+ * 5. Ao detectar uma peça via `/bbox_3d_with_labels`, o callback `detectionCallback()`:
+ * - Identifica o tipo de trajetória associado à peça;
+ * - Para a esteira quando a peça está na posição ideal;
+ * - Executa a trajetória de solda correspondente (ponto, linha ou arco);
+ * - Retoma o movimento da esteira após o término da solda.
+ * * ---
+ * ### Tópicos ROS2
+ * **Publishers**
+ * - `/conveyor_velocity` (`std_msgs::msg::Float32`): Controla a **velocidade linear** da esteira.
+ * - `/conveyor_angular_velocity` (`std_msgs::msg::Float32`): Controla a **velocidade angular** da esteira.
+ * * **Subscriber**
+ * - `/bbox_3d_with_labels` (`vision_msgs::msg::Detection3DArray`): Recebe detecções de objetos com pose e rótulo, disparando o processo de soldagem.
+ * * ---
+ * ### Parâmetros
+ * - `yaml_file`: Caminho para o arquivo YAML contendo as poses e definições de trajetória para cada tipo de objeto.
+ * * ---
+ * ### Integração com MoveIt2
+ * O `MoveGroupInterface` para o grupo `"denso_arm"` é usado para planejar e executar movimentos.
+ * A função de planejamento **cartesiano** (`computeCartesianPath`) é fundamental para gerar trajetórias
+ * suaves e contínuas para as soldas do tipo `"line"` e `"circle"`.
+ * * ---
+ * @version 1.0
+ * @date 07-11-2025
+ * @author Lucas Momesso
+ */
 #include <memory>
 #include <vector>
 #include <tuple>
@@ -99,35 +152,52 @@ struct TupleEqual {
 };
 
 
-class Welding : public rclcpp::Node {
+/**
+ * @class WeldingWithTrajectory
+ * @brief Classe principal que gerencia o processo de soldagem automatizada com trajetórias complexas.
+ * * @details
+ * Esta classe implementa o nó ROS2 que integra a detecção de objetos, o controle da esteira circular
+ * e a execução de trajetórias de solda (ponto, linha, arco) com o MoveIt2 no ambiente Isaac Sim.
+ * Ela é responsável por carregar configurações de um arquivo YAML, reagir a detecções de objetos,
+ * controlar a esteira e comandar o braço robótico para executar as operações de soldagem.
+ */
+class WeldingWithTrajectory : public rclcpp::Node {
 
 private:
-
+    /// @brief Estrutura para armazenar os dados de uma pose de soldagem, incluindo tipo e parâmetros de trajetória.
     struct WeldingPoseData
     {
-        geometry_msgs::msg::Pose pose;
-        std::string trajectory_type;
-        std::vector<double> trajectory_data; 
+        geometry_msgs::msg::Pose pose; ///< A pose de referência local (relativa ao objeto).
+        std::string trajectory_type;   ///< O tipo de trajetória ("normal", "line", "circle").
+        std::vector<double> trajectory_data; ///< Parâmetros para a trajetória (ex: raio, ângulos).
     };
 
-    //Publishers.
-    rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
+    /// Publisher para a velocidade linear da esteira.
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
+    /// Publisher para a velocidade angular da esteira.
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_1;
-
-    //Subscriptions.
+    /// Subscriber para as detecções 3D de objetos.
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_1;
-
+    /// Interface MoveIt2 para controle do grupo de juntas do braço robótico.
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
-
+    /// Caminho para o arquivo YAML de configuração das poses e trajetórias.
     std::string yaml_file;
-
+    /// Temporizador para a inicialização assíncrona do MoveGroupInterface.
     rclcpp::TimerBase::SharedPtr init_timer_;
-
+    /// Mapa que associa o ID de um objeto a um vetor de operações de soldagem.
     std::unordered_map<std::string, std::vector<WeldingPoseData>> welding_poses;
+    /// Variáveis de estado para controlar o processo de soldagem.
+    std::string welding_id;
+    bool stopped = false, welding_done = false;
 
-        
+    /**
+     * @brief Carrega as poses e os dados de trajetória de um arquivo YAML.
+     * * @details
+     * Este método processa um arquivo YAML, extraindo não apenas a posição e orientação, mas também
+     * o tipo de trajetória (`normal`, `line`, `circle`) e seus parâmetros associados. Os dados
+     * são armazenados no mapa `welding_poses`, usando o rótulo do objeto como chave.
+     * * @param yaml_path Caminho do arquivo YAML a ser carregado.
+     */
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
         try
@@ -222,9 +292,10 @@ private:
     }
 
 
-
-
-
+    /**
+     * @brief Inicializa a interface MoveGroup do MoveIt2 de forma assíncrona.
+     * @details Tenta criar a instância `move_group_arm` e cancela o temporizador em caso de sucesso.
+     */
     void initMoveGroup() {
         try 
         {
@@ -243,6 +314,9 @@ private:
 
     }
 
+    /**
+     * @brief Retorna o braço robótico à sua posição inicial de prontidão.
+     */
     void return_to_welding_position()
     {
          if (!move_group_arm) {
@@ -269,11 +343,17 @@ private:
             rclcpp::sleep_for(std::chrono::milliseconds(100));
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
-                RCLCPP_INFO(this->get_logger(), "Returned to welding position.");
+                RCLCPP_INFO(this->get_logger(), "Returned to WeldingWithTrajectory position.");
             }
         }
     }
     
+    /**
+     * @brief Move o robô para uma única pose alvo (trajetória 'normal').
+     * @details Configura e executa um plano do MoveIt2 para mover o efetuador final até uma
+     * `target_pose` específica. Usado para operações de soldagem em um único ponto.
+     * @param target_pose A pose de destino para o efetuador final.
+     */
     void positions_for_arm(const geometry_msgs::msg::Pose &target_pose) 
     {
         if (!move_group_arm) {
@@ -313,6 +393,10 @@ private:
 
     }
 
+    /**
+     * @brief Publica a velocidade linear da esteira.
+     * @param velocity Valor da velocidade linear.
+     */
     void publish_velocity(float velocity)
     {
         auto message = std_msgs::msg::Float32();
@@ -322,6 +406,10 @@ private:
 
     }
 
+    /**
+     * @brief Publica a velocidade angular da esteira.
+     * @param velocity Valor da velocidade angular.
+     */
     void publish_angular_velocity(float velocity)
     {
         auto message = std_msgs::msg::Float32();
@@ -338,9 +426,21 @@ private:
 
     */
     
-    std::string welding_id;
-    bool stopped = false, welding_done = false;
-
+ 
+    /**
+     * @brief Callback principal que processa detecções 3D e orquestra a soldagem.
+     * * @details
+     * Acionado a cada nova mensagem em `/bbox_3d_with_labels`. A lógica principal é:
+     * 1. Extrai o ID do objeto detectado.
+     * 2. Se a esteira está em movimento, mantém a velocidade.
+     * 3. Se um novo objeto chega à zona de solda, para a esteira.
+     * 4. Recupera as operações de solda para esse ID do mapa `welding_poses`.
+     * 5. Para cada operação, transforma a pose local em global usando a pose do objeto detectado.
+     * 6. Executa a trajetória correspondente: 'normal' (ponto único), 'line' (caminho cartesiano linear) ou
+     * 'circle' (gera waypoints em arco e usa caminho cartesiano).
+     * 7. Após concluir todas as operações, retorna o robô à posição inicial e reinicia a esteira.
+     * * @param msg Ponteiro compartilhado para a mensagem `Detection3DArray` recebida.
+     */
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         std::string id;
@@ -539,8 +639,23 @@ private:
         
 
 public:
-    Welding()
-     : Node("welding")
+    /**
+     * @brief Construtor da classe WeldingWithTrajectory.
+     * * @details
+     * Inicializa o nó ROS2, configurando todos os componentes necessários para o funcionamento
+     * do sistema de soldagem automatizada com trajetórias complexas.
+     * * ---
+     * ### **Responsabilidades principais**
+     * - **Declaração de parâmetros**: Declara e lê o parâmetro `yaml_file` para a configuração das trajetórias.
+     * - **Configuração de publishers**: Cria publishers para controlar as velocidades linear e angular da esteira.
+     * - **Assinatura de tópicos**: Cria um subscriber para `/bbox_3d_with_labels`, que aciona o callback `detectionCallback` para iniciar o processo de soldagem.
+     * - **Carregamento de Configuração**: Chama `loadLocationsFromYaml` para carregar as operações de solda do arquivo YAML.
+     * - **Inicialização do MoveIt2**: Inicia um temporizador que chama `initMoveGroup()` para garantir que a interface com o MoveIt2 seja estabelecida de forma robusta.
+     * * ---
+     * @see loadLocationsFromYaml(), initMoveGroup(), detectionCallback()
+     */
+    WeldingWithTrajectory()
+     : Node("welding_with_trajectory")
     {
         this->declare_parameter<std::string>("yaml_file", "");
    
@@ -551,13 +666,13 @@ public:
        
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,
-            std::bind(&Welding::detectionCallback, this, std::placeholders::_1));
+            std::bind(&WeldingWithTrajectory::detectionCallback, this, std::placeholders::_1));
         
         loadLocationsFromYaml(yaml_file);
 
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
-            std::bind(&Welding::initMoveGroup, this));
+            std::bind(&WeldingWithTrajectory::initMoveGroup, this));
 
     }   
 };
@@ -565,7 +680,7 @@ public:
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<Welding>());
+  rclcpp::spin(std::make_shared<WeldingWithTrajectory>());
   rclcpp::shutdown();
   return 0;
 }

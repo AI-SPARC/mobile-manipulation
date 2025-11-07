@@ -1,0 +1,463 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classWeldingWithCircularConveyorBelt" kind="class" language="C++" prot="public">
+    <compoundname>WeldingWithCircularConveyorBelt</compoundname>
+    <basecompoundref prot="public" virt="non-virtual">rclcpp::Node</basecompoundref>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1a540435baad7e132941ea2282a4c126f5" prot="private" static="no" mutable="no">
+        <type>rclcpp::Publisher&lt; std_msgs::msg::Float32 &gt;::SharedPtr</type>
+        <definition>rclcpp::Publisher&lt;std_msgs::msg::Float32&gt;::SharedPtr WeldingWithCircularConveyorBelt::publisher_</definition>
+        <argsstring></argsstring>
+        <name>publisher_</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::publisher_</qualifiedname>
+        <briefdescription>
+<para>Publisher de velocidade linear da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="130" column="35" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="130" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1a169b428c5919ca9cc756dfdf050f8bd2" prot="private" static="no" mutable="no">
+        <type>rclcpp::Publisher&lt; std_msgs::msg::Float32 &gt;::SharedPtr</type>
+        <definition>rclcpp::Publisher&lt;std_msgs::msg::Float32&gt;::SharedPtr WeldingWithCircularConveyorBelt::publisher_1</definition>
+        <argsstring></argsstring>
+        <name>publisher_1</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::publisher_1</qualifiedname>
+        <briefdescription>
+<para>Publisher de velocidade angular da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="132" column="35" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="132" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1a4c2e800f7f5e15611812c7c30f72e334" prot="private" static="no" mutable="no">
+        <type>rclcpp::Subscription&lt; vision_msgs::msg::Detection3DArray &gt;::SharedPtr</type>
+        <definition>rclcpp::Subscription&lt;vision_msgs::msg::Detection3DArray&gt;::SharedPtr WeldingWithCircularConveyorBelt::sub_</definition>
+        <argsstring></argsstring>
+        <name>sub_</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::sub_</qualifiedname>
+        <briefdescription>
+<para>Subscriber de detecções 3D. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="134" column="38" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="134" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1a904f307492b0180435b951c8f8839f2d" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; moveit::planning_interface::MoveGroupInterface &gt;</type>
+        <definition>std::unique_ptr&lt;moveit::planning_interface::MoveGroupInterface&gt; WeldingWithCircularConveyorBelt::move_group_arm</definition>
+        <argsstring></argsstring>
+        <name>move_group_arm</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::move_group_arm</qualifiedname>
+        <briefdescription>
+<para>Interface MoveIt2 para controle do braço robótico. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="136" column="21" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="136" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1adcff645ce53e7b33f652c51c8bf9a3b0" prot="private" static="no" mutable="no">
+        <type>std::vector&lt; geometry_msgs::msg::Pose &gt;</type>
+        <definition>std::vector&lt;geometry_msgs::msg::Pose&gt; WeldingWithCircularConveyorBelt::locations</definition>
+        <argsstring></argsstring>
+        <name>locations</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::locations</qualifiedname>
+        <briefdescription>
+<para>Vetor de poses locais de soldagem carregadas do YAML. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="138" column="17" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="138" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1a3c7923acce90f55323ff98103aeab7d1" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string WeldingWithCircularConveyorBelt::yaml_file</definition>
+        <argsstring></argsstring>
+        <name>yaml_file</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::yaml_file</qualifiedname>
+        <briefdescription>
+<para>Caminho do arquivo YAML de poses. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="140" column="17" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="140" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1ae6792bc72dea595674afe02289d76f0d" prot="private" static="no" mutable="no">
+        <type>rclcpp::TimerBase::SharedPtr</type>
+        <definition>rclcpp::TimerBase::SharedPtr WeldingWithCircularConveyorBelt::init_timer_</definition>
+        <argsstring></argsstring>
+        <name>init_timer_</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::init_timer_</qualifiedname>
+        <briefdescription>
+<para>Temporizador para inicialização assíncrona do MoveGroup. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="142" column="34" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="142" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1a552c5763e0195a2a0e8f974c50dcbcaf" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string WeldingWithCircularConveyorBelt::welding_id</definition>
+        <argsstring></argsstring>
+        <name>welding_id</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::welding_id</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="346" column="17" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="346" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1aa8067e0464f5244e8c8074f534a04eb5" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool WeldingWithCircularConveyorBelt::stopped</definition>
+        <argsstring></argsstring>
+        <name>stopped</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::stopped</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="347" column="10" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="347" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWeldingWithCircularConveyorBelt_1a43e892da6c5476d5022a4323da370cd2" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool WeldingWithCircularConveyorBelt::welding_done</definition>
+        <argsstring></argsstring>
+        <name>welding_done</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::welding_done</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="347" column="19" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="347" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1acd842a4506ee817c36b678526725e382" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; geometry_msgs::msg::Pose &gt;</type>
+        <definition>std::vector&lt; geometry_msgs::msg::Pose &gt; WeldingWithCircularConveyorBelt::loadLocationsFromYaml</definition>
+        <argsstring>(const std::string &amp;yaml_path)</argsstring>
+        <name>loadLocationsFromYaml</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::loadLocationsFromYaml</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>yaml_path</declname>
+        </param>
+        <briefdescription>
+<para>Carrega poses de solda a partir de um arquivo YAML. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>yaml_path</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Caminho do arquivo YAML. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Vetor de poses carregadas. </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="150" column="17" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="150" bodyend="207"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1a005f435019c2c8379dd43c1365cbabe5" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithCircularConveyorBelt::initMoveGroup</definition>
+        <argsstring>()</argsstring>
+        <name>initMoveGroup</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::initMoveGroup</qualifiedname>
+        <briefdescription>
+<para>Inicializa a interface MoveGroup do MoveIt2. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Tenta criar a instância <computeroutput>move_group_arm</computeroutput> de forma assíncrona até obter sucesso. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="216" column="10" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="216" bodyend="233"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1aca3bc9914238ed309c9f9d11d1cc349a" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithCircularConveyorBelt::return_to_welding_position</definition>
+        <argsstring>()</argsstring>
+        <name>return_to_welding_position</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::return_to_welding_position</qualifiedname>
+        <briefdescription>
+<para>Retorna o braço robótico à posição inicial de soldagem. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="238" column="10" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="238" bodyend="267"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1a6d0866ce848ecc1d2b578980f8fed575" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithCircularConveyorBelt::positions_for_arm</definition>
+        <argsstring>(const geometry_msgs::msg::Pose &amp;target_pose)</argsstring>
+        <name>positions_for_arm</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::positions_for_arm</qualifiedname>
+        <param>
+          <type>const geometry_msgs::msg::Pose &amp;</type>
+          <declname>target_pose</declname>
+        </param>
+        <briefdescription>
+<para>Move o braço robótico até uma pose alvo. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>target_pose</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pose de destino. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="274" column="10" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="274" bodyend="311"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1af843d86b53163d3f3b99971d822a764b" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithCircularConveyorBelt::publish_velocity</definition>
+        <argsstring>(float velocity)</argsstring>
+        <name>publish_velocity</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::publish_velocity</qualifiedname>
+        <param>
+          <type>float</type>
+          <declname>velocity</declname>
+        </param>
+        <briefdescription>
+<para>Publica a velocidade linear da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>velocity</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Valor da velocidade linear. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="317" column="10" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="317" bodyend="324"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1a6518cf0684e8df463f969ef876b681e8" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithCircularConveyorBelt::publish_angular_velocity</definition>
+        <argsstring>(float velocity)</argsstring>
+        <name>publish_angular_velocity</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::publish_angular_velocity</qualifiedname>
+        <param>
+          <type>float</type>
+          <declname>velocity</declname>
+        </param>
+        <briefdescription>
+<para>Publica a velocidade angular da esteira. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>velocity</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Valor da velocidade angular. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="330" column="10" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="330" bodyend="337"/>
+      </memberdef>
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1a7ed15a04ed394330761216c27b572e17" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void WeldingWithCircularConveyorBelt::detectionCallback</definition>
+        <argsstring>(const vision_msgs::msg::Detection3DArray::SharedPtr msg)</argsstring>
+        <name>detectionCallback</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::detectionCallback</qualifiedname>
+        <param>
+          <type>const vision_msgs::msg::Detection3DArray::SharedPtr</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+<para>Callback de detecção de objetos 3D. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Interpreta as mensagens do tópico <computeroutput>/bbox_3d_with_labels</computeroutput> e controla a esteira e o robô conforme a posição e identificação dos objetos detectados. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="356" column="10" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="356" bodyend="422"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classWeldingWithCircularConveyorBelt_1ab51200482cd539bae5b014ec7c593e8e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>WeldingWithCircularConveyorBelt::WeldingWithCircularConveyorBelt</definition>
+        <argsstring>()</argsstring>
+        <name>WeldingWithCircularConveyorBelt</name>
+        <qualifiedname>WeldingWithCircularConveyorBelt::WeldingWithCircularConveyorBelt</qualifiedname>
+        <briefdescription>
+<para>Construtor da classe <ref refid="classWeldingWithCircularConveyorBelt" kindref="compound">WeldingWithCircularConveyorBelt</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Inicializa o nó ROS2 responsável pelo controle integrado da esteira circular e do braço robótico no ambiente de simulação <bold>Isaac Sim</bold>, coordenando o processo automatizado de soldagem. <linebreak/>
+</para>
+<para>Este construtor configura todos os componentes ROS2 necessários para o funcionamento completo do sistema, desde a leitura das poses locais de solda até a publicação de comandos de velocidade da esteira e o recebimento de detecções 3D de objetos.</para>
+<para><hruler/>
+ </para>
+<sect3 id="classWeldingWithCircularConveyorBelt_1autotoc_md11">
+<title>&lt;strong&gt;Responsabilidades principais&lt;/strong&gt;</title>
+<para><itemizedlist>
+<listitem><para><bold>Declaração de parâmetros</bold><itemizedlist>
+<listitem><para>Declara e lê o parâmetro <computeroutput>yaml_file</computeroutput>, que define o caminho para o arquivo YAML contendo as poses locais de solda (posição e orientação de cada ponto relativo à peça detectada).</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para><bold>Configuração de publishers</bold><itemizedlist>
+<listitem><para><computeroutput>publisher_</computeroutput> → Cria o publisher responsável por enviar mensagens do tipo <computeroutput>std_msgs::msg::Float32</computeroutput> para o tópico <computeroutput>/conveyor_velocity</computeroutput>, controlando a <bold>velocidade linear da esteira circular</bold>.</para>
+</listitem><listitem><para><computeroutput>publisher_1</computeroutput> → Cria o publisher para o tópico <computeroutput>/conveyor_angular_velocity</computeroutput>, enviando comandos para ajustar a <bold>velocidade angular</bold> (rotação) da esteira.</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para><bold>Assinatura de tópicos</bold><itemizedlist>
+<listitem><para><computeroutput>sub_</computeroutput> → Cria o subscriber para o tópico <computeroutput>/bbox_3d_with_labels</computeroutput>, que recebe mensagens do tipo <computeroutput>vision_msgs::msg::Detection3DArray</computeroutput>. <linebreak/>
+ Cada mensagem contém uma lista de objetos detectados com posição, orientação e identificador da classe (ex: “firecabinet”). <linebreak/>
+ O callback associado (<computeroutput>detectionCallback</computeroutput>) é responsável por:<itemizedlist>
+<listitem><para>Monitorar a posição do objeto detectado;</para>
+</listitem><listitem><para>Parar a esteira quando o objeto estiver na área de soldagem;</para>
+</listitem><listitem><para>Acionar o robô para realizar a sequência de solda com base nas poses carregadas do YAML;</para>
+</listitem><listitem><para>Retomar o movimento da esteira após o término da soldagem.</para>
+</listitem></itemizedlist>
+</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para><bold>Leitura e carregamento das poses de solda</bold><itemizedlist>
+<listitem><para>Chama o método <computeroutput>loadLocationsFromYaml(yaml_file)</computeroutput> para carregar as poses locais de solda (coordenadas relativas à peça) definidas no arquivo de configuração YAML. Essas poses são transformadas em coordenadas globais quando a peça é detectada, permitindo que o robô realize a soldagem com precisão em cada ponto.</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para><bold>Inicialização do MoveIt2</bold><itemizedlist>
+<listitem><para>Cria o temporizador <computeroutput>init_timer_</computeroutput>, que chama periodicamente o método <computeroutput><ref refid="classWeldingWithCircularConveyorBelt_1a005f435019c2c8379dd43c1365cbabe5" kindref="member">initMoveGroup()</ref></computeroutput> até que a interface <computeroutput>MoveGroupInterface</computeroutput> do MoveIt2 seja inicializada com sucesso. Isso garante que o sistema não falhe caso o MoveIt2 ainda não esteja pronto no momento em que o nó é iniciado.</para>
+</listitem></itemizedlist>
+</para>
+</listitem></itemizedlist>
+</para>
+<para><hruler/>
+ </para>
+</sect3>
+<sect3 id="classWeldingWithCircularConveyorBelt_1autotoc_md13">
+<title>&lt;strong&gt;Fluxo resumido&lt;/strong&gt;</title>
+<para><orderedlist>
+<listitem><para>Declara o parâmetro <computeroutput>yaml_file</computeroutput>;</para>
+</listitem><listitem><para>Cria os publishers de velocidade linear e angular da esteira;</para>
+</listitem><listitem><para>Cria o subscriber de detecções 3D com callback inteligente;</para>
+</listitem><listitem><para>Carrega poses de solda do arquivo YAML configurado;</para>
+</listitem><listitem><para>Inicia o temporizador que tenta conectar o MoveIt2 até sucesso.</para>
+</listitem></orderedlist>
+</para>
+<para><hruler/>
+ </para>
+</sect3>
+<sect3 id="classWeldingWithCircularConveyorBelt_1autotoc_md15">
+<title>&lt;strong&gt;Integração geral&lt;/strong&gt;</title>
+<para><itemizedlist>
+<listitem><para>Integração direta com o <bold>Isaac Sim</bold> via tópicos <computeroutput>/conveyor_velocity</computeroutput> e <computeroutput>/conveyor_angular_velocity</computeroutput>;</para>
+</listitem><listitem><para>Comunicação com o <bold>MoveIt2</bold> para planejamento e execução de trajetórias do braço robótico;</para>
+</listitem><listitem><para>Compatibilidade com mensagens do tipo <bold>vision_msgs</bold> (usadas em pipelines de visão 3D);</para>
+</listitem><listitem><para>Arquitetura modular, permitindo fácil substituição da esteira linear por circular sem alterar o restante do código.</para>
+</listitem></itemizedlist>
+</para>
+<para><simplesect kind="see"><para><ref refid="classWeldingWithCircularConveyorBelt_1acd842a4506ee817c36b678526725e382" kindref="member">loadLocationsFromYaml()</ref>, <ref refid="classWeldingWithCircularConveyorBelt_1a005f435019c2c8379dd43c1365cbabe5" kindref="member">initMoveGroup()</ref>, <ref refid="classWeldingWithCircularConveyorBelt_1a7ed15a04ed394330761216c27b572e17" kindref="member">detectionCallback()</ref> </para>
+</simplesect>
+</para>
+</sect3>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="491" column="5" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="491" bodyend="511"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Classe principal responsável pelo controle automatizado de soldagem. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>Implementa o nó ROS2 que controla a esteira e o braço robótico no ambiente de simulação Isaac Sim, executando a sequência de soldagem automaticamente. </para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>WeldingWithCircularConveyorBelt</label>
+        <link refid="classWeldingWithCircularConveyorBelt"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>WeldingWithCircularConveyorBelt</label>
+        <link refid="classWeldingWithCircularConveyorBelt"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </collaborationgraph>
+    <location file="src/welding_with_circular_conveyor_belt.cpp" line="125" column="1" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="125" bodyend="512"/>
+    <listofallmembers>
+      <member refid="classWeldingWithCircularConveyorBelt_1a7ed15a04ed394330761216c27b572e17" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>detectionCallback</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1ae6792bc72dea595674afe02289d76f0d" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>init_timer_</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a005f435019c2c8379dd43c1365cbabe5" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>initMoveGroup</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1acd842a4506ee817c36b678526725e382" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>loadLocationsFromYaml</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1adcff645ce53e7b33f652c51c8bf9a3b0" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>locations</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a904f307492b0180435b951c8f8839f2d" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>move_group_arm</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a6d0866ce848ecc1d2b578980f8fed575" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>positions_for_arm</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a6518cf0684e8df463f969ef876b681e8" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>publish_angular_velocity</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1af843d86b53163d3f3b99971d822a764b" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>publish_velocity</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a540435baad7e132941ea2282a4c126f5" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>publisher_</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a169b428c5919ca9cc756dfdf050f8bd2" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>publisher_1</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1aca3bc9914238ed309c9f9d11d1cc349a" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>return_to_welding_position</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1aa8067e0464f5244e8c8074f534a04eb5" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>stopped</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a4c2e800f7f5e15611812c7c30f72e334" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>sub_</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a43e892da6c5476d5022a4323da370cd2" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>welding_done</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a552c5763e0195a2a0e8f974c50dcbcaf" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>welding_id</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1ab51200482cd539bae5b014ec7c593e8e" prot="public" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>WeldingWithCircularConveyorBelt</name></member>
+      <member refid="classWeldingWithCircularConveyorBelt_1a3c7923acce90f55323ff98103aeab7d1" prot="private" virt="non-virtual"><scope>WeldingWithCircularConveyorBelt</scope><name>yaml_file</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

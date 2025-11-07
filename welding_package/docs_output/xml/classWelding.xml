@@ -1,0 +1,630 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classWelding" kind="class" language="C++" prot="public">
+    <compoundname>Welding</compoundname>
+    <basecompoundref prot="public" virt="non-virtual">rclcpp::Node</basecompoundref>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classWelding_1adfda2a8510c799f3c2699ac99e5468c1" prot="private" static="no" mutable="no">
+        <type>rclcpp::Publisher&lt; std_msgs::msg::Float32 &gt;::SharedPtr</type>
+        <definition>rclcpp::Publisher&lt;std_msgs::msg::Float32&gt;::SharedPtr Welding::publisher_</definition>
+        <argsstring></argsstring>
+        <name>publisher_</name>
+        <qualifiedname>Welding::publisher_</qualifiedname>
+        <briefdescription>
+<para>Publica velocidade linear para a esteira do Isaac Sim. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="154" column="35" bodyfile="src/welding_multiple_objects.cpp" bodystart="154" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1a19fa2943d4fcc02c038686c280bce184" prot="private" static="no" mutable="no">
+        <type>rclcpp::Publisher&lt; std_msgs::msg::Float32 &gt;::SharedPtr</type>
+        <definition>rclcpp::Publisher&lt;std_msgs::msg::Float32&gt;::SharedPtr Welding::publisher_1</definition>
+        <argsstring></argsstring>
+        <name>publisher_1</name>
+        <qualifiedname>Welding::publisher_1</qualifiedname>
+        <briefdescription>
+<para>Publica velocidade angular para a esteira do Isaac Sim. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="155" column="35" bodyfile="src/welding_multiple_objects.cpp" bodystart="155" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1a5dbf3724fab3fca9df622a73d2a486d4" prot="private" static="no" mutable="no">
+        <type>rclcpp::Subscription&lt; vision_msgs::msg::Detection3DArray &gt;::SharedPtr</type>
+        <definition>rclcpp::Subscription&lt;vision_msgs::msg::Detection3DArray&gt;::SharedPtr Welding::sub_</definition>
+        <argsstring></argsstring>
+        <name>sub_</name>
+        <qualifiedname>Welding::sub_</qualifiedname>
+        <briefdescription>
+<para>Recebe a pose, tamanho e o id de objetos. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="158" column="38" bodyfile="src/welding_multiple_objects.cpp" bodystart="158" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1a77e92d6a79908cbea394a394526c5783" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; moveit::planning_interface::MoveGroupInterface &gt;</type>
+        <definition>std::unique_ptr&lt;moveit::planning_interface::MoveGroupInterface&gt; Welding::move_group_arm</definition>
+        <argsstring></argsstring>
+        <name>move_group_arm</name>
+        <qualifiedname>Welding::move_group_arm</qualifiedname>
+        <briefdescription>
+<para>Declara o move group do Moveit2. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="160" column="21" bodyfile="src/welding_multiple_objects.cpp" bodystart="160" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1acda7829aaab39b8fe36f4b9064b6e525" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string Welding::yaml_file</definition>
+        <argsstring></argsstring>
+        <name>yaml_file</name>
+        <qualifiedname>Welding::yaml_file</qualifiedname>
+        <briefdescription>
+<para>Caminho do arquivo yaml que contém as poses locais de solda de cada objeto. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="162" column="17" bodyfile="src/welding_multiple_objects.cpp" bodystart="162" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1ab5b71ade482caee12344ed4efe29cd48" prot="private" static="no" mutable="no">
+        <type>rclcpp::TimerBase::SharedPtr</type>
+        <definition>rclcpp::TimerBase::SharedPtr Welding::init_timer_</definition>
+        <argsstring></argsstring>
+        <name>init_timer_</name>
+        <qualifiedname>Welding::init_timer_</qualifiedname>
+        <briefdescription>
+<para>Inicia o timer para iniciar o move group do Moveit2. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="164" column="34" bodyfile="src/welding_multiple_objects.cpp" bodystart="164" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1ac90f42d27aaa0852ab89c5bdaf78262f" prot="private" static="no" mutable="no">
+        <type>std::unordered_map&lt; std::string, std::vector&lt; geometry_msgs::msg::Pose &gt; &gt;</type>
+        <definition>std::unordered_map&lt;std::string, std::vector&lt;geometry_msgs::msg::Pose&gt; &gt; Welding::welding_poses</definition>
+        <argsstring></argsstring>
+        <name>welding_poses</name>
+        <qualifiedname>Welding::welding_poses</qualifiedname>
+        <briefdescription>
+<para>Armazena as poses de solda associadas a cada objeto. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Este mapa associa um identificador de objeto (string) a uma lista de poses de solda. Cada entrada contém todas as posições e orientações (<computeroutput>geometry_msgs::msg::Pose</computeroutput>) que o robô deve posicionar o end-effector para realizar as soldas daquele objeto específico. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="173" column="24" bodyfile="src/welding_multiple_objects.cpp" bodystart="173" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1a456d442509931ead17ed7c264674c4a6" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string Welding::welding_id</definition>
+        <argsstring></argsstring>
+        <name>welding_id</name>
+        <qualifiedname>Welding::welding_id</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="538" column="17" bodyfile="src/welding_multiple_objects.cpp" bodystart="538" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1ac963adf903ef3d91b206c93750400187" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool Welding::stopped</definition>
+        <argsstring></argsstring>
+        <name>stopped</name>
+        <qualifiedname>Welding::stopped</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="539" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="539" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classWelding_1a67de48f82e2c4a838689abc481e2f382" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool Welding::welding_done</definition>
+        <argsstring></argsstring>
+        <name>welding_done</name>
+        <qualifiedname>Welding::welding_done</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="539" column="19" bodyfile="src/welding_multiple_objects.cpp" bodystart="539" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classWelding_1a5159367a4c2ab41513d81bb339c07709" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void Welding::loadLocationsFromYaml</definition>
+        <argsstring>(const std::string &amp;yaml_path)</argsstring>
+        <name>loadLocationsFromYaml</name>
+        <qualifiedname>Welding::loadLocationsFromYaml</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>yaml_path</declname>
+        </param>
+        <briefdescription>
+<para>Carrega as localizações de solda a partir de um arquivo YAML. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Esta função lê um arquivo YAML que contém um conjunto de objetos e suas respectivas posições/orientações de soldagem. O formato esperado do arquivo YAML é o seguinte:</para>
+<para><programlisting filename=".yaml"><codeline><highlight class="normal">trashcan:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/>-<sp/>location1:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/>position:<sp/>[x,<sp/>y,<sp/>z]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/>orientation:<sp/>[qx,<sp/>qy,<sp/>qz,<sp/>qw]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/>-<sp/>location2:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/>position:<sp/>[x,<sp/>y,<sp/>z]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/>orientation:<sp/>[qx,<sp/>qy,<sp/>qz,<sp/>qw]</highlight></codeline>
+<codeline><highlight class="normal">firecabinet:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/>-<sp/>location1:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/>position:<sp/>[x,<sp/>y,<sp/>z]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/>orientation:<sp/>[qx,<sp/>qy,<sp/>qz,<sp/>qw]</highlight></codeline>
+</programlisting></para>
+<para>Cada chave de nível superior (ex: <computeroutput>&quot;trashcan&quot;</computeroutput>, <computeroutput>&quot;firecabinet&quot;</computeroutput>) representa um objeto, e cada um possui uma lista de localizações com suas respectivas posições (<computeroutput>geometry_msgs::msg::Point</computeroutput>) e orientações (<computeroutput>geometry_msgs::msg::Quaternion</computeroutput>).</para>
+<para>As poses extraídas são convertidas em <computeroutput>geometry_msgs::msg::Pose</computeroutput> e armazenadas no mapa <computeroutput>welding_poses</computeroutput>, onde:</para>
+<para><itemizedlist>
+<listitem><para>**Chave (<computeroutput>std::string</computeroutput>)** → nome/label do objeto</para>
+</listitem><listitem><para>**Valor (<computeroutput>std::vector&lt;geometry_msgs::msg::Pose&gt;</computeroutput>)** → lista de poses associadas ao objeto</para>
+</listitem></itemizedlist>
+</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">yaml_path</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Caminho completo para o arquivo YAML contendo as localizações.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="note"><para><itemizedlist>
+<listitem><para>Entradas inválidas (sem <computeroutput>position</computeroutput> ou <computeroutput>orientation</computeroutput>, ou tamanhos incorretos) são ignoradas com um aviso no log.</para>
+</listitem><listitem><para>O mapa <computeroutput>welding_poses</computeroutput> é sobrescrito para cada label encontrado.</para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>YAML::Exception</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Caso o arquivo YAML seja inválido ou não possa ser carregado.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="warning"><para>Se o arquivo YAML não seguir o formato esperado, algumas localizações podem não ser carregadas corretamente, ou o mapa pode ficar incompleto.</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1ac90f42d27aaa0852ab89c5bdaf78262f" kindref="member">welding_poses</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="221" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="221" bodyend="295"/>
+      </memberdef>
+      <memberdef kind="function" id="classWelding_1a24258dea10218f8834c8a000221f6410" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void Welding::initMoveGroup</definition>
+        <argsstring>()</argsstring>
+        <name>initMoveGroup</name>
+        <qualifiedname>Welding::initMoveGroup</qualifiedname>
+        <briefdescription>
+<para>Inicializa a interface de controle do grupo de movimento do MoveIt. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Esta função cria uma instância de <computeroutput>moveit::planning_interface::MoveGroupInterface</computeroutput> responsável por controlar o grupo de juntas do manipulador (no caso, <computeroutput>&quot;denso_arm&quot;</computeroutput>).</para>
+<para>O método tenta inicializar a interface utilizando o contexto do nó atual (<computeroutput>shared_from_this()</computeroutput>). Caso a inicialização seja bem-sucedida, um log de sucesso é exibido e o timer de reinicialização (<computeroutput>init_timer_</computeroutput>) é cancelado, evitando chamadas repetidas.</para>
+<para>Um pequeno atraso de 5 segundos (<computeroutput>rclcpp::sleep_for</computeroutput>) é incluído para garantir que o MoveIt e o ROS2 tenham inicializado completamente antes do uso da interface.</para>
+<para>Caso ocorra uma exceção durante a criação da interface, um aviso (<computeroutput>RCLCPP_WARN</computeroutput>) é exibido no log, indicando que a inicialização ainda não foi concluída com sucesso.</para>
+<para><simplesect kind="note"><para>Esta função normalmente é chamada de forma periódica por um timer (<computeroutput>init_timer_</computeroutput>) até que o MoveGroupInterface seja criado corretamente. Após a criação bem-sucedida, o timer é cancelado.</para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>std::exception</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Se ocorrer um erro durante a criação do <computeroutput>MoveGroupInterface</computeroutput>.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="warning"><para>Certifique-se de que o MoveIt esteja em execução e o nome do grupo (<computeroutput>&quot;denso_arm&quot;</computeroutput>) corresponda ao definido no arquivo SRDF/MoveItConfig. Caso contrário, a inicialização falhará.</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1a77e92d6a79908cbea394a394526c5783" kindref="member">move_group_arm</ref>, <ref refid="classWelding_1ab5b71ade482caee12344ed4efe29cd48" kindref="member">init_timer_</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="328" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="328" bodyend="345"/>
+      </memberdef>
+      <memberdef kind="function" id="classWelding_1a8420c61171c026d4870b88426cb8215f" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void Welding::return_to_welding_position</definition>
+        <argsstring>()</argsstring>
+        <name>return_to_welding_position</name>
+        <qualifiedname>Welding::return_to_welding_position</qualifiedname>
+        <briefdescription>
+<para>Move o braço robótico de volta para a posição de soldagem padrão. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Esta função comanda o grupo de juntas do braço (<computeroutput>move_group_arm</computeroutput>) para retornar a uma configuração pré-definida de soldagem. As posições-alvo das juntas são definidas manualmente através de valores específicos para cada articulação.</para>
+<para>O método primeiro verifica se o <computeroutput>MoveGroupInterface</computeroutput> foi inicializado corretamente. Caso contrário, a função retorna imediatamente com uma mensagem de erro.</para>
+<para>Em seguida, define as metas de juntas via <computeroutput>setJointValueTarget()</computeroutput>, gera um plano de movimento com <computeroutput>plan()</computeroutput>, e, se o planejamento for bem-sucedido, executa o movimento usando <computeroutput>execute()</computeroutput>. Após a execução, é feito um pequeno atraso de 100 ms para garantir estabilidade e sincronização.</para>
+<para><simplesect kind="note"><para>Os valores das juntas foram ajustados empiricamente para corresponder à posição de soldagem. É importante garantir que esses ângulos sejam compatíveis com o modelo cinemático do robô e que não causem colisões.</para>
+</simplesect>
+<simplesect kind="warning"><para>Se o <computeroutput>MoveGroupInterface</computeroutput> não estiver inicializado, a função não realiza nenhuma ação e apenas registra um erro no log.</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1a24258dea10218f8834c8a000221f6410" kindref="member">initMoveGroup()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="373" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="373" bodyend="402"/>
+      </memberdef>
+      <memberdef kind="function" id="classWelding_1a77e45df07f337bb83dbe9b869001b33c" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void Welding::positions_for_arm</definition>
+        <argsstring>(const geometry_msgs::msg::Pose &amp;target_pose)</argsstring>
+        <name>positions_for_arm</name>
+        <qualifiedname>Welding::positions_for_arm</qualifiedname>
+        <param>
+          <type>const geometry_msgs::msg::Pose &amp;</type>
+          <declname>target_pose</declname>
+        </param>
+        <briefdescription>
+<para>Planeja e executa o movimento do braço robótico até uma pose alvo. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Esta função define parâmetros de planejamento e executa o movimento do braço utilizando o MoveIt, com base em uma pose 3D alvo (<computeroutput>target_pose</computeroutput>).</para>
+<para>O método realiza as seguintes etapas:<orderedlist>
+<listitem><para>Verifica se o <computeroutput>MoveGroupInterface</computeroutput> está inicializado.</para>
+</listitem><listitem><para>Define o estado inicial do robô como o estado atual.</para>
+</listitem><listitem><para>Configura o planejador como <computeroutput>RRTConnect</computeroutput>.</para>
+</listitem><listitem><para>Define a pose alvo e os parâmetros de planejamento (tempo e tentativas).</para>
+</listitem><listitem><para>Define os fatores de escala para velocidade e aceleração.</para>
+</listitem><listitem><para>Ajusta as tolerâncias de posição e orientação.</para>
+</listitem><listitem><para>Gera o plano de movimento e o executa caso o planejamento seja bem-sucedido.</para>
+</listitem></orderedlist>
+</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>target_pose</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pose alvo do tipo <computeroutput>geometry_msgs::msg::Pose</computeroutput> que contém a posição e orientação desejadas para o efetuador final.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="note"><para><itemizedlist>
+<listitem><para>A função usa o planejador <computeroutput>RRTConnect</computeroutput>, que é adequado para ambientes com espaços de busca grandes e sem muitas restrições.</para>
+</listitem><listitem><para>As tolerâncias pequenas (0.01) garantem precisão, mas podem aumentar o tempo de planejamento.</para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+<simplesect kind="warning"><para><itemizedlist>
+<listitem><para>Se <computeroutput>move_group_arm</computeroutput> não estiver inicializado, a função não realiza nenhuma ação e emite um erro no log.</para>
+</listitem><listitem><para>Se o planejador retornar uma trajetória vazia, um aviso é exibido e nenhuma execução ocorre.</para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1a24258dea10218f8834c8a000221f6410" kindref="member">initMoveGroup()</ref>, <ref refid="classWelding_1a8420c61171c026d4870b88426cb8215f" kindref="member">return_to_welding_position()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="434" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="434" bodyend="471"/>
+      </memberdef>
+      <memberdef kind="function" id="classWelding_1aee46de4c5dce5208fa029bc7a7098d0e" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void Welding::publish_velocity</definition>
+        <argsstring>(float velocity)</argsstring>
+        <name>publish_velocity</name>
+        <qualifiedname>Welding::publish_velocity</qualifiedname>
+        <param>
+          <type>float</type>
+          <declname>velocity</declname>
+        </param>
+        <briefdescription>
+<para>Publica a velocidade linear da esteira no Isaac Sim. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Esta função envia uma mensagem <computeroutput>std_msgs::msg::Float32</computeroutput> contendo o valor de velocidade linear, publicada através do <computeroutput>publisher_</computeroutput>.</para>
+<para>O valor publicado representa a velocidade de translação da esteira simulada no Isaac Sim, usada para controlar o movimento linear.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>velocity</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Valor da velocidade linear (em unidades compatíveis com o simulador).</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="note"><para><itemizedlist>
+<listitem><para>O publisher usado é <computeroutput>publisher_</computeroutput>.</para>
+</listitem><listitem><para>É necessário garantir que <computeroutput>publisher_</computeroutput> foi corretamente inicializado no construtor do nó.</para>
+</listitem><listitem><para>A mensagem é do tipo <computeroutput>std_msgs::msg::Float32</computeroutput>, portanto, apenas um número de ponto flutuante é transmitido.</para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1ad0c0392480e99aadc14c15761b5cc399" kindref="member">publish_angular_velocity()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="495" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="495" bodyend="502"/>
+      </memberdef>
+      <memberdef kind="function" id="classWelding_1ad0c0392480e99aadc14c15761b5cc399" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void Welding::publish_angular_velocity</definition>
+        <argsstring>(float velocity)</argsstring>
+        <name>publish_angular_velocity</name>
+        <qualifiedname>Welding::publish_angular_velocity</qualifiedname>
+        <param>
+          <type>float</type>
+          <declname>velocity</declname>
+        </param>
+        <briefdescription>
+<para>Publica a velocidade angular da esteira no Isaac Sim. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Esta função cria e envia uma mensagem <computeroutput>std_msgs::msg::Float32</computeroutput> contendo o valor da velocidade angular, utilizando o <computeroutput>publisher_1</computeroutput>.</para>
+<para>O valor publicado representa a taxa de rotação da esteira ou mecanismo de rotação controlado no ambiente simulado do Isaac Sim.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>velocity</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Valor da velocidade angular (em rad/s ou unidade definida pelo sistema).</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="note"><para><itemizedlist>
+<listitem><para>O publisher usado é <computeroutput>publisher_1</computeroutput>.</para>
+</listitem><listitem><para>Assim como o publisher linear, ele deve ser inicializado no construtor do nó.</para>
+</listitem><listitem><para>Este tópico é independente do de velocidade linear.</para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1aee46de4c5dce5208fa029bc7a7098d0e" kindref="member">publish_velocity()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="522" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="522" bodyend="529"/>
+      </memberdef>
+      <memberdef kind="function" id="classWelding_1a7342d4cbb06a41d54ceea6ebc3135753" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void Welding::detectionCallback</definition>
+        <argsstring>(const vision_msgs::msg::Detection3DArray::SharedPtr msg)</argsstring>
+        <name>detectionCallback</name>
+        <qualifiedname>Welding::detectionCallback</qualifiedname>
+        <param>
+          <type>const vision_msgs::msg::Detection3DArray::SharedPtr</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+<para>Callback responsável por processar as detecções 3D recebidas e acionar o robô para soldagem. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Esta função é chamada automaticamente sempre que uma nova mensagem do tipo <computeroutput>vision_msgs::msg::Detection3DArray</computeroutput> é recebida no tópico inscrito.</para>
+<para>O callback tem como função principal:<itemizedlist>
+<listitem><para>Identificar o ID do objeto detectado;</para>
+</listitem><listitem><para>Verificar se existem poses de solda associadas a esse objeto no mapa <computeroutput>welding_poses</computeroutput>;</para>
+</listitem><listitem><para>Controlar o movimento da esteira (parar e retomar);</para>
+</listitem><listitem><para>Enviar o robô para executar as poses de solda correspondentes;</para>
+</listitem><listitem><para>Retornar o robô à posição inicial de soldagem ao término.</para>
+</listitem></itemizedlist>
+</para>
+<sect3 id="classWelding_1autotoc_md6">
+<title>Fluxo principal:</title>
+<para><orderedlist>
+<listitem><para>Para cada detecção recebida:<itemizedlist>
+<listitem><para>Extrai o <computeroutput>class_id</computeroutput> do objeto (antes do primeiro <computeroutput>_</computeroutput>, se houver).</para>
+</listitem><listitem><para>Verifica se há poses de solda registradas para esse objeto em <computeroutput>welding_poses</computeroutput>.</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para>Caso a esteira não esteja parada (<computeroutput>stopped == false</computeroutput>), envia comandos de velocidade linear e angular para continuar o movimento.</para>
+</listitem><listitem><para>Quando um objeto é detectado em uma zona de parada definida pelos limites de <computeroutput>y</computeroutput> e <computeroutput>x</computeroutput>, o sistema pausa a esteira e armazena o <computeroutput>welding_id</computeroutput> atual.</para>
+</listitem><listitem><para>Se o objeto detectado for o mesmo que o armazenado e o sistema estiver parado (<computeroutput>stopped == true</computeroutput>), o robô executa as poses de solda do objeto.</para>
+</listitem><listitem><para>Após a soldagem (<computeroutput>welding_done = true</computeroutput>), o robô retorna à posição inicial e o movimento da esteira é retomado.</para>
+</listitem></orderedlist>
+</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>msg</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Ponteiro compartilhado (<computeroutput>SharedPtr</computeroutput>) para a mensagem de entrada do tipo <computeroutput>vision_msgs::msg::Detection3DArray</computeroutput>, contendo uma lista de detecções 3D.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="note"><para><itemizedlist>
+<listitem><para>A função usa variáveis de controle globais:<itemizedlist>
+<listitem><para><computeroutput>welding_id</computeroutput>: armazena o identificador do objeto atualmente em soldagem.</para>
+</listitem><listitem><para><computeroutput>stopped</computeroutput>: indica se a esteira está parada.</para>
+</listitem><listitem><para><computeroutput>welding_done</computeroutput>: sinaliza que a operação de solda foi concluída.</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para>O mapa <computeroutput>welding_poses</computeroutput> associa IDs de objetos às suas poses locais de solda, usadas para calcular poses globais no ambiente.</para>
+</listitem><listitem><para>O cálculo da pose global usa transformações via <computeroutput>tf2</computeroutput>, aplicando rotação e translação da caixa delimitadora (<computeroutput>bbox</computeroutput>) sobre as poses locais.</para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+<simplesect kind="warning"><para><itemizedlist>
+<listitem><para>Se <computeroutput>move_group_arm</computeroutput> não estiver inicializado, a execução das poses de solda falhará silenciosamente.</para>
+</listitem><listitem><para>Caso o ID detectado não exista em <computeroutput>welding_poses</computeroutput>, nenhuma ação será tomada para o objeto.</para>
+</listitem><listitem><para>O controle da esteira depende dos publishers <computeroutput>publisher_</computeroutput> (linear) e <computeroutput>publisher_1</computeroutput> (angular) estarem corretamente configurados.</para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1a77e45df07f337bb83dbe9b869001b33c" kindref="member">positions_for_arm()</ref>, <ref refid="classWelding_1a8420c61171c026d4870b88426cb8215f" kindref="member">return_to_welding_position()</ref>, <ref refid="classWelding_1aee46de4c5dce5208fa029bc7a7098d0e" kindref="member">publish_velocity()</ref>, <ref refid="classWelding_1ad0c0392480e99aadc14c15761b5cc399" kindref="member">publish_angular_velocity()</ref> </para>
+</simplesect>
+</para>
+</sect3>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="587" column="10" bodyfile="src/welding_multiple_objects.cpp" bodystart="587" bodyend="686"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classWelding_1a5c4c64ce080b7b85f559eedd483ce498" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>Welding::Welding</definition>
+        <argsstring>()</argsstring>
+        <name>Welding</name>
+        <qualifiedname>Welding::Welding</qualifiedname>
+        <briefdescription>
+<para>Construtor da classe <ref refid="classWelding" kindref="compound">Welding</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Inicializa o nó ROS2 responsável pelo controle do braço robótico e da esteira do Isaac Sim. Este construtor configura toda a comunicação ROS necessária para o funcionamento do sistema de soldagem automatizado.</para>
+<para><bold>Responsabilidades principais:</bold><itemizedlist>
+<listitem><para>Declara e lê o parâmetro <computeroutput>yaml_file</computeroutput> com o caminho das poses locais de solda.</para>
+</listitem><listitem><para>Cria publishers para o controle da velocidade linear e angular da esteira.</para>
+</listitem><listitem><para>Cria um subscriber para receber detecções 3D de objetos com suas poses e identificadores.</para>
+</listitem><listitem><para>Carrega as poses de solda do arquivo YAML.</para>
+</listitem><listitem><para>Inicia um temporizador que tenta inicializar o <computeroutput>MoveGroupInterface</computeroutput> do MoveIt2 de forma assíncrona.</para>
+</listitem></itemizedlist>
+</para>
+<sect3 id="classWelding_1autotoc_md7">
+<title>Publishers</title>
+<para><itemizedlist>
+<listitem><para><computeroutput>publisher_</computeroutput> → Publica mensagens <computeroutput>std_msgs::msg::Float32</computeroutput> no tópico <computeroutput>/conveyor_velocity</computeroutput>, controlando a <bold>velocidade linear da esteira</bold> no Isaac Sim.</para>
+</listitem><listitem><para><computeroutput>publisher_1</computeroutput> → Publica mensagens <computeroutput>std_msgs::msg::Float32</computeroutput> no tópico <computeroutput>/conveyor_angular_velocity</computeroutput>, controlando a <bold>velocidade angular da esteira</bold>.</para>
+</listitem></itemizedlist>
+</para>
+</sect3>
+<sect3 id="classWelding_1autotoc_md8">
+<title>Subscriber</title>
+<para><itemizedlist>
+<listitem><para><computeroutput>sub_</computeroutput> → Recebe mensagens do tipo <computeroutput>vision_msgs::msg::Detection3DArray</computeroutput> no tópico <computeroutput>/bbox_3d_with_labels</computeroutput>. <linebreak/>
+ Cada mensagem contém as <bold>detecções 3D de objetos</bold> com posição, tamanho e ID (classe do objeto). <linebreak/>
+ O callback associado (<computeroutput>detectionCallback</computeroutput>) interpreta essas informações e decide quando iniciar o processo de soldagem.</para>
+</listitem></itemizedlist>
+</para>
+</sect3>
+<sect3 id="classWelding_1autotoc_md9">
+<title>Timer</title>
+<para><itemizedlist>
+<listitem><para><computeroutput>init_timer_</computeroutput> → Cria um temporizador que chama periodicamente a função <computeroutput><ref refid="classWelding_1a24258dea10218f8834c8a000221f6410" kindref="member">initMoveGroup()</ref></computeroutput> até que o <computeroutput>MoveGroupInterface</computeroutput> seja inicializado com sucesso. <linebreak/>
+ Isso evita falhas caso o MoveIt2 ainda não esteja pronto no início do nó. </para>
+</listitem></itemizedlist>
+</para>
+</sect3>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="722" column="5" bodyfile="src/welding_multiple_objects.cpp" bodystart="722" bodyend="742"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Classe principal responsável pelo controle automatizado de soldagem. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>A classe <computeroutput><ref refid="classWelding" kindref="compound">Welding</ref></computeroutput> implementa o nó ROS2 que coordena todo o processo de soldagem automatizada, incluindo o controle do braço robótico (via MoveIt2), o acionamento da esteira no Isaac Sim e a interpretação de detecções 3D provenientes do sistema de visão computacional.</para>
+<para><bold>Principais responsabilidades:</bold><itemizedlist>
+<listitem><para>Inicializar e configurar toda a comunicação ROS2 necessária (publishers, subscribers e timers);</para>
+</listitem><listitem><para>Carregar as poses locais de solda a partir de um arquivo YAML;</para>
+</listitem><listitem><para>Processar as detecções de objetos recebidas e acionar o robô para realizar a soldagem;</para>
+</listitem><listitem><para>Controlar o movimento da esteira, pausando-a e retomando conforme a posição do objeto detectado;</para>
+</listitem><listitem><para>Planejar e executar trajetórias robóticas para atingir as poses de solda;</para>
+</listitem><listitem><para>Garantir o retorno seguro do robô à posição inicial de soldagem após cada operação.</para>
+</listitem></itemizedlist>
+</para>
+<sect3 id="classWelding_1autotoc_md4">
+<title>Comunicação ROS2</title>
+<para><itemizedlist>
+<listitem><para><bold>Publisher <computeroutput>/conveyor_velocity</computeroutput></bold> → controla a velocidade linear da esteira.</para>
+</listitem><listitem><para><bold>Publisher <computeroutput>/conveyor_angular_velocity</computeroutput></bold> → controla a velocidade angular da esteira.</para>
+</listitem><listitem><para><bold>Subscriber <computeroutput>/bbox_3d_with_labels</computeroutput></bold> → recebe detecções 3D de objetos com posição e ID.</para>
+</listitem><listitem><para><bold>Timer</bold> → tenta inicializar o <computeroutput>MoveGroupInterface</computeroutput> de forma assíncrona.</para>
+</listitem></itemizedlist>
+</para>
+</sect3>
+<sect3 id="classWelding_1autotoc_md5">
+<title>Dependências</title>
+<para><itemizedlist>
+<listitem><para><bold>MoveIt2</bold> para planejamento e execução de trajetórias do braço robótico.</para>
+</listitem><listitem><para><bold>YAML-CPP</bold> para leitura dos arquivos de configuração de poses locais.</para>
+</listitem><listitem><para><bold>vision_msgs</bold> para interpretar as mensagens de detecção 3D.</para>
+</listitem></itemizedlist>
+</para>
+<para><simplesect kind="note"><para>Esta classe foi projetada para integração com o ambiente de simulação Isaac Sim e assume que o grupo de juntas do robô é denominado <computeroutput>&quot;denso_arm&quot;</computeroutput>.</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classWelding_1a5159367a4c2ab41513d81bb339c07709" kindref="member">loadLocationsFromYaml()</ref>, <ref refid="classWelding_1a24258dea10218f8834c8a000221f6410" kindref="member">initMoveGroup()</ref>, <ref refid="classWelding_1a7342d4cbb06a41d54ceea6ebc3135753" kindref="member">detectionCallback()</ref> </para>
+</simplesect>
+</para>
+</sect3>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>Welding</label>
+        <link refid="classWelding"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>Welding</label>
+        <link refid="classWelding"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>rclcpp::Node</label>
+      </node>
+    </collaborationgraph>
+    <location file="src/welding_multiple_objects.cpp" line="149" column="1" bodyfile="src/welding_multiple_objects.cpp" bodystart="149" bodyend="743"/>
+    <listofallmembers>
+      <member refid="classWelding_1a7342d4cbb06a41d54ceea6ebc3135753" prot="private" virt="non-virtual"><scope>Welding</scope><name>detectionCallback</name></member>
+      <member refid="classWelding_1ab5b71ade482caee12344ed4efe29cd48" prot="private" virt="non-virtual"><scope>Welding</scope><name>init_timer_</name></member>
+      <member refid="classWelding_1a24258dea10218f8834c8a000221f6410" prot="private" virt="non-virtual"><scope>Welding</scope><name>initMoveGroup</name></member>
+      <member refid="classWelding_1a5159367a4c2ab41513d81bb339c07709" prot="private" virt="non-virtual"><scope>Welding</scope><name>loadLocationsFromYaml</name></member>
+      <member refid="classWelding_1a77e92d6a79908cbea394a394526c5783" prot="private" virt="non-virtual"><scope>Welding</scope><name>move_group_arm</name></member>
+      <member refid="classWelding_1a77e45df07f337bb83dbe9b869001b33c" prot="private" virt="non-virtual"><scope>Welding</scope><name>positions_for_arm</name></member>
+      <member refid="classWelding_1ad0c0392480e99aadc14c15761b5cc399" prot="private" virt="non-virtual"><scope>Welding</scope><name>publish_angular_velocity</name></member>
+      <member refid="classWelding_1aee46de4c5dce5208fa029bc7a7098d0e" prot="private" virt="non-virtual"><scope>Welding</scope><name>publish_velocity</name></member>
+      <member refid="classWelding_1adfda2a8510c799f3c2699ac99e5468c1" prot="private" virt="non-virtual"><scope>Welding</scope><name>publisher_</name></member>
+      <member refid="classWelding_1a19fa2943d4fcc02c038686c280bce184" prot="private" virt="non-virtual"><scope>Welding</scope><name>publisher_1</name></member>
+      <member refid="classWelding_1a8420c61171c026d4870b88426cb8215f" prot="private" virt="non-virtual"><scope>Welding</scope><name>return_to_welding_position</name></member>
+      <member refid="classWelding_1ac963adf903ef3d91b206c93750400187" prot="private" virt="non-virtual"><scope>Welding</scope><name>stopped</name></member>
+      <member refid="classWelding_1a5dbf3724fab3fca9df622a73d2a486d4" prot="private" virt="non-virtual"><scope>Welding</scope><name>sub_</name></member>
+      <member refid="classWelding_1a5c4c64ce080b7b85f559eedd483ce498" prot="public" virt="non-virtual"><scope>Welding</scope><name>Welding</name></member>
+      <member refid="classWelding_1a67de48f82e2c4a838689abc481e2f382" prot="private" virt="non-virtual"><scope>Welding</scope><name>welding_done</name></member>
+      <member refid="classWelding_1a456d442509931ead17ed7c264674c4a6" prot="private" virt="non-virtual"><scope>Welding</scope><name>welding_id</name></member>
+      <member refid="classWelding_1ac90f42d27aaa0852ab89c5bdaf78262f" prot="private" virt="non-virtual"><scope>Welding</scope><name>welding_poses</name></member>
+      <member refid="classWelding_1acda7829aaab39b8fe36f4b9064b6e525" prot="private" virt="non-virtual"><scope>Welding</scope><name>yaml_file</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

@@ -1,3 +1,17 @@
+/**
+ * @file add_collision_objects.cpp
+ * @brief Nó ROS2 responsável por adicionar objetos de colisão no ambiente MoveIt com base em detecções 3D.
+ *
+ * Este nó escuta mensagens de detecção 3D (topic `/boxes_detection_array`), 
+ * verifica se os objetos detectados estão autorizados de acordo com um arquivo YAML,
+ * e os adiciona (ou atualiza) como objetos de colisão na cena MoveIt.
+ *
+ * O nó também adiciona um plano de chão e pode inicializar grupos de movimento (braço e garra).
+ *
+ * @version 1.0
+ * @date 07-11-2025
+ * @author Lucas Momesso
+ */
 #include <memory>
 #include <vector>
 #include <tuple>
@@ -99,45 +113,74 @@ struct TupleEqual {
     }
 };
 
-// Estrutura para labels com possibilidade de prefixo
+/**
+ * @struct LabelRule
+ * @brief Estrutura para armazenar regras de labels (autorizadas ou não).
+ *
+ * Cada regra contém um rótulo (`label`) e um indicador se esse rótulo é um prefixo (`is_prefix`).
+ * Se `is_prefix` for verdadeiro, qualquer label que começar com esse prefixo será considerada correspondente.
+ */
 struct LabelRule {
     std::string label;
     bool is_prefix;
 };
 
+/**
+ * @class AddCollision
+ * @brief Classe principal do nó responsável por adicionar objetos de colisão no ambiente MoveIt.
+ *
+ * Esta classe herda de `rclcpp::Node` e implementa:
+ * - Assinatura de mensagens de detecção 3D.
+ * - Leitura de labels autorizadas e não autorizadas de um arquivo YAML.
+ * - Adição e atualização de objetos de colisão na cena MoveIt.
+ * - Inicialização de MoveGroupInterface para manipulação de grupos robóticos.
+ */
 class AddCollision : public rclcpp::Node {
 
 private:
 
-    // Publishers.
-    rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub;
-
     // Subscriptions.
+    /**
+     * @brief Assinatura para mensagens de detecção 3D (topic: `/boxes_detection_array`).
+     */
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
 
-    // Services.
-    rclcpp::Service<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr service_;
-    
+     /**
+     * @brief Interface para manipulação de objetos de colisão no MoveIt.
+     */
     moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-    rclcpp::TimerBase::SharedPtr parameterTimer;    
-
-
-    std::vector<std::tuple<float, float, float>> points;
+    /**
+     * @brief Ponteiros para os grupo do braço no Moveit.
+     */
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
-    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
+
+    /**
+     * @brief Timer usado para tentar inicializar o MoveGroupInterface até que ele esteja disponível.
+     */
     rclcpp::TimerBase::SharedPtr init_timer_;
     
-    vision_msgs::msg::Detection3DArray object_detections;
-
-    std::string id_to_remove = "", move_group;
+    /**
+     * @brief Nome do grupo MoveIt usado (padrão: "denso_arm").
+     */
+    std::string move_group;
+    
+    /**
+     * @brief Conjunto de IDs de objetos já adicionados à cena, para evitar duplicações.
+     */
     std::unordered_set<std::string> added;
 
+     /**
+     * @brief Vetores com labels autorizadas e não autorizadas.
+     */
     std::vector<LabelRule> authorized_labels_;
     std::vector<LabelRule> unauthorized_labels_;
 
+
+    /**
+     * @brief Lê as listas de labels autorizadas e não autorizadas de um arquivo YAML.
+     * @param file_path Caminho do arquivo YAML contendo os labels.
+     */
     void load_labels_from_yaml(const std::string& file_path)
     {
         std::ifstream f(file_path.c_str());
@@ -178,6 +221,9 @@ private:
         }
     }
 
+    /**
+     * @brief Inicializa o grupo MoveIt do braço (tenta várias vezes até conseguir).
+     */
     void initMoveGroup() {
         try {
             move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
@@ -192,6 +238,9 @@ private:
         }
     }
 
+    /**
+     * @brief Adiciona o plano de chão como objeto de colisão na cena.
+     */
     void add_ground_plane()
     {
         moveit_msgs::msg::CollisionObject ground;
@@ -215,6 +264,12 @@ private:
         planning_scene_interface.applyCollisionObjects({ground});
     }
 
+     /**
+     * @brief Adiciona uma caixa de colisão na cena MoveIt.
+     * @param id Identificador único do objeto.
+     * @param dimensions Dimensões da caixa [x, y, z].
+     * @param pose Posição e orientação da caixa no frame "world".
+     */
     void add_collision_box(const std::string &id,const std::array<double, 3> &dimensions, const geometry_msgs::msg::Pose &pose)
     {
         std::vector<std::string> known_objects = planning_scene_interface.getKnownObjectNames();
@@ -238,6 +293,11 @@ private:
         planning_scene_interface.applyCollisionObjects({collision_object});
     }
 
+    /**
+     * @brief Move (atualiza a posição) de uma caixa de colisão existente.
+     * @param id Identificador único do objeto.
+     * @param pose Nova pose do objeto.
+     */
     void move_collision_box(const std::string &id, const geometry_msgs::msg::Pose &pose)
     {
         moveit_msgs::msg::CollisionObject collision_object;
@@ -250,6 +310,11 @@ private:
         planning_scene_interface.applyCollisionObjects({collision_object});
     }
 
+    /**
+     * @brief Verifica se um label é autorizado de acordo com as listas carregadas.
+     * @param label Nome do label do objeto detectado.
+     * @return `true` se o label for autorizado, `false` caso contrário.
+     */
     bool is_authorized(const std::string& label)
     {
         for (const auto& rule : unauthorized_labels_) 
@@ -273,6 +338,14 @@ private:
         return false;
     }
 
+    /**
+     * @brief Callback acionado ao receber uma nova mensagem de detecção 3D.
+     *
+     * Verifica cada objeto detectado, testa se o label é autorizado e adiciona/move 
+     * a caixa de colisão correspondente na cena MoveIt.
+     *
+     * @param msg Ponteiro para a mensagem `vision_msgs::msg::Detection3DArray` recebida.
+     */
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         if (msg->detections.empty())
@@ -309,15 +382,59 @@ private:
         }
     }
 
+
+
 public:
+        /**
+     * @brief Construtor da classe AddCollision.
+     * 
+     * @details
+     * Inicializa o nó ROS2 responsável por **gerenciar objetos de colisão no ambiente MoveIt2**
+     * com base nas **detecções 3D recebidas de um tópico**.  
+     * Este nó integra dados de percepção com o sistema de planejamento de movimento,
+     * garantindo que o robô evite colisões com objetos detectados em tempo real.
+     * 
+     * **Responsabilidades principais:**
+     * - Declara e lê o parâmetro `yaml_file`, que define o caminho do arquivo contendo as listas
+     *   de *labels* autorizadas e não autorizadas.
+     * - Declara e lê o parâmetro `move_group`, que define o nome do grupo MoveIt a ser controlado
+     *   (ex.: `"denso_arm"`).
+     * - Cria o **subscriber** para o tópico `/boxes_detection_array`, 
+     *   que fornece as detecções 3D dos objetos no ambiente.
+     * - Inicializa um **timer** para tentar configurar o `MoveGroupInterface` de forma assíncrona, 
+     *   evitando erros caso o MoveIt ainda não esteja pronto na inicialização.
+     * - Adiciona automaticamente um **plano de chão (ground plane)** como objeto de colisão.
+     * - Carrega as **regras de labels autorizadas e não autorizadas** a partir do arquivo YAML especificado.
+     * 
+     * ### Subscribers
+     * - `sub_` → Assina o tópico `/boxes_detection_array` com mensagens do tipo 
+     *   `vision_msgs::msg::Detection3DArray`.  
+     *   Cada detecção contém o ID do objeto (classe) e sua pose 3D no espaço.  
+     *   O callback associado (`detectionCallback`) adiciona ou move caixas de colisão 
+     *   correspondentes na cena MoveIt.
+     * 
+     * ### Timer
+     * - `init_timer_` → Cria um temporizador que chama periodicamente `initMoveGroup()`
+     *   até que o `MoveGroupInterface` seja inicializado com sucesso.  
+     *   Esse método garante que o nó só tente manipular o MoveIt quando o contexto de ROS2
+     *   estiver totalmente inicializado.
+     * 
+     * ### Parâmetros ROS2
+     * - `yaml_file` (`std::string`) → Caminho do arquivo YAML contendo as listas de labels autorizadas e não autorizadas.
+     * - `move_group` (`std::string`) → Nome do grupo MoveIt2 (por padrão, `"denso_arm"`).
+     * 
+     * @note O construtor também chama internamente:
+     * - `add_ground_plane()` → adiciona o plano de chão como objeto fixo de colisão.
+     * - `load_labels_from_yaml()` → carrega as listas de labels a partir do arquivo YAML configurado.
+     */
     AddCollision()
      : Node("add_colision_objects")
     {
         this->declare_parameter<std::string>("yaml_file", "");
-        this->declare_parameter<std::string>("move_group", "denso_arm");
+        this->declare_parameter<std::string>("", "denso_arm");
 
         std::string labels_path = this->get_parameter("yaml_file").as_string();
-        move_group = this->get_parameter("move_group").as_string();
+        move_group = this->get_parameter("").as_string();
 
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
