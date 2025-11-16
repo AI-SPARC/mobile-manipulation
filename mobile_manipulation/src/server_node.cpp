@@ -175,7 +175,6 @@ private:
 
                 if (response->success) 
                 {
-                    send_request(false);
                     RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
                 } 
                 else 

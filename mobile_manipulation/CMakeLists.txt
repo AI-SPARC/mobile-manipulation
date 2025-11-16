@@ -132,9 +132,9 @@ ament_target_dependencies(controller
   object_manipulation_interfaces
 )
 
-add_executable(simple_manipulation_with_suction_gripper src/simple_manipulation_with_suction_gripper.cpp)
+add_executable(simple_manipulation_node src/simple_manipulation_node.cpp)
 
-ament_target_dependencies(simple_manipulation_with_suction_gripper 
+ament_target_dependencies(simple_manipulation_node 
   trajectory_msgs 
   rclcpp 
   nav_msgs 
@@ -194,7 +194,7 @@ target_link_libraries(controller
   yaml-cpp
 )
 
-target_link_libraries(simple_manipulation_with_suction_gripper
+target_link_libraries(simple_manipulation_node
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
   ${GLEW_LIBRARIES}
@@ -214,7 +214,7 @@ install(TARGETS
   server_node
   a_star
   controller
-  simple_manipulation_with_suction_gripper
+  simple_manipulation_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

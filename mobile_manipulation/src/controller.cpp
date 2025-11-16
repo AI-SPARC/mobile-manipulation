@@ -33,9 +33,9 @@ public:
             std::chrono::milliseconds(50),
             std::bind(&DijkstraController3D::control_loop, this));
 
-        linear_speed_ = 0.8;
+        linear_speed_ = 0.5;
         angular_speed_ = 2.0;
-        waypoint_tolerance_ = 0.15; 
+        waypoint_tolerance_ = 0.1; 
         angle_tolerance_ = 0.1;
 
         RCLCPP_INFO(this->get_logger(), "DijkstraController3D iniciado!");
@@ -133,7 +133,7 @@ private:
             cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
         }
 
-
+        // Corrige a inversão de rotação
         cmd.angular.z = -cmd.angular.z;
 
         cmd_vel_pub_->publish(cmd);
@@ -147,6 +147,7 @@ private:
                 executing_path_ = false;
                 path_received_ = false; 
                 current_path_.clear();
+                rclcpp::sleep_for(std::chrono::milliseconds(2000));
                 goal_reached();
                 RCLCPP_INFO(this->get_logger(), "Goal Reached.");
             }
@@ -167,7 +168,7 @@ private:
                 if (response->success) 
                 {
                    
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                    RCLCPP_INFO(this->get_logger(), "Controller: Service executado com sucesso!");
                 } 
                 else 
                 {

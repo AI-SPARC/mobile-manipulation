@@ -45,17 +45,17 @@ def generate_launch_description():
     moveit_config = (
         MoveItConfigsBuilder("vai_se_ferrar")
         .robot_description(
-            file_path="suction_gripper_config/panda.urdf.xacro",
+            file_path="config/panda.urdf.xacro",
             mappings={
                 "ros2_control_hardware_type": LaunchConfiguration(
                     "ros2_control_hardware_type"
                 )
             },
         )
-        .robot_description_semantic(file_path="suction_gripper_config/panda.srdf")
-        .trajectory_execution(file_path="suction_gripper_config/gripper_moveit_controllers.yaml")
+        .robot_description_semantic(file_path="config/panda.srdf")
+        .trajectory_execution(file_path="config/gripper_moveit_controllers.yaml")
         .planning_pipelines(pipelines=["ompl", "pilz_industrial_motion_planner"])
-        .robot_description_kinematics(file_path="suction_gripper_config/kinematics.yaml")
+        .robot_description_kinematics(file_path="config/kinematics.yaml")
         .to_moveit_configs()
     )
 
@@ -72,7 +72,7 @@ def generate_launch_description():
     )
 
     _robot_description_kinematics_yaml = load_yaml(
-        "vai_se_ferrar_moveit_config", path.join("suction_gripper_config", "kinematics.yaml")
+        "vai_se_ferrar_moveit_config", path.join("config", "kinematics.yaml")
     )
     robot_description_kinematics = {
         "robot_description_kinematics": _robot_description_kinematics_yaml
@@ -119,7 +119,7 @@ def generate_launch_description():
     # ros2_control using FakeSystem as hardware
     ros2_controllers_path = os.path.join(
         get_package_share_directory("vai_se_ferrar_moveit_config"),
-        "suction_gripper_config",
+        "config",
         "ros2_controllers.yaml",
     )
     ros2_control_node = Node(
@@ -154,7 +154,7 @@ def generate_launch_description():
 
     robot_description_joint_limits = {
         "robot_description_planning": load_yaml(
-            "vai_se_ferrar_moveit_config", path.join("suction_gripper_config", "joint_limits.yaml")
+            "vai_se_ferrar_moveit_config", path.join("config", "joint_limits.yaml")
         )
     }
 
@@ -175,16 +175,11 @@ def generate_launch_description():
         'empty.yaml'
     )
 
-    storages_yaml_file = os.path.join(
-        get_package_share_directory(pkg_name),
-        'config',
-        'storages.yaml'
-    )
-
-    simple_manipulation_with_suction_gripper = Node(
+  
+    simple_manipulation_node = Node(
         package="mobile_manipulation",
-        executable="simple_manipulation_with_suction_gripper",
-        name="simple_manipulation_with_suction_gripper",
+        executable="simple_manipulation_node",
+        name="simple_manipulation_node",
         output="screen",
         parameters=[
             moveit_config.robot_description,
@@ -196,7 +191,6 @@ def generate_launch_description():
             robot_description_kinematics,
             moveit_config.planning_scene_monitor,
             {'yaml_file': yaml_file},
-            {'storages_yaml_file': storages_yaml_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         arguments=["--ros-args", "--log-level", "info"],
@@ -210,7 +204,7 @@ def generate_launch_description():
         parameters=[
             {'yaml_file': occupancy_grid_yaml},
             {'path_resolution': 0.05},
-            {'security_distance': 0.5},
+            {'security_distance': 0.45},
             {'iterations_before_verification': 20},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -289,7 +283,7 @@ def generate_launch_description():
             ros2_control_node,
             joint_state_broadcaster_spawner,
             panda_arm_controller_spawner,
-            simple_manipulation_with_suction_gripper,
+            simple_manipulation_node,
             add_collision,
             server_node,
             a_star,

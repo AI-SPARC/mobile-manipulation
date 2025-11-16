@@ -847,7 +847,7 @@ private:
 
         response->success = success;
 
-        if (!success)
+        if (success)
         {
             RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
         }
