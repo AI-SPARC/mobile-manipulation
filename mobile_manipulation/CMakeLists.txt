@@ -31,6 +31,7 @@ find_package(OpenCV REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED) 
 find_package(object_manipulation_interfaces REQUIRED)
+find_package(mobile_manipulation_interfaces REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(vision_msgs REQUIRED)
 find_package(message_filters REQUIRED)
@@ -58,6 +59,7 @@ ament_target_dependencies(add_collision
   moveit_ros_planning_interface 
   Eigen3
   object_manipulation_interfaces
+  mobile_manipulation_interfaces
 )
 
 add_executable(server_node src/server_node.cpp)
@@ -82,6 +84,7 @@ ament_target_dependencies(server_node
   moveit_ros_planning_interface 
   Eigen3
   object_manipulation_interfaces
+  mobile_manipulation_interfaces
 )
 
 add_executable(a_star src/a_star.cpp)
@@ -106,6 +109,7 @@ ament_target_dependencies(a_star
   moveit_ros_planning_interface 
   Eigen3
   object_manipulation_interfaces
+  mobile_manipulation_interfaces
 )
 
 add_executable(controller src/controller.cpp)
@@ -130,6 +134,7 @@ ament_target_dependencies(controller
   moveit_ros_planning_interface 
   Eigen3
   object_manipulation_interfaces
+  mobile_manipulation_interfaces
 )
 
 add_executable(simple_manipulation_node src/simple_manipulation_node.cpp)
@@ -154,6 +159,7 @@ ament_target_dependencies(simple_manipulation_node
   moveit_ros_planning_interface 
   Eigen3
   object_manipulation_interfaces
+  mobile_manipulation_interfaces
 )
 
 target_link_libraries(add_collision

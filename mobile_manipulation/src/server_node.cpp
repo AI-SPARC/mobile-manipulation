@@ -23,9 +23,9 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
-#include "object_manipulation_interfaces/srv/object_collision.hpp"
-#include "object_manipulation_interfaces/srv/picked_object.hpp"
-#include "object_manipulation_interfaces/srv/goal_pose.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_picked_object.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <std_msgs/msg/float32.hpp>
@@ -34,7 +34,29 @@
 
 using namespace std::chrono_literals;
 
-class PickAndOrganize : public rclcpp::Node {
+class PickAndOrganize : public rclcpp::Node 
+{
+
+public:
+    PickAndOrganize()
+     : Node("pick_and_organize")
+    {
+        this->declare_parameter<std::string>("yaml_file", "");
+
+        yaml_file = this->get_parameter("yaml_file").as_string();
+        
+        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
+            "/bbox_3d_with_labels", 10,
+            std::bind(&PickAndOrganize::detectionCallback, this, std::placeholders::_1));
+
+        client_1 = this->create_client<mobile_manipulation_interfaces::srv::MobilePickedObject>(
+            "/picked_object");
+
+        client_2 = this->create_client<mobile_manipulation_interfaces::srv::MobileGoalPose>(
+            "/goal_pose");
+
+        loadLocationsFromYaml(yaml_file);
+    } 
 
 private:
 
@@ -46,9 +68,8 @@ private:
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
 
     //Service.
-    rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr client_;
-    rclcpp::Client<object_manipulation_interfaces::srv::PickedObject>::SharedPtr client_1;
-    rclcpp::Client<object_manipulation_interfaces::srv::GoalPose>::SharedPtr client_2;
+    rclcpp::Client<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedPtr client_1;
+    rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedPtr client_2;
     
     //Timer.
     rclcpp::TimerBase::SharedPtr init_timer_;
@@ -126,7 +147,6 @@ private:
 
                 send_picked_object(det.results[0].hypothesis.class_id, pose, size);
                 send_goal_pose(pose);
-                send_request(true);
 
                 picked.insert(id);
             }
@@ -137,39 +157,16 @@ private:
     }
 
     // Services
-
-    void send_request(bool stop_flag)
-    {
-        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
-        request->stop = stop_flag;
-
-      
-        client_->async_send_request(request,
-            [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) 
-            {
-                auto response = future_response.get();  
-
-                if (response->success) 
-                {
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                } 
-                else 
-                {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
-    }
     
     void send_picked_object(std::string received_id, geometry_msgs::msg::Pose received_pose, geometry_msgs::msg::Vector3 received_size)
     {
-        auto request = std::make_shared<object_manipulation_interfaces::srv::PickedObject::Request>();
+        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobilePickedObject::Request>();
         request->id = received_id;
         request->pose = received_pose;
         request->size = received_size;
       
         client_1->async_send_request(request,
-            [this](rclcpp::Client<object_manipulation_interfaces::srv::PickedObject>::SharedFuture future_response) 
+            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedFuture future_response) 
             {
                 auto response = future_response.get();  
 
@@ -187,13 +184,13 @@ private:
 
     void send_goal_pose(geometry_msgs::msg::Pose received_pose)
     {
-        auto request = std::make_shared<object_manipulation_interfaces::srv::GoalPose::Request>();
+        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileGoalPose::Request>();
     
         request->pose = received_pose;
      
       
         client_2->async_send_request(request,
-            [this](rclcpp::Client<object_manipulation_interfaces::srv::GoalPose>::SharedFuture future_response) 
+            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedFuture future_response) 
             {
                 auto response = future_response.get();  
 
@@ -209,33 +206,7 @@ private:
             }
         );
     }
-
-
-            
-
-public:
-    PickAndOrganize()
-     : Node("pick_and_organize")
-    {
-        this->declare_parameter<std::string>("yaml_file", "");
-
-        yaml_file = this->get_parameter("yaml_file").as_string();
-        
-        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-            "/bbox_3d_with_labels", 10,
-            std::bind(&PickAndOrganize::detectionCallback, this, std::placeholders::_1));
-
-        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>(
-            "/object_collision");
-
-        client_1 = this->create_client<object_manipulation_interfaces::srv::PickedObject>(
-            "/picked_object");
-
-        client_2 = this->create_client<object_manipulation_interfaces::srv::GoalPose>(
-            "/goal_pose");
-
-        loadLocationsFromYaml(yaml_file);
-    }   
+  
 };
 
 int main(int argc, char * argv[])

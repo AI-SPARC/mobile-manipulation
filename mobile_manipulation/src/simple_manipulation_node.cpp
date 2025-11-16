@@ -23,9 +23,9 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
-#include "object_manipulation_interfaces/srv/picked_object.hpp"
-#include "object_manipulation_interfaces/srv/goal_reached.hpp"
-#include "object_manipulation_interfaces/srv/object_collision.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_picked_object.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_goal_reached.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <std_msgs/msg/float32.hpp>
@@ -35,76 +35,51 @@
 
 using namespace std::chrono_literals;
 
-namespace std 
+
+class SimpleManipulation : public rclcpp::Node 
 {
-    template <>
-    struct hash<std::tuple<float, float, float>> 
+
+public:
+    SimpleManipulation()
+     : Node("pick_and_organize")
     {
-        size_t operator()(const std::tuple<float, float, float>& t) const 
+        this->declare_parameter<std::string>("yaml_file", "");
+
+        yaml_file = this->get_parameter("yaml_file").as_string();
+    
+        moveit_node_ = std::make_shared<rclcpp::Node>("pick_and_organize_moveit_node");
+
+        executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
+        
+        executor_->add_node(moveit_node_);
+        executor_thread_ = std::thread([this]() { this->executor_->spin(); });
+      
+    
+        client_ = this->create_client<mobile_manipulation_interfaces::srv::MobileObjectCollision>(
+            "/object_collision");
+
+        service_ = this->create_service<mobile_manipulation_interfaces::srv::MobilePickedObject>("/picked_object",std::bind(&SimpleManipulation::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+        
+        service_1 = this->create_service<mobile_manipulation_interfaces::srv::MobileGoalReached>("/goal_reached",std::bind(&SimpleManipulation::handle_controller_request, this, std::placeholders::_1, std::placeholders::_2));
+
+        init_timer_ = this->create_wall_timer(
+            std::chrono::seconds(1),
+            std::bind(&SimpleManipulation::initMoveGroup, this));
+        
+        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+        loadLocationsFromYaml(yaml_file);
+    }   
+
+    ~SimpleManipulation()
+    {
+        executor_->cancel();
+        if (executor_thread_.joinable())
         {
-            size_t h1 = hash<float>()(std::get<0>(t));
-            size_t h2 = hash<float>()(std::get<1>(t));
-            size_t h3 = hash<float>()(std::get<2>(t));
-            
-            return h1 ^ (h2 << 1) ^ (h3 << 2);
+            executor_thread_.join();
         }
-    };
-}
-
-namespace std {
-    template<>
-    struct hash<std::tuple<std::pair<int, int>, bool>> {
-        size_t operator()(const std::tuple<std::pair<int, int>, bool>& t) const {
-            const auto& p = std::get<0>(t);
-            bool b = std::get<1>(t);
-            size_t h1 = std::hash<int>{}(p.first);
-            size_t h2 = std::hash<int>{}(p.second);
-            size_t h3 = std::hash<bool>{}(b);
-            size_t seed = h1;
-            seed ^= h2 + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-            seed ^= h3 + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-            return seed;
-        }
-    };
-}
-
-template <typename T1, typename T2>
-struct pair_hash {
-    std::size_t operator ()(const std::pair<T1, T2>& p) const {
-        auto h1 = std::hash<T1>{}(p.first);
-        auto h2 = std::hash<T2>{}(p.second);
-        return h1 ^ (h2 << 1);  
     }
-};
-
-template<typename T1, typename T2, typename T3>
-std::ostream& operator<<(std::ostream& os, const std::tuple<T1, T2, T3>& t) {
-    os << "(" << std::get<0>(t) << ", " 
-       << std::get<1>(t) << ", " 
-       << std::get<2>(t) << ")";
-    return os;
-}
-
-struct TupleHash {
-    std::size_t operator()(const std::tuple<float, float, float>& t) const {
-        auto h1 = std::hash<float>{}(std::get<0>(t));
-        auto h2 = std::hash<float>{}(std::get<1>(t));
-        auto h3 = std::hash<float>{}(std::get<2>(t));
-        return h1 ^ (h2 << 1) ^ (h3 << 2);
-    }
-};
-
-struct TupleEqual {
-    bool operator()(const std::tuple<float,float,float>& a,
-                    const std::tuple<float,float,float>& b) const noexcept {
-        return std::get<0>(a) == std::get<0>(b) &&
-               std::get<1>(a) == std::get<1>(b) &&
-               std::get<2>(a) == std::get<2>(b);
-    }
-};
-
-
-class SimpleManipulation : public rclcpp::Node {
 
 private:
 
@@ -129,11 +104,11 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
     
     //Client.
-    rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedPtr client_;
+    rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr client_;
 
     //Service.
-    rclcpp::Service<object_manipulation_interfaces::srv::PickedObject>::SharedPtr service_;
-    rclcpp::Service<object_manipulation_interfaces::srv::GoalReached>::SharedPtr service_1;
+    rclcpp::Service<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedPtr service_;
+    rclcpp::Service<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedPtr service_1;
 
     //Timer.
     rclcpp::TimerBase::SharedPtr init_timer_;
@@ -548,11 +523,12 @@ private:
            
             if (positions_for_arm(target_pose_world, 0.5, false)) 
             {
+                send_request(received_id, false);
                 rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
                 move_group_arm->attachObject(received_id, "panda_link8", touch_links);
-
+                
                 rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 close_gripper();
@@ -620,7 +596,7 @@ private:
 
     */
 
-    void handle_request(const std::shared_ptr<object_manipulation_interfaces::srv::PickedObject::Request> request, std::shared_ptr<object_manipulation_interfaces::srv::PickedObject::Response> response)
+    void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobilePickedObject::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobilePickedObject::Response> response)
     {
 
         std::get<0>(object) = request->id;
@@ -640,14 +616,14 @@ private:
         }
     }
 
-    void handle_controller_request(const std::shared_ptr<object_manipulation_interfaces::srv::GoalReached::Request> request, std::shared_ptr<object_manipulation_interfaces::srv::GoalReached::Response> response)
+    void handle_controller_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalReached::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalReached::Response> response)
     {
         if(request->reached == true)
         {
             open_gripper();
             calculate_global_pose(std::get<0>(object), std::get<1>(object));
 
-            send_request(false);
+            send_request(std::get<0>(object), true);
             bool success = true;  
 
             response->success = success;
@@ -665,14 +641,15 @@ private:
     }
 
 
-    void send_request(bool stop_flag)
+    void send_request(std::string received_obstacle_id, bool received_activate_movement)
     {
-        auto request = std::make_shared<object_manipulation_interfaces::srv::ObjectCollision::Request>();
-        request->stop = stop_flag;
+        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileObjectCollision::Request>();
+        request->obstacle_id = received_obstacle_id;
+        request->activate_movement = received_activate_movement;
 
       
         client_->async_send_request(request,
-            [this](rclcpp::Client<object_manipulation_interfaces::srv::ObjectCollision>::SharedFuture future_response) 
+            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedFuture future_response) 
             {
                 auto response = future_response.get();  
 
@@ -688,47 +665,6 @@ private:
         );
     }
 
-public:
-    SimpleManipulation()
-     : Node("pick_and_organize")
-    {
-        this->declare_parameter<std::string>("yaml_file", "");
-
-        yaml_file = this->get_parameter("yaml_file").as_string();
-    
-        moveit_node_ = std::make_shared<rclcpp::Node>("pick_and_organize_moveit_node");
-
-        executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
-        
-        executor_->add_node(moveit_node_);
-        executor_thread_ = std::thread([this]() { this->executor_->spin(); });
-      
-    
-        client_ = this->create_client<object_manipulation_interfaces::srv::ObjectCollision>(
-            "/object_collision");
-
-        service_ = this->create_service<object_manipulation_interfaces::srv::PickedObject>("/picked_object",std::bind(&SimpleManipulation::handle_request, this, std::placeholders::_1, std::placeholders::_2));
-        
-        service_1 = this->create_service<object_manipulation_interfaces::srv::GoalReached>("/goal_reached",std::bind(&SimpleManipulation::handle_controller_request, this, std::placeholders::_1, std::placeholders::_2));
-
-        init_timer_ = this->create_wall_timer(
-            std::chrono::seconds(1),
-            std::bind(&SimpleManipulation::initMoveGroup, this));
-        
-        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-        loadLocationsFromYaml(yaml_file);
-    }   
-
-    ~SimpleManipulation()
-    {
-        executor_->cancel();
-        if (executor_thread_.joinable())
-        {
-            executor_thread_.join();
-        }
-    }
 };
 
 int main(int argc, char * argv[])

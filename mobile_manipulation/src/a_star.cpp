@@ -45,7 +45,7 @@
 #include <utility>
 #include <string>
 #include <filesystem>
-#include "object_manipulation_interfaces/srv/goal_pose.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
 
 using namespace std::chrono_literals;
 
@@ -103,8 +103,43 @@ std::ostream& operator<<(std::ostream& os, const std::tuple<T1, T2, T3>& t) {
 
 
 
-class AStar : public rclcpp::Node {
+class AStar : public rclcpp::Node 
+{
+    
+public:
+    AStar()
+     : Node("a_star")
+    {
+        this->declare_parameter<std::string>("yaml_file", "");
+        this->declare_parameter<double>("path_resolution", 0.05);
+        this->declare_parameter<double>("security_distance", 0.50);
+        this->declare_parameter<int>("iterations_before_verification", 10);
 
+        yaml_file = this->get_parameter("yaml_file").as_string();
+        distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
+        security_distance = static_cast<float>(this->get_parameter("security_distance").get_parameter_value().get<double>());
+        iterations_before_verification = this->get_parameter("iterations_before_verification").get_parameter_value().get<int>();
+
+        RCLCPP_INFO(this->get_logger(), "path_resolution is set to: %f", distanceToObstacle_);
+        RCLCPP_INFO(this->get_logger(), "iterations_before_verification is set to: %d", iterations_before_verification);
+
+        service_ = this->create_service<mobile_manipulation_interfaces::srv::MobileGoalPose>("/goal_pose",std::bind(&AStar::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+
+        decimals = count_decimals(distanceToObstacle_);
+
+     
+        publisher_nav_path_ = this->create_publisher<nav_msgs::msg::Path>("visualize_path", 10);
+
+        publisher_path_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/path", 10);
+        
+
+        subscription_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/odom", 10, std::bind(&AStar::callback_odom, this, std::placeholders::_1));
+
+
+     
+        // load_black_points(yaml_file);
+    }
 private:
 
 
@@ -159,7 +194,7 @@ private:
     };
     
     //Service.
-    rclcpp::Service<object_manipulation_interfaces::srv::GoalPose>::SharedPtr service_;
+    rclcpp::Service<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedPtr service_;
     
     //Publishers.
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr publisher_path_;
@@ -828,7 +863,7 @@ private:
 
     // Service
 
-    void handle_request(const std::shared_ptr<object_manipulation_interfaces::srv::GoalPose::Request> request, std::shared_ptr<object_manipulation_interfaces::srv::GoalPose::Response> response)
+    void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Response> response)
     {
         std::pair<float, float> initial_pose, goal_pose;
 
@@ -855,41 +890,6 @@ private:
         {
             RCLCPP_WARN(this->get_logger(), "Falha ao processar o pedido!");
         }
-    }
-
-public:
-    AStar()
-     : Node("a_star")
-    {
-        this->declare_parameter<std::string>("yaml_file", "");
-        this->declare_parameter<double>("path_resolution", 0.05);
-        this->declare_parameter<double>("security_distance", 0.50);
-        this->declare_parameter<int>("iterations_before_verification", 10);
-
-        yaml_file = this->get_parameter("yaml_file").as_string();
-        distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
-        security_distance = static_cast<float>(this->get_parameter("security_distance").get_parameter_value().get<double>());
-        iterations_before_verification = this->get_parameter("iterations_before_verification").get_parameter_value().get<int>();
-
-        RCLCPP_INFO(this->get_logger(), "path_resolution is set to: %f", distanceToObstacle_);
-        RCLCPP_INFO(this->get_logger(), "iterations_before_verification is set to: %d", iterations_before_verification);
-
-        service_ = this->create_service<object_manipulation_interfaces::srv::GoalPose>("/goal_pose",std::bind(&AStar::handle_request, this, std::placeholders::_1, std::placeholders::_2));
-
-        decimals = count_decimals(distanceToObstacle_);
-
-     
-        publisher_nav_path_ = this->create_publisher<nav_msgs::msg::Path>("visualize_path", 10);
-
-        publisher_path_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/path", 10);
-        
-
-        subscription_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/odom", 10, std::bind(&AStar::callback_odom, this, std::placeholders::_1));
-
-
-     
-        // load_black_points(yaml_file);
     }
 };
 
