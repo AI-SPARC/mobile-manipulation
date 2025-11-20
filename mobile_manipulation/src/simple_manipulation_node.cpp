@@ -36,7 +36,7 @@
 #include <shape_msgs/msg/solid_primitive.hpp>
 
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
-#include "mobile_manipulation_interfaces/action/object_collision.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
 
 class SimpleManipulation : public rclcpp::Node 
 {
@@ -63,8 +63,8 @@ public:
             std::bind(&SimpleManipulation::handle_cancel, this, std::placeholders::_1),
             std::bind(&SimpleManipulation::handle_accepted, this, std::placeholders::_1));
 
-        object_collision_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::ObjectCollision>(
-            this, "object_collision");
+        client_ = this->create_client<mobile_manipulation_interfaces::srv::MobileObjectCollision>(
+            "/object_collision");
         
         
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
@@ -108,8 +108,8 @@ private:
     //Publishers.
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
     
-    //Action client.
-    rclcpp_action::Client<mobile_manipulation_interfaces::action::ObjectCollision>::SharedPtr object_collision_client;
+    //Service client.
+    rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr client_;
 
     //Action server.
     rclcpp_action::Server<mobile_manipulation_interfaces::action::PickObject>::SharedPtr action_server_;
@@ -523,6 +523,7 @@ private:
            
             if (positions_for_arm(target_pose_world, 0.5, false)) 
             {
+                send_request(received_id, false);
                 rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
@@ -572,76 +573,41 @@ private:
 
         if (positions_for_arm(place_in_world.pose, 0.5, false)) 
         {
-            rclcpp::sleep_for(std::chrono::milliseconds(1000));
+            rclcpp::sleep_for(std::chrono::milliseconds(400));
             open_gripper();
             move_group_arm->detachObject(received_id);
-            rclcpp::sleep_for(std::chrono::milliseconds(500));
+            rclcpp::sleep_for(std::chrono::milliseconds(200));
+            send_request(received_id, true);
         }
         else 
         {
             RCLCPP_ERROR(this->get_logger(), "Falha ao mover para a pose de descarte.");
         }
     }
+    // Service client (object_collision).
 
-    // Action client (object_collision).
-
-    void send_obstacle_id(const std::string id)
+    void send_request(std::string received_obstacle_id, bool received_activate_movement)
     {
-        if (!this->object_collision_client->wait_for_action_server(std::chrono::seconds(5))) 
-        {
-            RCLCPP_ERROR(this->get_logger(), "Action server not available");
-            return;
-        }
+        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileObjectCollision::Request>();
+        request->obstacle_id = received_obstacle_id;
+        request->activate_movement = received_activate_movement;
 
-        auto goal_msg = mobile_manipulation_interfaces::action::ObjectCollision::Goal();
-        
-        goal_msg.obstacle_id = id;
+      
+        client_->async_send_request(request,
+            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedFuture future_response) 
+            {
+                auto response = future_response.get();  
 
-        RCLCPP_INFO(this->get_logger(), "Sending obstacle_id to add_collision node.");
-
-        auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::ObjectCollision>::SendGoalOptions();
-        
-        send_goal_options.goal_response_callback = 
-            std::bind(&SimpleManipulation::goal_response_callback, this, std::placeholders::_1);
-            
-        send_goal_options.result_callback = 
-            std::bind(&SimpleManipulation::result_callback, this, std::placeholders::_1);
-
-        this->object_collision_client->async_send_goal(goal_msg, send_goal_options);
-    }
-
-    void goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::ObjectCollision>> & goal_handle)
-    {
-        if (!goal_handle) 
-        {
-            RCLCPP_ERROR(this->get_logger(), "Goal rejected");
-        } 
-        else 
-        {
-            RCLCPP_INFO(this->get_logger(), "Goal accepted, executing...");
-        }
-    }
-
-    void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::ObjectCollision>::WrappedResult & result)
-    {
-        switch (result.code) 
-        {
-            case rclcpp_action::ResultCode::SUCCEEDED:
-                break;
-            case rclcpp_action::ResultCode::ABORTED:
-                RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
-                return;
-            case rclcpp_action::ResultCode::CANCELED:
-                RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
-                return;
-            default:
-                RCLCPP_ERROR(this->get_logger(), "Unknown result code");
-                return;
-        }
-
-        RCLCPP_INFO(this->get_logger(), "O resultado foi: %s", result.result->success ? "true" : "false");
-                
-        
+                if (response->success) 
+                {
+                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                } 
+                else 
+                {
+                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+                }
+            }
+        );
     }
 
     // Action server (pick_object).
