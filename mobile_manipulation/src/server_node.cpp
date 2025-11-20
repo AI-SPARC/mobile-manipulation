@@ -1,163 +1,124 @@
 #include <memory>
 #include <vector>
-#include <tuple>
-#include <cmath>
-#include <iostream>
-#include <functional>
+#include <string>
+#include <unordered_set>
 #include <chrono>
-#include <random>
-#include <yaml-cpp/yaml.h>
+#include <functional>
+#include <iostream>
+#include <sstream>
+
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+
 #include "geometry_msgs/msg/pose.hpp"
 #include "vision_msgs/msg/detection3_d_array.hpp"
-#include <tf2_ros/transform_listener.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include "sensor_msgs/msg/point_cloud2.hpp"
-#include <moveit/move_group_interface/move_group_interface.hpp>
-#include <moveit/robot_state/robot_state.hpp>
-#include <moveit/robot_model_loader/robot_model_loader.hpp>
-#include <moveit_msgs/msg/move_it_error_codes.hpp>
-#include "trajectory_msgs/msg/joint_trajectory.hpp"
-#include "trajectory_msgs/msg/joint_trajectory_point.hpp"
-#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
-#include <moveit_msgs/msg/collision_object.hpp>
-#include <shape_msgs/msg/solid_primitive.hpp>
-#include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
-#include "mobile_manipulation_interfaces/srv/mobile_picked_object.hpp"
-#include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
-#include <tf2/LinearMath/Quaternion.h>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <std_msgs/msg/float32.hpp>
-#include <cmath> 
+#include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/bool.hpp"
 
-using namespace std::chrono_literals;
+#include <yaml-cpp/yaml.h>
 
-class PickAndOrganize : public rclcpp::Node 
+#include "mobile_manipulation_interfaces/srv/mobile_picked_object.hpp"
+#include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
+#include "mobile_manipulation_interfaces/action/pick_object.hpp"
+
+class ServerNode : public rclcpp::Node 
 {
-
 public:
-    PickAndOrganize()
+    ServerNode()
      : Node("pick_and_organize")
     {
         this->declare_parameter<std::string>("yaml_file", "");
-
         yaml_file = this->get_parameter("yaml_file").as_string();
         
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,
-            std::bind(&PickAndOrganize::detectionCallback, this, std::placeholders::_1));
+            std::bind(&ServerNode::detectionCallback, this, std::placeholders::_1));
+        
+        client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(
+            this, "pick_object");
 
         client_1 = this->create_client<mobile_manipulation_interfaces::srv::MobilePickedObject>(
             "/picked_object");
-
         client_2 = this->create_client<mobile_manipulation_interfaces::srv::MobileGoalPose>(
             "/goal_pose");
 
-        loadLocationsFromYaml(yaml_file);
+        if(!yaml_file.empty()) {
+            loadLocationsFromYaml(yaml_file);
+        }
     } 
 
 private:
+    bool action_busy = false;
 
-    //Publishers.
-    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
-    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_1;
-
-    //Subscriptions.
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
 
-    //Service.
     rclcpp::Client<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedPtr client_1;
     rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedPtr client_2;
+
+    rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
     
-    //Timer.
-    rclcpp::TimerBase::SharedPtr init_timer_;
-
     std::string yaml_file;
-
     std::unordered_set<std::string> pick_and_place_poses;
     std::unordered_set<std::string> picked;
 
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
-        try
-        {
+        try {
             YAML::Node config = YAML::LoadFile(yaml_path);
-
-            for (const auto &label_node : config)
-            {
-                const std::string label = label_node.first.as<std::string>();
-
-                pick_and_place_poses.insert(label);
+            for (const auto &label_node : config) {
+                pick_and_place_poses.insert(label_node.first.as<std::string>());
             }
-        }
-        catch (const YAML::Exception &e)
-        {
-            RCLCPP_ERROR(rclcpp::get_logger("yaml_loader"),
-                        "Failed to load YAML file '%s': %s", yaml_path.c_str(), e.what());
+        } catch (const YAML::Exception &e) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to load YAML: %s", e.what());
         }
     }
-        
- 
-    
-    
-    // Callbacks.
 
-    
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
-        std::string id;
+        if (action_busy) {
+            return;
+        }
+
         for (const auto &det : msg->detections)
         {
-            
-            size_t pos = det.results[0].hypothesis.class_id.find('_'); 
+            if (det.results.empty()) continue;
 
-            if (pos != std::string::npos) 
-            {
-                id = det.results[0].hypothesis.class_id.substr(0, pos);  
-            } 
-            else
-            {
-                id = det.results[0].hypothesis.class_id;  
+            std::string raw_id = det.results[0].hypothesis.class_id;
+            std::string id;
+            
+            size_t pos = raw_id.find('_'); 
+            if (pos != std::string::npos) {
+                id = raw_id.substr(0, pos);  
+            } else {
+                id = raw_id;  
             }
 
-            if (det.results.empty() || pick_and_place_poses.find(id) == pick_and_place_poses.end())
-            {
+            if (pick_and_place_poses.find(id) == pick_and_place_poses.end()) {
                 continue;
             }
             
             if(picked.find(id) == picked.end())
             {
-                rclcpp::sleep_for(std::chrono::milliseconds(100));
+                action_busy = true;
+                picked.insert(id);
+
                 geometry_msgs::msg::Pose pose;
-                pose.position.x = det.bbox.center.position.x;
-                pose.position.y = det.bbox.center.position.y;
-                pose.position.z = det.bbox.center.position.z;
-                pose.orientation.x = det.bbox.center.orientation.x;
-                pose.orientation.y = det.bbox.center.orientation.y;
-                pose.orientation.z = det.bbox.center.orientation.z;
-                pose.orientation.w = det.bbox.center.orientation.w;
+                pose.position = det.bbox.center.position;
+                pose.orientation = det.bbox.center.orientation;
 
-                geometry_msgs::msg::Vector3 size;
-                size.x = det.bbox.size.x;
-                size.y = det.bbox.size.y;
-                size.z = det.bbox.size.z;
+                geometry_msgs::msg::Vector3 size = det.bbox.size;
 
-
-                send_picked_object(det.results[0].hypothesis.class_id, pose, size);
+                send_picked_object(raw_id, pose, size);
                 send_goal_pose(pose);
 
-                picked.insert(id);
+                // Chama Action
+                send_goal(pose);
+
+                break;
             }
-            
-
-
         }
     }
 
-    // Services
-    
     void send_picked_object(std::string received_id, geometry_msgs::msg::Pose received_pose, geometry_msgs::msg::Vector3 received_size)
     {
         auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobilePickedObject::Request>();
@@ -166,54 +127,91 @@ private:
         request->size = received_size;
       
         client_1->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedFuture future_response) 
-            {
-                auto response = future_response.get();  
-
-                if (response->success) 
-                {
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                } 
-                else 
-                {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
+            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedFuture future) {
+                if(future.get()->success) RCLCPP_INFO(this->get_logger(), "Service PickedObject OK");
+            });
     }
 
     void send_goal_pose(geometry_msgs::msg::Pose received_pose)
     {
         auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileGoalPose::Request>();
-    
         request->pose = received_pose;
      
-      
         client_2->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedFuture future_response) 
-            {
-                auto response = future_response.get();  
-
-                if (response->success) 
-                {
-                  
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                } 
-                else 
-                {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
+            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedFuture future) {
+                if(future.get()->success) RCLCPP_INFO(this->get_logger(), "Service GoalPose OK");
+            });
     }
-  
+
+    //Actions.
+
+    void send_goal(const geometry_msgs::msg::Pose & target_pose)
+    {
+        if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5))) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Action server not available");
+            action_busy = false;
+            return;
+        }
+
+        auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
+        
+    
+        goal_msg.pose = target_pose;
+
+        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para Action...");
+
+        auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SendGoalOptions();
+        
+        send_goal_options.goal_response_callback = 
+            std::bind(&ServerNode::goal_response_callback, this, std::placeholders::_1);
+            
+        send_goal_options.result_callback = 
+            std::bind(&ServerNode::result_callback, this, std::placeholders::_1);
+
+        this->client_ptr_->async_send_goal(goal_msg, send_goal_options);
+    }
+
+    void goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>> & goal_handle)
+    {
+        if (!goal_handle) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Goal foi rejeitado pelo servidor");
+            action_busy = false;
+        } 
+        else 
+        {
+            RCLCPP_INFO(this->get_logger(), "Goal aceito, executando...");
+        }
+    }
+
+    void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>::WrappedResult & result)
+    {
+        switch (result.code) 
+        {
+            case rclcpp_action::ResultCode::SUCCEEDED:
+                break;
+            case rclcpp_action::ResultCode::ABORTED:
+                RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
+                return;
+            case rclcpp_action::ResultCode::CANCELED:
+                RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
+                return;
+            default:
+                RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+                return;
+        }
+
+        RCLCPP_INFO(this->get_logger(), "O resultado foi: %s", result.result->success ? "true" : "false");
+                
+        action_busy = false;
+    }
 };
 
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<PickAndOrganize>());
+  rclcpp::spin(std::make_shared<ServerNode>());
   rclcpp::shutdown();
   return 0;
 }
-
