@@ -17,9 +17,8 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "mobile_manipulation_interfaces/srv/mobile_picked_object.hpp"
-#include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
+#include "mobile_manipulation_interfaces/action/path.hpp"
 
 class ServerNode : public rclcpp::Node 
 {
@@ -37,6 +36,9 @@ public:
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(
             this, "pick_object");
 
+        path_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Path>(
+            this, "path");
+
         if(!yaml_file.empty()) {
             loadLocationsFromYaml(yaml_file);
         }
@@ -47,11 +49,15 @@ private:
 
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
 
+    // Action clients.
     rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
-    
+    rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SharedPtr path_client;
+
     std::string yaml_file;
     std::unordered_set<std::string> pick_and_place_poses;
     std::unordered_set<std::string> picked;
+
+    nav_msgs::msg::Path mobile_robot_path;
 
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
@@ -67,9 +73,6 @@ private:
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
-        if (action_busy) {
-            return;
-        }
 
         for (const auto &det : msg->detections)
         {
@@ -98,8 +101,6 @@ private:
                 pose.position = det.bbox.center.position;
                 pose.orientation = det.bbox.center.orientation;
 
-                geometry_msgs::msg::Vector3 size = det.bbox.size;
-
                 send_goal(id, pose);
 
                 break;
@@ -107,7 +108,80 @@ private:
         }
     }
 
-    //Actions.
+    // Action client (path).
+
+    void send_path_goal(const geometry_msgs::msg::Pose & target_pose)
+    {
+        if (!this->path_client->wait_for_action_server(std::chrono::seconds(5))) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Action server not available");
+            action_busy = false;
+            return;
+        }
+
+        auto goal_msg = mobile_manipulation_interfaces::action::Path::Goal();
+        
+        goal_msg.pose = target_pose;
+
+        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para Action...");
+
+        auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SendGoalOptions();
+        
+        send_goal_options.goal_response_callback = std::bind(&ServerNode::path_goal_response_callback, this, std::placeholders::_1);
+        send_goal_options.result_callback = std::bind(&ServerNode::path_result_callback, this, std::placeholders::_1);
+
+        this->path_client->async_send_goal(goal_msg, send_goal_options);
+    }
+
+    void path_feedback_callback(
+        rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::SharedPtr,
+        const std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Feedback> feedback)
+    {
+        if (feedback->recalculating_path) 
+        {
+            RCLCPP_WARN(this->get_logger(), "O servidor avisou: Recalculando rota...");
+        }
+
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+            "Feedback recebido. Stop Pose: [x: %.2f, y: %.2f]", 
+            feedback->stop_pose.position.x, 
+            feedback->stop_pose.position.y);
+    }
+
+    void path_goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>> & goal_handle)
+    {
+        if (!goal_handle) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Goal foi rejeitado pelo servidor");
+        } 
+        else 
+        {
+            RCLCPP_INFO(this->get_logger(), "Goal aceito, executando...");
+        }
+    }
+
+    void path_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::WrappedResult & result)
+    {
+        switch (result.code) 
+        {
+            case rclcpp_action::ResultCode::SUCCEEDED:
+                break;
+            case rclcpp_action::ResultCode::ABORTED:
+                RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
+                return;
+            case rclcpp_action::ResultCode::CANCELED:
+                RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
+                return;
+            default:
+                RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+                return;
+        }
+    
+        mobile_robot_path = result.result->path;
+
+    }
+
+    // Action client (pick_object).
 
     void send_goal(const std::string id, const geometry_msgs::msg::Pose & target_pose)
     {
@@ -115,6 +189,11 @@ private:
         {
             RCLCPP_ERROR(this->get_logger(), "Action server not available");
             action_busy = false;
+            return;
+        }
+
+        if(action_busy)
+        {
             return;
         }
 
