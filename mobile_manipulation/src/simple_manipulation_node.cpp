@@ -584,6 +584,7 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Falha ao mover para a pose de descarte.");
         }
     }
+    
     // Service client (object_collision).
 
     void send_request(std::string received_obstacle_id, bool received_activate_movement)

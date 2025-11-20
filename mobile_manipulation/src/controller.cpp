@@ -7,7 +7,7 @@
 #include <mutex>
 #include <vector>
 #include <algorithm> 
-#include "mobile_manipulation_interfaces/srv/mobile_goal_reached.hpp"
+// #include "mobile_manipulation_interfaces/srv/mobile_goal_reached.hpp"
 
 class DijkstraController3D : public rclcpp::Node
 {
@@ -26,8 +26,8 @@ public:
         vertex_sub_ = this->create_subscription<geometry_msgs::msg::PoseArray>(
             "/path", 10, std::bind(&DijkstraController3D::vertex_callback, this, std::placeholders::_1));
 
-        client_1 = this->create_client<mobile_manipulation_interfaces::srv::MobileGoalReached>(
-            "/goal_reached");
+        // client_1 = this->create_client<mobile_manipulation_interfaces::srv::MobileGoalReached>(
+        //     "/goal_reached");
 
         control_timer_ = this->create_wall_timer(
             std::chrono::milliseconds(50),
@@ -45,7 +45,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr vertex_sub_;
-    rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedPtr client_1;
+    // rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedPtr client_1;
     rclcpp::TimerBase::SharedPtr control_timer_;
 
     geometry_msgs::msg::Pose current_pose_;
@@ -148,35 +148,35 @@ private:
                 path_received_ = false; 
                 current_path_.clear();
                 rclcpp::sleep_for(std::chrono::milliseconds(2000));
-                goal_reached();
+                // goal_reached();
                 RCLCPP_INFO(this->get_logger(), "Goal Reached.");
             }
         }
     }
 
-    void goal_reached()
-    {
-        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileGoalReached::Request>();
-        request->reached = true;
+    // void goal_reached()
+    // {
+    //     auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileGoalReached::Request>();
+    //     request->reached = true;
         
       
-        client_1->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedFuture future_response) 
-            {
-                auto response = future_response.get();  
+    //     client_1->async_send_request(request,
+    //         [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedFuture future_response) 
+    //         {
+    //             auto response = future_response.get();  
 
-                if (response->success) 
-                {
+    //             if (response->success) 
+    //             {
                    
-                    RCLCPP_INFO(this->get_logger(), "Controller: Service executado com sucesso!");
-                } 
-                else 
-                {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
-    }
+    //                 RCLCPP_INFO(this->get_logger(), "Controller: Service executado com sucesso!");
+    //             } 
+    //             else 
+    //             {
+    //                 RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+    //             }
+    //         }
+    //     );
+    // }
 
     void publish_zero_velocity()
     {

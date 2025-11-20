@@ -45,7 +45,7 @@
 #include <utility>
 #include <string>
 #include <filesystem>
-#include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
+// #include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
 
 using namespace std::chrono_literals;
 
@@ -123,7 +123,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "path_resolution is set to: %f", distanceToObstacle_);
         RCLCPP_INFO(this->get_logger(), "iterations_before_verification is set to: %d", iterations_before_verification);
 
-        service_ = this->create_service<mobile_manipulation_interfaces::srv::MobileGoalPose>("/goal_pose",std::bind(&AStar::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+        // service_ = this->create_service<mobile_manipulation_interfaces::srv::MobileGoalPose>("/goal_pose",std::bind(&AStar::handle_request, this, std::placeholders::_1, std::placeholders::_2));
 
         decimals = count_decimals(distanceToObstacle_);
 
@@ -194,7 +194,7 @@ private:
     };
     
     //Service.
-    rclcpp::Service<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedPtr service_;
+    // rclcpp::Service<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedPtr service_;
     
     //Publishers.
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr publisher_path_;
@@ -863,34 +863,34 @@ private:
 
     // Service
 
-    void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Response> response)
-    {
-        std::pair<float, float> initial_pose, goal_pose;
+    // void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Response> response)
+    // {
+    //     std::pair<float, float> initial_pose, goal_pose;
 
-        initial_pose = std::make_pair(pose_x_, pose_y_);
+    //     initial_pose = std::make_pair(pose_x_, pose_y_);
 
-        geometry_msgs::msg::Pose pose = request->pose;
+    //     geometry_msgs::msg::Pose pose = request->pose;
 
-        goal_pose = std::make_pair(pose.position.x, pose.position.y);
+    //     goal_pose = std::make_pair(pose.position.x, pose.position.y);
 
-        std::pair<std::vector<std::pair<float, float>>, bool> a_star_result = run_a_star(initial_pose, goal_pose);
-        std::vector<std::pair<float, float>> shortestPath = std::get<0>(a_star_result);
-        bool straight_line = std::get<1>(a_star_result);
-        store_edges_in_path(shortestPath, straight_line);
+    //     std::pair<std::vector<std::pair<float, float>>, bool> a_star_result = run_a_star(initial_pose, goal_pose);
+    //     std::vector<std::pair<float, float>> shortestPath = std::get<0>(a_star_result);
+    //     bool straight_line = std::get<1>(a_star_result);
+    //     store_edges_in_path(shortestPath, straight_line);
 
-        bool success = true;  
+    //     bool success = true;  
 
-        response->success = success;
+    //     response->success = success;
 
-        if (success)
-        {
-            RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
-        }
-        else
-        {
-            RCLCPP_WARN(this->get_logger(), "Falha ao processar o pedido!");
-        }
-    }
+    //     if (success)
+    //     {
+    //         RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
+    //     }
+    //     else
+    //     {
+    //         RCLCPP_WARN(this->get_logger(), "Falha ao processar o pedido!");
+    //     }
+    // }
 };
 
 

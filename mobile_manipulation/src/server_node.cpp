@@ -17,6 +17,8 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "mobile_manipulation_interfaces/srv/stop_pose.hpp"
+
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/action/path.hpp"
 #include "mobile_manipulation_interfaces/action/controller.hpp"
@@ -33,6 +35,9 @@ public:
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/bbox_3d_with_labels", 10,
             std::bind(&ServerNode::detectionCallback, this, std::placeholders::_1));
+
+        client_ = this->create_client<mobile_manipulation_interfaces::srv::StopPose>(
+            "stop_pose");
         
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(
             this, "pick_object");
@@ -53,6 +58,9 @@ private:
     bool action_busy = false;
 
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
+
+    // Service client.
+    rclcpp::Client<mobile_manipulation_interfaces::srv::StopPose>::SharedPtr client_;
 
     // Action clients.
     rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
@@ -113,6 +121,31 @@ private:
                 break;
             }
         }
+    }
+
+    // Service client (stop_pose).
+
+    void send_request(geometry_msgs::msg::Pose pose)
+    {
+        auto request = std::make_shared<mobile_manipulation_interfaces::srv::StopPose::Request>();
+
+        request->stop_pose = pose;
+      
+        client_->async_send_request(request,
+            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::StopPose>::SharedFuture future_response) 
+            {
+                auto response = future_response.get();  
+
+                if (response->success) 
+                {
+                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                } 
+                else 
+                {
+                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+                }
+            }
+        );
     }
 
     // Action client (path).

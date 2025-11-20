@@ -13,10 +13,7 @@ find_package(nav_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MobileObjectCollision.srv"
-  "srv/MobileGoalPose.srv"
-  "srv/MobileGoalReached.srv"
-  "srv/MobileEvaluateReward.srv"
-  "srv/MobilePickedObject.srv"
+  "srv/StopPose.srv"
   "action/PickObject.action"
   "action/Path.action"
   "action/Controller.action"
