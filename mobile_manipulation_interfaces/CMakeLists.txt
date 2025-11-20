@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MobilePickedObject.srv"
   "action/PickObject.action"
   "action/Path.action"
+  "action/Controller.action"
   DEPENDENCIES 
   builtin_interfaces
   geometry_msgs
