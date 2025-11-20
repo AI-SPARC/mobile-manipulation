@@ -36,7 +36,7 @@
 #include <shape_msgs/msg/solid_primitive.hpp>
 
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
-#include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
+#include "mobile_manipulation_interfaces/action/object_collision.hpp"
 
 class SimpleManipulation : public rclcpp::Node 
 {
@@ -62,13 +62,17 @@ public:
             std::bind(&SimpleManipulation::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&SimpleManipulation::handle_cancel, this, std::placeholders::_1),
             std::bind(&SimpleManipulation::handle_accepted, this, std::placeholders::_1));
+
+        object_collision_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::ObjectCollision>(
+            this, "object_collision");
         
-        init_timer_ = this->create_wall_timer(
-            std::chrono::seconds(1),
-            std::bind(&SimpleManipulation::initMoveGroup, this));
         
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+        init_timer_ = this->create_wall_timer(
+            std::chrono::seconds(1),
+            std::bind(&SimpleManipulation::initMoveGroup, this));
 
         loadLocationsFromYaml(yaml_file);
     }   
@@ -104,6 +108,9 @@ private:
     //Publishers.
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
     
+    //Action client.
+    rclcpp_action::Client<mobile_manipulation_interfaces::action::ObjectCollision>::SharedPtr object_collision_client;
+
     //Action server.
     rclcpp_action::Server<mobile_manipulation_interfaces::action::PickObject>::SharedPtr action_server_;
 
@@ -576,9 +583,68 @@ private:
         }
     }
 
+    // Action client (object_collision).
 
+    void send_obstacle_id(const std::string id)
+    {
+        if (!this->object_collision_client->wait_for_action_server(std::chrono::seconds(5))) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Action server not available");
+            return;
+        }
 
-    // Action server.
+        auto goal_msg = mobile_manipulation_interfaces::action::ObjectCollision::Goal();
+        
+        goal_msg.obstacle_id = id;
+
+        RCLCPP_INFO(this->get_logger(), "Sending obstacle_id to add_collision node.");
+
+        auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::ObjectCollision>::SendGoalOptions();
+        
+        send_goal_options.goal_response_callback = 
+            std::bind(&SimpleManipulation::goal_response_callback, this, std::placeholders::_1);
+            
+        send_goal_options.result_callback = 
+            std::bind(&SimpleManipulation::result_callback, this, std::placeholders::_1);
+
+        this->object_collision_client->async_send_goal(goal_msg, send_goal_options);
+    }
+
+    void goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::ObjectCollision>> & goal_handle)
+    {
+        if (!goal_handle) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Goal rejected");
+        } 
+        else 
+        {
+            RCLCPP_INFO(this->get_logger(), "Goal accepted, executing...");
+        }
+    }
+
+    void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::ObjectCollision>::WrappedResult & result)
+    {
+        switch (result.code) 
+        {
+            case rclcpp_action::ResultCode::SUCCEEDED:
+                break;
+            case rclcpp_action::ResultCode::ABORTED:
+                RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
+                return;
+            case rclcpp_action::ResultCode::CANCELED:
+                RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
+                return;
+            default:
+                RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+                return;
+        }
+
+        RCLCPP_INFO(this->get_logger(), "O resultado foi: %s", result.result->success ? "true" : "false");
+                
+        
+    }
+
+    // Action server (pick_object).
 
     rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
         std::shared_ptr<const mobile_manipulation_interfaces::action::PickObject::Goal> goal)

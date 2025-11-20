@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MobileEvaluateReward.srv"
   "srv/MobilePickedObject.srv"
   "action/PickObject.action"
+  "action/ObjectCollision.action"
   DEPENDENCIES 
   builtin_interfaces
   geometry_msgs
