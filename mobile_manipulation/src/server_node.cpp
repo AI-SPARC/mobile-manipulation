@@ -219,7 +219,7 @@ private:
 
     // Action client (controller).
 
-    void send_controller_goal(const geometry_msgs::msg::Pose & target_pose)
+    void send_controller_goal(const nav_msgs::msg::Path &target_path)
     {
         if (!this->controller_client->wait_for_action_server(std::chrono::seconds(5))) 
         {
@@ -229,7 +229,7 @@ private:
 
         auto goal_msg = mobile_manipulation_interfaces::action::Controller::Goal();
         
-        goal_msg.pose = target_pose;
+        goal_msg.path = target_path;
 
         RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para Action...");
 

@@ -1,4 +1,4 @@
-geometry_msgs/Pose pose
+nav_msgs/Path path  
 ---
 bool success
 ---

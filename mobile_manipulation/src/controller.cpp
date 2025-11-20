@@ -7,7 +7,8 @@
 #include <mutex>
 #include <vector>
 #include <algorithm> 
-// #include "mobile_manipulation_interfaces/srv/mobile_goal_reached.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "mobile_manipulation_interfaces/action/controller.hpp"
 
 class DijkstraController3D : public rclcpp::Node
 {
@@ -23,14 +24,15 @@ public:
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&DijkstraController3D::odom_callback, this, std::placeholders::_1));
             
-        vertex_sub_ = this->create_subscription<geometry_msgs::msg::PoseArray>(
-            "/path", 10, std::bind(&DijkstraController3D::vertex_callback, this, std::placeholders::_1));
-
-        // client_1 = this->create_client<mobile_manipulation_interfaces::srv::MobileGoalReached>(
-        //     "/goal_reached");
+        this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::Controller>(
+            this, 
+            "controller",
+            std::bind(&DijkstraController3D::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&DijkstraController3D::handle_cancel, this, std::placeholders::_1),
+            std::bind(&DijkstraController3D::handle_accepted, this, std::placeholders::_1));
 
         control_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(50),
+            std::chrono::milliseconds(10),
             std::bind(&DijkstraController3D::control_loop, this));
 
         linear_speed_ = 0.5;
@@ -45,8 +47,10 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr vertex_sub_;
-    // rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedPtr client_1;
     rclcpp::TimerBase::SharedPtr control_timer_;
+
+    rclcpp_action::Server<mobile_manipulation_interfaces::action::Controller>::SharedPtr action_server_;
+
 
     geometry_msgs::msg::Pose current_pose_;
     bool pose_initialized_;
@@ -66,28 +70,6 @@ private:
     {
         current_pose_ = msg->pose.pose;
         pose_initialized_ = true;
-    }
-
-    void vertex_callback(const geometry_msgs::msg::PoseArray::SharedPtr msg)
-    {
-        std::lock_guard<std::mutex> lock(path_mutex_);
-
-        if (executing_path_) {
-            RCLCPP_WARN(this->get_logger(), "Novo caminho ignorado. Execução em andamento.");
-            return;
-        }
-
-        current_path_.clear();
-        for (const auto& pose : msg->poses) {
-            current_path_.push_back(pose);
-        }
-
-        if (!current_path_.empty()) {
-            current_waypoint_idx_ = 0;
-            path_received_ = true;
-            executing_path_ = true;
-            RCLCPP_INFO(this->get_logger(), "Novo caminho recebido com %zu pontos. Iniciando trajetória.", current_path_.size());
-        }
     }
 
     void control_loop()
@@ -154,29 +136,6 @@ private:
         }
     }
 
-    // void goal_reached()
-    // {
-    //     auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileGoalReached::Request>();
-    //     request->reached = true;
-        
-      
-    //     client_1->async_send_request(request,
-    //         [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedFuture future_response) 
-    //         {
-    //             auto response = future_response.get();  
-
-    //             if (response->success) 
-    //             {
-                   
-    //                 RCLCPP_INFO(this->get_logger(), "Controller: Service executado com sucesso!");
-    //             } 
-    //             else 
-    //             {
-    //                 RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-    //             }
-    //         }
-    //     );
-    // }
 
     void publish_zero_velocity()
     {
@@ -198,6 +157,62 @@ private:
         while(a > M_PI) a -= 2*M_PI;
         while(a < -M_PI) a += 2*M_PI;
         return a;
+    }
+
+    // Action service (controller).
+
+    rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
+        std::shared_ptr<const mobile_manipulation_interfaces::action::Controller::Goal> goal)
+    {
+
+        (void)uuid;
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
+
+    rclcpp_action::CancelResponse handle_cancel(
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Recebido pedido de cancelamento da Action.");
+        (void)goal_handle;
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+
+    void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
+    {
+        using namespace std::placeholders;
+        
+        std::thread{std::bind(&DijkstraController3D::execute, this, std::placeholders::_1), goal_handle}.detach();
+    }
+
+    void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
+    {
+        std::lock_guard<std::mutex> lock(path_mutex_);
+
+        RCLCPP_INFO(this->get_logger(), "Executando lógica de Pick (Action)...");
+        
+        const auto goal = goal_handle->get_goal();
+        auto result = std::make_shared<mobile_manipulation_interfaces::action::Controller::Result>();
+    
+        current_path_.clear();
+        for (const auto& pose : goal->path.poses)        
+        {
+            current_path_.push_back(pose.pose);
+        }
+
+        if (!current_path_.empty()) 
+        {
+            current_waypoint_idx_ = 0;
+            path_received_ = true;
+            executing_path_ = true;
+            RCLCPP_INFO(this->get_logger(), "Novo caminho recebido com %zu pontos. Iniciando trajetória.", current_path_.size());
+        }
+
+        if (rclcpp::ok()) 
+        {
+            result->success = true;
+            goal_handle->succeed(result);
+            RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso.");
+        }
     }
 };
 
