@@ -6,14 +6,25 @@
 #include <functional>
 #include <chrono>
 #include <random>
+#include <thread>
+#include <unordered_map>
+
 #include <yaml-cpp/yaml.h>
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+
 #include "geometry_msgs/msg/pose.hpp"
 #include "vision_msgs/msg/detection3_d_array.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/bool.hpp"
+
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include "sensor_msgs/msg/point_cloud2.hpp"
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+
 #include <moveit/move_group_interface/move_group_interface.hpp>
 #include <moveit/robot_state/robot_state.hpp>
 #include <moveit/robot_model_loader/robot_model_loader.hpp>
@@ -23,18 +34,9 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
-#include "mobile_manipulation_interfaces/srv/mobile_picked_object.hpp"
-#include "mobile_manipulation_interfaces/srv/mobile_goal_reached.hpp"
+
+#include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
-#include <tf2/LinearMath/Quaternion.h>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <std_msgs/msg/float32.hpp>
-#include <cmath> 
-#include "std_msgs/msg/bool.hpp"
-#include <thread> 
-
-using namespace std::chrono_literals;
-
 
 class SimpleManipulation : public rclcpp::Node 
 {
@@ -54,14 +56,13 @@ public:
         executor_->add_node(moveit_node_);
         executor_thread_ = std::thread([this]() { this->executor_->spin(); });
       
-    
-        client_ = this->create_client<mobile_manipulation_interfaces::srv::MobileObjectCollision>(
-            "/object_collision");
-
-        service_ = this->create_service<mobile_manipulation_interfaces::srv::MobilePickedObject>("/picked_object",std::bind(&SimpleManipulation::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+        this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::PickObject>(
+            this, 
+            "pick_object",
+            std::bind(&SimpleManipulation::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&SimpleManipulation::handle_cancel, this, std::placeholders::_1),
+            std::bind(&SimpleManipulation::handle_accepted, this, std::placeholders::_1));
         
-        service_1 = this->create_service<mobile_manipulation_interfaces::srv::MobileGoalReached>("/goal_reached",std::bind(&SimpleManipulation::handle_controller_request, this, std::placeholders::_1, std::placeholders::_2));
-
         init_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
             std::bind(&SimpleManipulation::initMoveGroup, this));
@@ -103,12 +104,8 @@ private:
     //Publishers.
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
     
-    //Client.
-    rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr client_;
-
-    //Service.
-    rclcpp::Service<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedPtr service_;
-    rclcpp::Service<mobile_manipulation_interfaces::srv::MobileGoalReached>::SharedPtr service_1;
+    //Action server.
+    rclcpp_action::Server<mobile_manipulation_interfaces::action::PickObject>::SharedPtr action_server_;
 
     //Timer.
     rclcpp::TimerBase::SharedPtr init_timer_;
@@ -212,8 +209,6 @@ private:
         }
     }
 
-
-
     void initMoveGroup() 
     {
         try 
@@ -237,7 +232,6 @@ private:
         }
 
     }
-
     
     void ready()
     {
@@ -326,7 +320,6 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Falha ao fechar o gripper.");
         }
     }
-
        
     bool positions_for_arm(const geometry_msgs::msg::Pose &target_pose, float maxVelocity, bool computeCartesian)
     {
@@ -523,7 +516,6 @@ private:
            
             if (positions_for_arm(target_pose_world, 0.5, false)) 
             {
-                send_request(received_id, false);
                 rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
@@ -571,7 +563,6 @@ private:
                     place_in_world.pose.position.y,
                     place_in_world.pose.position.z);
 
-        // --- Mover usando a pose EM WORLD ---
         if (positions_for_arm(place_in_world.pose, 0.5, false)) 
         {
             rclcpp::sleep_for(std::chrono::milliseconds(1000));
@@ -583,86 +574,51 @@ private:
         {
             RCLCPP_ERROR(this->get_logger(), "Falha ao mover para a pose de descarte.");
         }
-
-       
     }
 
 
-    
 
-    /*
-    
-        Servers.
+    // Action server.
 
-    */
-
-    void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobilePickedObject::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobilePickedObject::Response> response)
+    rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
+        std::shared_ptr<const mobile_manipulation_interfaces::action::PickObject::Goal> goal)
     {
-
-        std::get<0>(object) = request->id;
-        std::get<1>(object) = request->pose;
-
-        bool success = true;  
-
-        response->success = success;
-
-        if (success)
-        {
-            RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
-        }
-        else
-        {
-            RCLCPP_WARN(this->get_logger(), "Falha ao processar o pedido!");
-        }
+        RCLCPP_INFO(this->get_logger(), "Recebido pedido de Action PickObject para pose [x: %.2f, y: %.2f]", 
+            goal->pose.position.x, goal->pose.position.y);
+        (void)uuid;
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     }
 
-    void handle_controller_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalReached::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalReached::Response> response)
+    rclcpp_action::CancelResponse handle_cancel(
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>> goal_handle)
     {
-        if(request->reached == true)
-        {
-            open_gripper();
-            calculate_global_pose(std::get<0>(object), std::get<1>(object));
-
-            send_request(std::get<0>(object), true);
-            bool success = true;  
-
-            response->success = success;
-
-            if (success)
-            {
-                RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
-            }
-            else
-            {
-                RCLCPP_WARN(this->get_logger(), "Falha ao processar o pedido!");
-            }
-        }
-       
+        RCLCPP_INFO(this->get_logger(), "Recebido pedido de cancelamento da Action.");
+        (void)goal_handle;
+        return rclcpp_action::CancelResponse::ACCEPT;
     }
 
-
-    void send_request(std::string received_obstacle_id, bool received_activate_movement)
+    void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>> goal_handle)
     {
-        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileObjectCollision::Request>();
-        request->obstacle_id = received_obstacle_id;
-        request->activate_movement = received_activate_movement;
+        using namespace std::placeholders;
+        
+        std::thread{std::bind(&SimpleManipulation::execute, this, std::placeholders::_1), goal_handle}.detach();
+    }
 
-      
-        client_->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedFuture future_response) 
-            {
-                auto response = future_response.get();  
+    void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Executando lógica de Pick (Action)...");
+        
+        const auto goal = goal_handle->get_goal();
+        auto result = std::make_shared<mobile_manipulation_interfaces::action::PickObject::Result>();
 
-                if (response->success) 
-                {
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                } 
-                else 
-                {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-                }
-            }
-        );
+        calculate_global_pose(goal->obstacle_id, goal->pose);
+
+        if (rclcpp::ok()) 
+        {
+            result->success = true;
+            goal_handle->succeed(result);
+            RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso.");
+        }
     }
 
 };

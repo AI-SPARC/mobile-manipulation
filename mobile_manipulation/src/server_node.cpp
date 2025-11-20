@@ -37,11 +37,6 @@ public:
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(
             this, "pick_object");
 
-        client_1 = this->create_client<mobile_manipulation_interfaces::srv::MobilePickedObject>(
-            "/picked_object");
-        client_2 = this->create_client<mobile_manipulation_interfaces::srv::MobileGoalPose>(
-            "/goal_pose");
-
         if(!yaml_file.empty()) {
             loadLocationsFromYaml(yaml_file);
         }
@@ -51,9 +46,6 @@ private:
     bool action_busy = false;
 
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
-
-    rclcpp::Client<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedPtr client_1;
-    rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedPtr client_2;
 
     rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
     
@@ -108,44 +100,16 @@ private:
 
                 geometry_msgs::msg::Vector3 size = det.bbox.size;
 
-                send_picked_object(raw_id, pose, size);
-                send_goal_pose(pose);
-
-                // Chama Action
-                send_goal(pose);
+                send_goal(id, pose);
 
                 break;
             }
         }
     }
 
-    void send_picked_object(std::string received_id, geometry_msgs::msg::Pose received_pose, geometry_msgs::msg::Vector3 received_size)
-    {
-        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobilePickedObject::Request>();
-        request->id = received_id;
-        request->pose = received_pose;
-        request->size = received_size;
-      
-        client_1->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobilePickedObject>::SharedFuture future) {
-                if(future.get()->success) RCLCPP_INFO(this->get_logger(), "Service PickedObject OK");
-            });
-    }
-
-    void send_goal_pose(geometry_msgs::msg::Pose received_pose)
-    {
-        auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileGoalPose::Request>();
-        request->pose = received_pose;
-     
-        client_2->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedFuture future) {
-                if(future.get()->success) RCLCPP_INFO(this->get_logger(), "Service GoalPose OK");
-            });
-    }
-
     //Actions.
 
-    void send_goal(const geometry_msgs::msg::Pose & target_pose)
+    void send_goal(const std::string id, const geometry_msgs::msg::Pose & target_pose)
     {
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5))) 
         {
@@ -156,7 +120,7 @@ private:
 
         auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
         
-    
+        goal_msg.obstacle_id = id;
         goal_msg.pose = target_pose;
 
         RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para Action...");
