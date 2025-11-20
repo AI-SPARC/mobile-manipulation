@@ -7,16 +7,18 @@
 #include <mutex>
 #include <vector>
 #include <algorithm> 
+#include <thread>
+#include <chrono>
+#include <map>   // Necessário para std::map
+#include <tuple> // Necessário para std::tuple
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "mobile_manipulation_interfaces/action/controller.hpp"
+#include "mobile_manipulation_interfaces/srv/stop_pose.hpp"
 
 class DijkstraController3D : public rclcpp::Node
 {
 public:
     DijkstraController3D() : Node("dijkstra_controller_3d"), 
-                              current_waypoint_idx_(0),
-                              path_received_(false),
-                              executing_path_(false),
                               pose_initialized_(false)
     {
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
@@ -31,36 +33,37 @@ public:
             std::bind(&DijkstraController3D::handle_cancel, this, std::placeholders::_1),
             std::bind(&DijkstraController3D::handle_accepted, this, std::placeholders::_1));
 
-        control_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(10),
-            std::bind(&DijkstraController3D::control_loop, this));
+        service_ = this->create_service<mobile_manipulation_interfaces::srv::StopPose>("/stop_pose",
+            std::bind(&DijkstraController3D::handle_request, this, std::placeholders::_1, std::placeholders::_2));
 
         linear_speed_ = 0.5;
         angular_speed_ = 2.0;
         waypoint_tolerance_ = 0.1; 
         angle_tolerance_ = 0.1;
 
-        RCLCPP_INFO(this->get_logger(), "DijkstraController3D iniciado!");
+        // Só iniciando com valores impossíveis para não parar quando não deveria.
+        stop_pose_.position.x = -99999.256; 
+
+        RCLCPP_INFO(this->get_logger(), "DijkstraController3D iniciado (Modo Action Loop)!");
     }
 
 private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr vertex_sub_;
-    rclcpp::TimerBase::SharedPtr control_timer_;
-
+    
+    // Action server.
     rclcpp_action::Server<mobile_manipulation_interfaces::action::Controller>::SharedPtr action_server_;
 
+    // Service.
+    rclcpp::Service<mobile_manipulation_interfaces::srv::StopPose>::SharedPtr service_;
 
     geometry_msgs::msg::Pose current_pose_;
+    geometry_msgs::msg::Pose stop_pose_;
+    
+    std::mutex pose_mutex_; 
+    std::mutex stop_pose_mutex;
+
     bool pose_initialized_;
-    
-    std::vector<geometry_msgs::msg::Pose> current_path_;
-    std::mutex path_mutex_;
-    size_t current_waypoint_idx_;
-    bool path_received_;
-    bool executing_path_;
-    
     double linear_speed_;
     double angular_speed_;
     double waypoint_tolerance_;
@@ -68,74 +71,10 @@ private:
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
         current_pose_ = msg->pose.pose;
         pose_initialized_ = true;
     }
-
-    void control_loop()
-    {
-        if (!pose_initialized_ || !path_received_ || !executing_path_) {
-            publish_zero_velocity();
-            return;
-        }
-
-        std::lock_guard<std::mutex> lock(path_mutex_);
-
-        if (current_path_.empty() || current_waypoint_idx_ >= current_path_.size()) {
-            publish_zero_velocity();
-            executing_path_ = false;
-            return;
-        }
-
-        const auto& target = current_path_[current_waypoint_idx_];
-        double dx = target.position.x - current_pose_.position.x;
-        double dy = target.position.y - current_pose_.position.y;
-        double distance = std::sqrt(dx*dx + dy*dy);
-
-        tf2::Quaternion q(current_pose_.orientation.x,
-                          current_pose_.orientation.y,
-                          current_pose_.orientation.z,
-                          current_pose_.orientation.w);
-        double yaw = get_yaw_from_quaternion(q);
-
-        double target_yaw = std::atan2(dy, dx);
-        double angle_error = normalize_angle(target_yaw - yaw);
-
-        geometry_msgs::msg::Twist cmd;
-        
-        if (std::fabs(angle_error) > angle_tolerance_) 
-        {
-            cmd.linear.x = 0.0;
-            cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
-        } 
-        else 
-        {
-            cmd.linear.x = std::min(linear_speed_, distance * 1.5); 
-            cmd.linear.x = std::clamp(cmd.linear.x, 0.0, linear_speed_);
-            cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
-        }
-
-        // Corrige a inversão de rotação
-        cmd.angular.z = -cmd.angular.z;
-
-        cmd_vel_pub_->publish(cmd);
-
-        if (distance < waypoint_tolerance_) {
-            RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu.", current_waypoint_idx_);
-            current_waypoint_idx_++; 
-
-            if (current_waypoint_idx_ >= current_path_.size()) {
-                publish_zero_velocity();
-                executing_path_ = false;
-                path_received_ = false; 
-                current_path_.clear();
-                rclcpp::sleep_for(std::chrono::milliseconds(2000));
-                // goal_reached();
-                RCLCPP_INFO(this->get_logger(), "Goal Reached.");
-            }
-        }
-    }
-
 
     void publish_zero_velocity()
     {
@@ -159,13 +98,32 @@ private:
         return a;
     }
 
-    // Action service (controller).
+    // Service
+    void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::StopPose::Request> request, 
+                        std::shared_ptr<mobile_manipulation_interfaces::srv::StopPose::Response> response)
+    {   
+        {
+            std::lock_guard<std::mutex> lock(stop_pose_mutex);
+            stop_pose_ = request->stop_pose;
+        }
+        
+        response->success = true;
+        RCLCPP_INFO(this->get_logger(), "Stop Pose atualizado via serviço.");
+    }
+
+    // Action server (controller).
 
     rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
         std::shared_ptr<const mobile_manipulation_interfaces::action::Controller::Goal> goal)
     {
-
         (void)uuid;
+
+        if (goal->path.poses.empty()) 
+        {
+            RCLCPP_WARN(this->get_logger(), "Caminho vazio recebido. Rejeitando goal.");
+            return rclcpp_action::GoalResponse::REJECT;
+        }
+
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     }
 
@@ -179,33 +137,127 @@ private:
 
     void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
     {
-        using namespace std::placeholders;
-        
         std::thread{std::bind(&DijkstraController3D::execute, this, std::placeholders::_1), goal_handle}.detach();
     }
 
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
     {
-        std::lock_guard<std::mutex> lock(path_mutex_);
+        RCLCPP_INFO(this->get_logger(), "Iniciando execução do caminho (Action Thread)...");
 
-        RCLCPP_INFO(this->get_logger(), "Executando lógica de Pick (Action)...");
-        
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::Controller::Result>();
-    
-        current_path_.clear();
-        for (const auto& pose : goal->path.poses)        
+        
+        std::vector<geometry_msgs::msg::Pose> path;
+        std::map<std::tuple<float, float, float>, int> index_map;
+        int i = 0;
+
+        for (const auto& p : goal->path.poses) 
         {
-            current_path_.push_back(pose.pose);
+            path.push_back(p.pose);
+            index_map[std::make_tuple(static_cast<float>(p.pose.position.x), 
+                                      static_cast<float>(p.pose.position.y), 
+                                      static_cast<float>(p.pose.position.z))] = i;
+            i++;
         }
 
-        if (!current_path_.empty()) 
+        size_t current_idx = 0;
+        rclcpp::Rate rate(100);
+
+        while (rclcpp::ok() && !pose_initialized_) 
         {
-            current_waypoint_idx_ = 0;
-            path_received_ = true;
-            executing_path_ = true;
-            RCLCPP_INFO(this->get_logger(), "Novo caminho recebido com %zu pontos. Iniciando trajetória.", current_path_.size());
+             if (goal_handle->is_canceling()) 
+             {
+                result->success = false;
+                goal_handle->canceled(result);
+                return;
+             }
+             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Aguardando odometria...");
+             rate.sleep();
         }
+
+        while (rclcpp::ok() && current_idx < path.size())
+        {
+            if (goal_handle->is_canceling()) 
+            {
+                publish_zero_velocity();
+                result->success = false;
+                goal_handle->canceled(result);
+                RCLCPP_INFO(this->get_logger(), "Execução cancelada.");
+                return;
+            }
+
+            geometry_msgs::msg::Pose local_pose;
+            int stop_index = -1; 
+
+            {
+                std::lock_guard<std::mutex> lock(stop_pose_mutex);
+                auto search_tuple = std::make_tuple(static_cast<float>(stop_pose_.position.x), 
+                                                    static_cast<float>(stop_pose_.position.y), 
+                                                    static_cast<float>(stop_pose_.position.z));
+                
+                if(index_map.find(search_tuple) != index_map.end())
+                {
+                    stop_index = index_map[search_tuple];
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(pose_mutex_);
+                local_pose = current_pose_;
+            }
+
+            if(stop_index != -1 && static_cast<int>(current_idx) >= stop_index)
+            {
+                RCLCPP_INFO(this->get_logger(), "Parada solicitada no waypoint %d.", stop_index);
+                break;
+            }
+
+            // 3. Lógica de Controle
+            const auto& target = path[current_idx];
+            
+            double dx = target.position.x - local_pose.position.x;
+            double dy = target.position.y - local_pose.position.y;
+            double distance = std::sqrt(dx*dx + dy*dy);
+
+            tf2::Quaternion q(local_pose.orientation.x,
+                              local_pose.orientation.y,
+                              local_pose.orientation.z,
+                              local_pose.orientation.w);
+            double yaw = get_yaw_from_quaternion(q);
+            double target_yaw = std::atan2(dy, dx);
+            double angle_error = normalize_angle(target_yaw - yaw);
+
+            geometry_msgs::msg::Twist cmd;
+
+            if (std::fabs(angle_error) > angle_tolerance_) 
+            {
+                cmd.linear.x = 0.0;
+                cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
+            } 
+            else 
+            {
+                double approach_speed = std::min(linear_speed_, distance * 1.5);
+                cmd.linear.x = std::clamp(approach_speed, 0.0, linear_speed_);
+                cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
+            }
+
+            cmd.angular.z = -cmd.angular.z;
+            cmd_vel_pub_->publish(cmd);
+
+            if (distance < waypoint_tolerance_) 
+            {
+                RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu/%zu.", current_idx + 1, path.size());
+                current_idx++;
+            }
+
+            rate.sleep();
+        }
+
+        publish_zero_velocity();
 
         if (rclcpp::ok()) 
         {
