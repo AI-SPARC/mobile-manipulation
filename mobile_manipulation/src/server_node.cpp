@@ -71,7 +71,7 @@ private:
     std::unordered_set<std::string> pick_and_place_poses;
     std::unordered_set<std::string> picked;
 
-    nav_msgs::msg::Path mobile_robot_path;
+    std::pair<std::string, geometry_msgs::msg::Pose> pick_pose;
 
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
@@ -87,6 +87,10 @@ private:
 
     void detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
+        if(action_busy == true)
+        {
+            return;
+        }
 
         for (const auto &det : msg->detections)
         {
@@ -115,8 +119,9 @@ private:
                 pose.position = det.bbox.center.position;
                 pose.orientation = det.bbox.center.orientation;
 
-                send_goal(id, pose);
+                pick_pose = std::make_pair(id, pose);
                 send_path_goal(pose);
+                action_busy = true;
 
                 break;
             }
@@ -180,7 +185,7 @@ private:
     {
         if (feedback->recalculating_path) 
         {
-            RCLCPP_WARN(this->get_logger(), "O servidor avisou: Recalculando rota...");
+            send_request(feedback->stop_pose);
         }
 
     }
@@ -214,7 +219,7 @@ private:
                 return;
         }
     
-        mobile_robot_path = result.result->path;
+        send_controller_goal(result.result->path);
     }
 
     // Action client (controller).
@@ -269,7 +274,8 @@ private:
                 RCLCPP_ERROR(this->get_logger(), "Unknown result code");
                 return;
         }
-    
+        
+        send_goal(std::get<0>(pick_pose), std::get<1>(pick_pose));
     }
 
     // Action client (pick_object).
@@ -279,14 +285,11 @@ private:
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5))) 
         {
             RCLCPP_ERROR(this->get_logger(), "Action server not available");
-            action_busy = false;
+           
             return;
         }
 
-        if(action_busy)
-        {
-            return;
-        }
+      
 
         auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
         
@@ -297,11 +300,8 @@ private:
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SendGoalOptions();
         
-        send_goal_options.goal_response_callback = 
-            std::bind(&ServerNode::goal_response_callback, this, std::placeholders::_1);
-            
-        send_goal_options.result_callback = 
-            std::bind(&ServerNode::result_callback, this, std::placeholders::_1);
+        send_goal_options.goal_response_callback = std::bind(&ServerNode::goal_response_callback, this, std::placeholders::_1);
+        send_goal_options.result_callback = std::bind(&ServerNode::result_callback, this, std::placeholders::_1);
 
         this->client_ptr_->async_send_goal(goal_msg, send_goal_options);
     }
@@ -321,6 +321,8 @@ private:
 
     void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>::WrappedResult & result)
     {
+        action_busy = false;
+
         switch (result.code) 
         {
             case rclcpp_action::ResultCode::SUCCEEDED:
@@ -338,7 +340,7 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "O resultado foi: %s", result.result->success ? "true" : "false");
                 
-        action_busy = false;
+        
     }
 };
 

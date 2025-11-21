@@ -3,3 +3,4 @@ geometry_msgs/Pose pose
 nav_msgs/Path path  
 ---
 bool recalculating_path
+geometry_msgs/Pose stop_pose
