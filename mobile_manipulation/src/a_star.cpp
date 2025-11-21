@@ -45,7 +45,8 @@
 #include <utility>
 #include <string>
 #include <filesystem>
-// #include "mobile_manipulation_interfaces/srv/mobile_goal_pose.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "mobile_manipulation_interfaces/action/path.hpp"
 
 using namespace std::chrono_literals;
 
@@ -193,9 +194,6 @@ private:
         float prob;
     };
     
-    //Service.
-    // rclcpp::Service<mobile_manipulation_interfaces::srv::MobileGoalPose>::SharedPtr service_;
-    
     //Publishers.
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr publisher_path_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_nav_path_;
@@ -203,6 +201,9 @@ private:
     //Subscriptions.
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_navigable_removed_vertices;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_odom_;
+    
+    //Action server.
+    rclcpp_action::Server<mobile_manipulation_interfaces::action::Path>::SharedPtr action_server_;
 
     //Timers.
     rclcpp::TimerBase::SharedPtr timer_;
@@ -236,7 +237,6 @@ private:
         return result;
     }
     
-
     int count_decimals(float number) 
     {
       
@@ -252,9 +252,6 @@ private:
         }
         return decimals;
     }
-    
-
-    
 
     std::vector<std::array<float, 3>> get_offsets(float distanceToObstacle) {
         return {
@@ -749,13 +746,7 @@ private:
     }
 
 
-    /*
-
-        PUBLISHERS.
-
-    */
-
-
+    // Publishers.
     
     void publisher_dijkstra()
     {   
@@ -792,7 +783,7 @@ private:
             
             pose_stamped.pose.position.x = vertex.x;
             pose_stamped.pose.position.y = vertex.y;
-            pose_stamped.pose.position.z = 0.0  ;
+            pose_stamped.pose.position.z = 0.0 ;
             pose_stamped.pose.orientation.x = vertex.orientation_x;
             pose_stamped.pose.orientation.y = vertex.orientation_y;
             pose_stamped.pose.orientation.z = vertex.orientation_z;
@@ -805,24 +796,16 @@ private:
     }
 
 
-
-    /*
+    // Callbacks.
     
-        CALLBACKS.
-
-    */
     
-
-    
-
     void callback_odom(const nav_msgs::msg::Odometry::SharedPtr msg) 
     {
         pose_x_ = msg->pose.pose.position.x;
         pose_y_ = msg->pose.pose.position.y;
         pose_z_ = 0.0;
     }
-
-        
+     
     void load_black_points(const std::string &yaml_file)
     {
         YAML::Node config = YAML::LoadFile(yaml_file);
@@ -861,36 +844,107 @@ private:
     }
     
 
-    // Service
+    // Action server (pick_object).
 
-    // void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Request> request, std::shared_ptr<mobile_manipulation_interfaces::srv::MobileGoalPose::Response> response)
-    // {
-    //     std::pair<float, float> initial_pose, goal_pose;
+    rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
+        std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Goal> goal)
+    {
+        RCLCPP_INFO(this->get_logger(), "Recebido pedido de Action Path para pose [x: %.2f, y: %.2f]", 
+            goal->pose.position.x, goal->pose.position.y);
+        (void)uuid;
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
 
-    //     initial_pose = std::make_pair(pose_x_, pose_y_);
+    rclcpp_action::CancelResponse handle_cancel(
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Recebido pedido de cancelamento da Action.");
+        (void)goal_handle;
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
 
-    //     geometry_msgs::msg::Pose pose = request->pose;
+    void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
+    {
+        using namespace std::placeholders;
+        
+        std::thread{std::bind(&AStar::execute, this, std::placeholders::_1), goal_handle}.detach();
+    }
 
-    //     goal_pose = std::make_pair(pose.position.x, pose.position.y);
+    void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Executando Action de Path Planning...");
 
-    //     std::pair<std::vector<std::pair<float, float>>, bool> a_star_result = run_a_star(initial_pose, goal_pose);
-    //     std::vector<std::pair<float, float>> shortestPath = std::get<0>(a_star_result);
-    //     bool straight_line = std::get<1>(a_star_result);
-    //     store_edges_in_path(shortestPath, straight_line);
+        const auto goal = goal_handle->get_goal();
+        auto result = std::make_shared<mobile_manipulation_interfaces::action::Path::Result>();
+        auto feedback = std::make_shared<mobile_manipulation_interfaces::action::Path::Feedback>();
 
-    //     bool success = true;  
+        std::pair<float, float> initial_pose = std::make_pair(pose_x_, pose_y_);
+        
+        std::pair<float, float> goal_pose = std::make_pair(goal->pose.position.x, goal->pose.position.y);
 
-    //     response->success = success;
+    
+        feedback->recalculating_path = true;
+        feedback->stop_pose.position.x = pose_x_;
+        feedback->stop_pose.position.y = pose_y_;
+        goal_handle->publish_feedback(feedback);
 
-    //     if (success)
-    //     {
-    //         RCLCPP_INFO(this->get_logger(), "Processamento concluído com sucesso!");
-    //     }
-    //     else
-    //     {
-    //         RCLCPP_WARN(this->get_logger(), "Falha ao processar o pedido!");
-    //     }
-    // }
+        
+        if (goal_handle->is_canceling()) 
+        {
+            result->path.header.stamp = this->now();
+            result->path.header.frame_id = "world"; 
+            goal_handle->canceled(result);
+            RCLCPP_INFO(this->get_logger(), "Action cancelada antes do cálculo.");
+            return;
+        }
+
+      
+        std::pair<std::vector<std::pair<float, float>>, bool> a_star_result = run_a_star(initial_pose, goal_pose);
+
+        std::vector<std::pair<float, float>> shortestPath = std::get<0>(a_star_result);
+        bool straight_line = std::get<1>(a_star_result);
+
+        store_edges_in_path(shortestPath, straight_line);
+
+        if (shortestPath.empty()) 
+        {
+            goal_handle->abort(result);
+            RCLCPP_WARN(this->get_logger(), "A* falhou em encontrar um caminho.");
+            return;
+        }
+
+        result->path.header.stamp = this->now();
+        result->path.header.frame_id = "world"; 
+        for (const auto& vertex : verticesDijkstra)
+        {
+            geometry_msgs::msg::PoseStamped pose_stamped;
+            pose_stamped.header.stamp = this->now();
+            pose_stamped.header.frame_id = "world";
+            
+            pose_stamped.pose.position.x = vertex.x;
+            pose_stamped.pose.position.y = vertex.y;
+            pose_stamped.pose.position.z = 0.0;
+            pose_stamped.pose.orientation.x = vertex.orientation_x;
+            pose_stamped.pose.orientation.y = vertex.orientation_y;
+            pose_stamped.pose.orientation.z = vertex.orientation_z;
+            pose_stamped.pose.orientation.w = vertex.orientation_w;
+            
+            
+            result->path.poses.push_back(pose_stamped);
+        }
+
+       
+        feedback->recalculating_path = false;
+        goal_handle->publish_feedback(feedback);
+
+       
+        if (rclcpp::ok()) 
+        {
+            goal_handle->succeed(result);
+            RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso. Caminho com %zu pontos.", result->path.poses.size());
+        }
+    }
+
 };
 
 
