@@ -124,15 +124,17 @@ public:
         RCLCPP_INFO(this->get_logger(), "path_resolution is set to: %f", distanceToObstacle_);
         RCLCPP_INFO(this->get_logger(), "iterations_before_verification is set to: %d", iterations_before_verification);
 
-        // service_ = this->create_service<mobile_manipulation_interfaces::srv::MobileGoalPose>("/goal_pose",std::bind(&AStar::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+        this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::Path>(
+            this, 
+            "path",
+            std::bind(&AStar::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&AStar::handle_cancel, this, std::placeholders::_1),
+            std::bind(&AStar::handle_accepted, this, std::placeholders::_1));
 
         decimals = count_decimals(distanceToObstacle_);
 
      
         publisher_nav_path_ = this->create_publisher<nav_msgs::msg::Path>("visualize_path", 10);
-
-        publisher_path_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/path", 10);
-        
 
         subscription_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&AStar::callback_odom, this, std::placeholders::_1));
@@ -740,34 +742,12 @@ private:
             verticesDijkstra.push_back(vertex);
         }
 
-
-        publisher_dijkstra();
         publisher_dijkstra_path();
     }
 
 
     // Publishers.
-    
-    void publisher_dijkstra()
-    {   
-        geometry_msgs::msg::PoseArray message;
-        message.header.stamp = this->now();
-        message.header.frame_id = "world";
 
-        for (const auto& vertex : verticesDijkstra) {
-            geometry_msgs::msg::Pose pose;
-            pose.position.x = vertex.x;
-            pose.position.y = vertex.y;
-            pose.position.z = 0.0;
-            pose.orientation.x = vertex.orientation_x;
-            pose.orientation.y = vertex.orientation_y;
-            pose.orientation.z = vertex.orientation_z;
-            pose.orientation.w = vertex.orientation_w; 
-            message.poses.push_back(pose);
-        }
-
-        publisher_path_->publish(message);
-    }
 
     void publisher_dijkstra_path()
     {

@@ -41,7 +41,7 @@ public:
      : Node("add_colision_objects")
     {
         this->declare_parameter<std::string>("yaml_file", "");
-        this->declare_parameter<std::string>("move_group", "denso_arm");
+        this->declare_parameter<std::string>("move_group", "panda_arm");
 
         std::string labels_path = this->get_parameter("yaml_file").as_string();
         move_group = this->get_parameter("move_group").as_string();

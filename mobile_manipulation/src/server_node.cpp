@@ -338,6 +338,11 @@ private:
                 return;
         }
 
+        if(result.result->success == false)
+        {
+            picked.erase(std::get<0>(pick_pose));
+        }
+
         RCLCPP_INFO(this->get_logger(), "O resultado foi: %s", result.result->success ? "true" : "false");
                 
         
