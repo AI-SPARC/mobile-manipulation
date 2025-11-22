@@ -524,7 +524,6 @@ private:
             if (positions_for_arm(target_pose_world, 0.5, false)) 
             {
                 send_request(received_id, false);
-                rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
                 move_group_arm->attachObject(received_id, "panda_link8", touch_links);
@@ -533,7 +532,7 @@ private:
 
                 close_gripper();
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(500));
+                rclcpp::sleep_for(std::chrono::milliseconds(600));
             }
         }
 
@@ -587,28 +586,47 @@ private:
     
     // Service client (object_collision).
 
-    void send_request(std::string received_obstacle_id, bool received_activate_movement)
+    bool send_request(std::string received_obstacle_id, bool received_activate_movement)
     {
         auto request = std::make_shared<mobile_manipulation_interfaces::srv::MobileObjectCollision::Request>();
         request->obstacle_id = received_obstacle_id;
         request->activate_movement = received_activate_movement;
 
-      
-        client_->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedFuture future_response) 
+        if (!client_->wait_for_service(std::chrono::seconds(1))) {
+            RCLCPP_ERROR(this->get_logger(), "Serviço '/object_collision' não está disponível.");
+            return false;
+        }
+
+        auto future_result = client_->async_send_request(request);
+
+        if (future_result.wait_for(std::chrono::seconds(5)) == std::future_status::ready)
+        {
+            try 
             {
-                auto response = future_response.get();  
+                auto response = future_result.get(); 
 
                 if (response->success) 
                 {
-                    RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
+                    RCLCPP_INFO(this->get_logger(), "Service síncrono OK: %s", received_obstacle_id.c_str());
+                    return true;
                 } 
                 else 
                 {
-                    RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
+                    RCLCPP_WARN(this->get_logger(), "Service retornou false (falha lógica no servidor).");
+                    return false;
                 }
             }
-        );
+            catch (const std::exception &e)
+            {
+                RCLCPP_ERROR(this->get_logger(), "Erro ao processar resposta do serviço: %s", e.what());
+                return false;
+            }
+        }
+        else
+        {
+            RCLCPP_ERROR(this->get_logger(), "Timeout: O serviço demorou demais para responder.");
+            return false;
+        }
     }
 
     // Action server (pick_object).
@@ -644,6 +662,7 @@ private:
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::PickObject::Result>();
 
+        open_gripper();
         calculate_global_pose(goal->obstacle_id, goal->pose);
 
         if (rclcpp::ok()) 

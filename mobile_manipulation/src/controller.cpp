@@ -199,10 +199,6 @@ private:
                 {
                     stop_index = index_map[search_tuple];
                 }
-                else
-                {
-                    break;
-                }
             }
 
             {

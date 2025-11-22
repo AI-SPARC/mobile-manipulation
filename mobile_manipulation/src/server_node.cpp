@@ -110,16 +110,16 @@ private:
                 continue;
             }
             
-            if(picked.find(id) == picked.end())
+            if(picked.find(raw_id) == picked.end())
             {
                 action_busy = true;
-                picked.insert(id);
+                picked.insert(raw_id);
 
                 geometry_msgs::msg::Pose pose;
                 pose.position = det.bbox.center.position;
                 pose.orientation = det.bbox.center.orientation;
 
-                pick_pose = std::make_pair(id, pose);
+                pick_pose = std::make_pair(raw_id, pose);
                 send_path_goal(pose);
                 action_busy = true;
 
@@ -168,7 +168,7 @@ private:
         
         goal_msg.pose = target_pose;
 
-        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para Action...");
+        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para A*...");
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SendGoalOptions();
         
@@ -183,7 +183,7 @@ private:
         rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::SharedPtr,
         const std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Feedback> feedback)
     {
-        if (feedback->recalculating_path) 
+        if (feedback->recalculating_path == true) 
         {
             send_request(feedback->stop_pose);
         }
@@ -194,6 +194,7 @@ private:
     {
         if (!goal_handle) 
         {
+            action_busy = false;
             RCLCPP_ERROR(this->get_logger(), "Goal foi rejeitado pelo servidor");
         } 
         else 
@@ -236,7 +237,7 @@ private:
         
         goal_msg.path = target_path;
 
-        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para Action...");
+        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para CONTROLLER...");
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SendGoalOptions();
         
@@ -296,7 +297,7 @@ private:
         goal_msg.obstacle_id = id;
         goal_msg.pose = target_pose;
 
-        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para Action...");
+        RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para MANIPULATION...");
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SendGoalOptions();
         
