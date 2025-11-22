@@ -8,6 +8,7 @@
 #include <random>
 #include <thread>
 #include <unordered_map>
+#include <atomic>
 
 #include <yaml-cpp/yaml.h>
 #include "rclcpp/rclcpp.hpp"
@@ -33,6 +34,8 @@
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
+#include <moveit_msgs/msg/allowed_collision_matrix.hpp>
+#include <moveit_msgs/srv/get_planning_scene.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
 
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
@@ -66,7 +69,9 @@ public:
         client_ = this->create_client<mobile_manipulation_interfaces::srv::MobileObjectCollision>(
             "/object_collision");
         
-        
+        planning_scene_publisher_ = this->create_publisher<moveit_msgs::msg::PlanningScene>("planning_scene", 1);        
+        get_planning_scene_client_ = this->create_client<moveit_msgs::srv::GetPlanningScene>("get_planning_scene");
+
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -107,9 +112,10 @@ private:
 
     //Publishers.
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
-    
+    rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_publisher_;
     //Service client.
     rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr client_;
+    rclcpp::Client<moveit_msgs::srv::GetPlanningScene>::SharedPtr get_planning_scene_client_;
 
     //Action server.
     rclcpp_action::Server<mobile_manipulation_interfaces::action::PickObject>::SharedPtr action_server_;
@@ -131,6 +137,8 @@ private:
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
+    std::atomic<bool> moveit_ready_{false};
 
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
@@ -220,7 +228,6 @@ private:
     {
         try 
         {
-           
             move_group_arm = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
                 moveit_node_, "panda_arm"); 
             
@@ -229,15 +236,15 @@ private:
 
             move_group_arm->startStateMonitor(); 
 
-            RCLCPP_INFO(this->get_logger(), "MoveGroup (arm) inicializados com sucesso.");
+            RCLCPP_INFO(this->get_logger(), "MoveGroup (arm e gripper) inicializados com sucesso.");
 
+            moveit_ready_ = true; 
             init_timer_->cancel();  
         } 
         catch (const std::exception &e) 
         {
-            RCLCPP_WARN(this->get_logger(), "Ainda não consegui inicializar MoveGroupInterface: %s. Tentando novamente...", e.what());
+            RCLCPP_WARN(this->get_logger(), "Tentando inicializar MoveGroupInterface: %s...", e.what());
         }
-
     }
     
     void ready()
@@ -265,7 +272,7 @@ private:
         if (result == moveit::core::MoveItErrorCode::SUCCESS) 
         {
             auto exec_result = move_group_arm->execute(plan);
-            rclcpp::sleep_for(std::chrono::milliseconds(100));
+
             if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
             {
                 RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
@@ -401,12 +408,12 @@ private:
             move_group_arm->setStartStateToCurrentState();
             move_group_arm->setPlannerId("RRTConnectkConfigDefault");
             move_group_arm->setPoseTarget(target_pose, "panda_link8");
-            move_group_arm->setPlanningTime(4.0);
-            move_group_arm->setNumPlanningAttempts(100);
+            move_group_arm->setPlanningTime(1.0);
+            move_group_arm->setNumPlanningAttempts(10);
             move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
             move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
-            move_group_arm->setGoalPositionTolerance(0.001);
-            move_group_arm->setGoalOrientationTolerance(0.001);
+            move_group_arm->setGoalPositionTolerance(0.005);
+            move_group_arm->setGoalOrientationTolerance(0.005);
 
 
     
@@ -457,7 +464,7 @@ private:
         }
 
         const auto &poses = pick_and_place_poses[id];
-
+        geometry_msgs::msg::Pose target_pose_world;
    
         for (size_t i = 0; i < poses.size(); ++i) {
             const auto &pose_local = poses[i];
@@ -484,7 +491,7 @@ private:
             tf2::Transform object_transform(q_object, t_object);
             tf2::Vector3 world_point = object_transform * local_point;
 
-            geometry_msgs::msg::Pose target_pose_world;
+            
             target_pose_world.position.x = world_point.x();
             target_pose_world.position.y = world_point.y();
             target_pose_world.position.z = world_point.z();
@@ -520,7 +527,7 @@ private:
             target_pose_world.orientation.z = q_final.z();
             target_pose_world.orientation.w = q_final.w();
 
-           
+           rclcpp::sleep_for(std::chrono::milliseconds(2000));
             if (positions_for_arm(target_pose_world, 0.5, false)) 
             {
                 send_request(received_id, false);
@@ -532,56 +539,126 @@ private:
 
                 close_gripper();
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(600));
+                rclcpp::sleep_for(std::chrono::milliseconds(2000));
             }
         }
 
+        set_collision_allowance(received_id, "ground_plane", true);
 
-        geometry_msgs::msg::Pose place_pose_base;
-        place_pose_base.position.x = -0.25;  
-        place_pose_base.position.y = 0.0;
-        place_pose_base.position.z = 0.25;
-        place_pose_base.orientation.x = 1.0;
-        place_pose_base.orientation.y = 0.0;
-        place_pose_base.orientation.z = 0.0;
-        place_pose_base.orientation.w = 0.0;
+        rclcpp::sleep_for(std::chrono::milliseconds(400));
+
+        target_pose_world.position.z += 0.2;
+
+        positions_for_arm(target_pose_world, 0.75, false);
+        rclcpp::sleep_for(std::chrono::milliseconds(300));
+        move_group_arm->detachObject(received_id);
+
+        // geometry_msgs::msg::Pose place_pose_base;
+        // place_pose_base.position.x = -0.25;  
+        // place_pose_base.position.y = 0.0;
+        // place_pose_base.position.z = 0.25;
+        // place_pose_base.orientation.x = 1.0;
+        // place_pose_base.orientation.y = 0.0;
+        // place_pose_base.orientation.z = 0.0;
+        // place_pose_base.orientation.w = 0.0;
 
         
-        geometry_msgs::msg::PoseStamped place_in_base, place_in_world;
+        // geometry_msgs::msg::PoseStamped place_in_base, place_in_world;
 
-        place_in_base.header.frame_id = "panda_link0";
-        place_in_base.header.stamp = tf2_ros::toMsg(tf2::TimePointZero);  
-        place_in_base.pose = place_pose_base;
+        // place_in_base.header.frame_id = "panda_link0";
+        // place_in_base.header.stamp = tf2_ros::toMsg(tf2::TimePointZero);  
+        // place_in_base.pose = place_pose_base;
 
-        try 
+        // try 
+        // {
+        //     place_in_world = tf_buffer_->transform(place_in_base, "world", tf2::durationFromSec(1.0));
+        // } 
+        // catch (const tf2::TransformException &ex) 
+        // {
+        //     RCLCPP_ERROR(this->get_logger(),
+        //                 "Falha ao transformar pose de descarte para 'world': %s", ex.what());
+        //     return;
+        // }
+
+        // RCLCPP_INFO(this->get_logger(),
+        //             "Pose de Descarte (world): x=%.3f, y=%.3f, z=%.3f",
+        //             place_in_world.pose.position.x,
+        //             place_in_world.pose.position.y,
+        //             place_in_world.pose.position.z);
+
+        // if (positions_for_arm(place_in_world.pose, 0.5, false)) 
+        // {
+        //     rclcpp::sleep_for(std::chrono::milliseconds(400));
+        //     open_gripper();
+        //     move_group_arm->detachObject(received_id);
+        //     rclcpp::sleep_for(std::chrono::milliseconds(200));
+        //     send_request(received_id, true);
+        // }
+        // else 
+        // {
+        //     RCLCPP_ERROR(this->get_logger(), "Falha ao mover para a pose de descarte.");
+        // }
+    }
+    
+    void set_collision_allowance(const std::string& id1, const std::string& id2, bool allow_collision)
+    {
+        auto request = std::make_shared<moveit_msgs::srv::GetPlanningScene::Request>();
+        request->components.components = moveit_msgs::msg::PlanningSceneComponents::ALLOWED_COLLISION_MATRIX;
+
+        if (!get_planning_scene_client_->wait_for_service(std::chrono::milliseconds(500))) 
         {
-            place_in_world = tf_buffer_->transform(place_in_base, "world", tf2::durationFromSec(1.0));
-        } 
-        catch (const tf2::TransformException &ex) 
-        {
-            RCLCPP_ERROR(this->get_logger(),
-                        "Falha ao transformar pose de descarte para 'world': %s", ex.what());
+            RCLCPP_ERROR(this->get_logger(), "Serviço get_planning_scene indisponível.");
             return;
         }
 
-        RCLCPP_INFO(this->get_logger(),
-                    "Pose de Descarte (world): x=%.3f, y=%.3f, z=%.3f",
-                    place_in_world.pose.position.x,
-                    place_in_world.pose.position.y,
-                    place_in_world.pose.position.z);
+        auto future = get_planning_scene_client_->async_send_request(request);
+        if (future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+            RCLCPP_ERROR(this->get_logger(), "Timeout ao buscar Planning Scene.");
+            return;
+        }
 
-        if (positions_for_arm(place_in_world.pose, 0.5, false)) 
+        auto response = future.get();
+        auto &acm = response->scene.allowed_collision_matrix;
+
+        auto get_or_add_index = [&](const std::string &name) -> int 
         {
-            rclcpp::sleep_for(std::chrono::milliseconds(400));
-            open_gripper();
-            move_group_arm->detachObject(received_id);
-            rclcpp::sleep_for(std::chrono::milliseconds(200));
-            send_request(received_id, true);
-        }
-        else 
-        {
-            RCLCPP_ERROR(this->get_logger(), "Falha ao mover para a pose de descarte.");
-        }
+            for (size_t i = 0; i < acm.entry_names.size(); ++i) 
+            {
+                if (acm.entry_names[i] == name) return i;
+            }
+            
+            acm.entry_names.push_back(name);
+            
+            for (auto &entry : acm.entry_values) 
+            {
+                entry.enabled.push_back(false); 
+            }
+
+            moveit_msgs::msg::AllowedCollisionEntry new_row;
+            new_row.enabled.resize(acm.entry_names.size(), false); 
+            acm.entry_values.push_back(new_row);
+
+            return acm.entry_names.size() - 1;
+        };
+
+        int idx1 = get_or_add_index(id1);
+        int idx2 = get_or_add_index(id2);
+
+      
+        if (acm.entry_values.size() > (size_t)idx1 && acm.entry_values[idx1].enabled.size() > (size_t)idx2)
+            acm.entry_values[idx1].enabled[idx2] = allow_collision;
+        
+        if (acm.entry_values.size() > (size_t)idx2 && acm.entry_values[idx2].enabled.size() > (size_t)idx1)
+            acm.entry_values[idx2].enabled[idx1] = allow_collision;
+
+        moveit_msgs::msg::PlanningScene update_msg;
+        update_msg.is_diff = true; 
+        update_msg.allowed_collision_matrix = acm;
+        
+        planning_scene_publisher_->publish(update_msg);
+        
+        RCLCPP_INFO(this->get_logger(), "Colisão entre %s e %s definida para: %s", 
+        id1.c_str(), id2.c_str(), allow_collision ? "PERMITIDA (Ignorada)" : "PROIBIDA (Detectada)");
     }
     
     // Service client (object_collision).
@@ -657,12 +734,30 @@ private:
 
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>> goal_handle)
     {
-        RCLCPP_INFO(this->get_logger(), "Executando lógica de Pick (Action)...");
+        RCLCPP_INFO(this->get_logger(), "Aguardando inicialização do MoveIt...");
+
+        while (!moveit_ready_ && rclcpp::ok()) 
+        {
+            if (goal_handle->is_canceling()) 
+            {
+                auto result = std::make_shared<mobile_manipulation_interfaces::action::PickObject::Result>();
+                result->success = false;
+                goal_handle->canceled(result);
+                RCLCPP_INFO(this->get_logger(), "Action cancelada durante a inicialização.");
+                return;
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Ainda aguardando MoveGroup...");
+        }
+
+        RCLCPP_INFO(this->get_logger(), "MoveIt pronto. Executando lógica de Pick (Action)...");
         
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::PickObject::Result>();
 
         open_gripper();
+
         calculate_global_pose(goal->obstacle_id, goal->pose);
 
         if (rclcpp::ok()) 
