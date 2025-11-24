@@ -169,6 +169,18 @@ def generate_launch_description():
         'pick_and_place_poses.yaml'
     )
 
+    label_to_storage_yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'labels_to_storage.yaml'
+    )
+
+    storage_poses_yaml_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'config',
+        'storages.yaml'
+    )
+
     occupancy_grid_yaml = os.path.join(
         get_package_share_directory(pkg_name),
         'config',
@@ -232,6 +244,8 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {'yaml_file': yaml_file},
+            {'label_to_storage_yaml_file': label_to_storage_yaml_file},
+            {'storage_poses_yaml_file': storage_poses_yaml_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         arguments=["--ros-args", "--log-level", "info"],

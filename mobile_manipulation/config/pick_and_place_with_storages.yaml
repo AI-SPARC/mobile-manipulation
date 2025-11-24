@@ -1,6 +1,0 @@
-box:
-  - storage: "storage_01"
-  - location1:
-      position: [0.0, 0.0, 0.05]
-      orientation: [1.0, 0.0, 0.0, 0.0]
- 
