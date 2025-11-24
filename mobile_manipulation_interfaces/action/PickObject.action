@@ -1,4 +1,5 @@
 string obstacle_id
+bool pick
 geometry_msgs/Pose pose
 ---
 bool success

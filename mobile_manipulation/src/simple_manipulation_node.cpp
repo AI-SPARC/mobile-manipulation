@@ -113,6 +113,7 @@ private:
     //Publishers.
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
     rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_publisher_;
+    
     //Service client.
     rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr client_;
     rclcpp::Client<moveit_msgs::srv::GetPlanningScene>::SharedPtr get_planning_scene_client_;

@@ -295,6 +295,7 @@ private:
         auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
         
         goal_msg.obstacle_id = id;
+        goal_msg.pick = true;
         goal_msg.pose = target_pose;
 
         RCLCPP_INFO(this->get_logger(), "Enviando Goal (Pose) para MANIPULATION...");
