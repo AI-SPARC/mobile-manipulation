@@ -8,7 +8,6 @@
       <Fallback name="NearOrNavigate">
           <Sequence name="PickIfNear">
              <IsRobotNear target="{target_pose}" threshold="0.50"/>
-             <CheckIfPickable target="{target_pose}"/>
              <PickObject pose="{target_pose}" id="{target_id}"/>
           </Sequence>
 
@@ -24,58 +23,44 @@
     </Sequence>
   </BehaviorTree>
 
-  <BehaviorTree ID="PlaceRoutine">
+ <BehaviorTree ID="PlaceRoutine">
     <Sequence name="PlaceSequence">
 
-      <Fallback name="CheckDestination">
-        <IsDestinationFree dest="{storage_pose}"/>
-        <ClearDestination dest="{storage_pose}"/>
-      </Fallback>
+      <Fallback name="NearOrNavigateToStorage">
+        
+        <Sequence name="PlaceIfNear">
+          <IsRobotNear target="{storage_pose}" threshold="0.50"/>
+          
+          <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
+        </Sequence>
 
-      <Sequence name="MoveAndPlace">
-        <ComputePath target="{storage_pose}"/>
-        <RetryUntilSuccessful num_attempts="2">
-           <NavigateTo/>
-        </RetryUntilSuccessful>
-      </Sequence>
+        <Sequence name="NavigateThenPlace">
+          <ComputePath target="{storage_pose}"/>
+          
+          <RetryUntilSuccessful num_attempts="2">
+              <NavigateTo/> 
+          </RetryUntilSuccessful>
+          
+          <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
+        </Sequence>
+      </Fallback>
 
     </Sequence>
   </BehaviorTree>
 
-  <BehaviorTree ID="RecoveryTree">
-    <Fallback>
-      <Sequence>
-        <Log msg="Recovery nível 1"/>
-        <ResetHardware/>
-        <Wait msec="1000"/>
-        <AlwaysSuccess/>
-      </Sequence>
-      
-      <Sequence>
-        <Log msg="Recovery nível 2"/>
-        <StopMovement/>
-        <RecalibrateArm/>
-        <Wait msec="1500"/>
-        <AlwaysSuccess/>
-      </Sequence>
-      
-      <Sequence>
-        <Log msg="Falha irreparável"/>
-        <AbortMission/>
-      </Sequence>
-    </Fallback>
-  </BehaviorTree>
-
-  <BehaviorTree ID="MainTree">
+ <BehaviorTree ID="MainTree">
     <Fallback name="MissionOrRecovery">
       
       <Sequence name="FullMission">
-        <SubTree ID="AcquireObject"/>
+        <SubTree ID="AcquireObject" target_id="{target_id}" target_pose="{target_pose}"/>
         
-        <SubTree ID="PlaceRoutine"/>
-      </Sequence>
+        <GetStorageInfo object_id="{target_id}" 
+                        storage_pose="{storage_pose}" 
+                        storage_limits="{storage_limits}"/>
 
-      <SubTree ID="RecoveryTree"/>
+        <SubTree ID="PlaceRoutine" storage_pose="{storage_pose}" storage_limits="{storage_limits}"/>
+    </Sequence>
+
     </Fallback>
   </BehaviorTree>
 
