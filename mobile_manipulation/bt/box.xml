@@ -1,4 +1,4 @@
-<root main_tree_to_execute="MainTree">
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
 
   <BehaviorTree ID="AcquireObject">
     <Sequence name="AcquireSequence">
@@ -24,7 +24,7 @@
     </Sequence>
   </BehaviorTree>
 
-  <BehaviorTree ID="PlaceObject">
+  <BehaviorTree ID="PlaceRoutine">
     <Sequence name="PlaceSequence">
 
       <GetStorageLocation object_id="{target_id}" output_pose="{storage_pose}"/>
@@ -51,15 +51,17 @@
         <Log msg="Recovery nível 1"/>
         <ResetHardware/>
         <Wait msec="1000"/>
-        <Success/>
+        <AlwaysSuccess/>
       </Sequence>
+      
       <Sequence>
         <Log msg="Recovery nível 2"/>
         <StopMovement/>
         <RecalibrateArm/>
         <Wait msec="1500"/>
-        <Success/>
+        <AlwaysSuccess/>
       </Sequence>
+      
       <Sequence>
         <Log msg="Falha irreparável"/>
         <AbortMission/>
@@ -72,7 +74,8 @@
       
       <Sequence name="FullMission">
         <SubTree ID="AcquireObject"/>
-        <SubTree ID="PlaceObject"/>
+        
+        <SubTree ID="PlaceRoutine"/>
       </Sequence>
 
       <SubTree ID="RecoveryTree"/>

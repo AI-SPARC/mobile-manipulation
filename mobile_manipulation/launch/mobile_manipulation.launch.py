@@ -187,6 +187,12 @@ def generate_launch_description():
         'empty.yaml'
     )
 
+    bt_file = os.path.join(
+        get_package_share_directory(pkg_name),
+        'bt',
+        'box.xml'
+    )
+
   
     simple_manipulation_node = Node(
         package="mobile_manipulation",
@@ -246,6 +252,7 @@ def generate_launch_description():
             {'yaml_file': yaml_file},
             {'label_to_storage_yaml_file': label_to_storage_yaml_file},
             {'storage_poses_yaml_file': storage_poses_yaml_file},
+            {'bt_xml_path': bt_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         arguments=["--ros-args", "--log-level", "info"],
