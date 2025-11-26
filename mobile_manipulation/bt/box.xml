@@ -1,0 +1,82 @@
+<root main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="AcquireObject">
+    <Sequence name="AcquireSequence">
+
+      <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
+
+      <Fallback name="NearOrNavigate">
+          <Sequence name="PickIfNear">
+             <IsRobotNear target="{target_pose}" threshold="0.50"/>
+             <CheckIfPickable target="{target_pose}"/>
+             <PickObject pose="{target_pose}" id="{target_id}"/>
+          </Sequence>
+
+          <Sequence name="NavigateThenPick">
+             <ComputePath target="{target_pose}"/>
+             <RetryUntilSuccessful num_attempts="2">
+                <NavigateTo/> 
+             </RetryUntilSuccessful>
+             <PickObject pose="{target_pose}" id="{target_id}"/>
+          </Sequence>
+      </Fallback>
+
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="PlaceObject">
+    <Sequence name="PlaceSequence">
+
+      <GetStorageLocation object_id="{target_id}" output_pose="{storage_pose}"/>
+
+      <Fallback name="CheckDestination">
+        <IsDestinationFree dest="{storage_pose}"/>
+        <ClearDestination dest="{storage_pose}"/>
+      </Fallback>
+
+      <Sequence name="MoveAndPlace">
+        <ComputePath target="{storage_pose}"/>
+        <RetryUntilSuccessful num_attempts="2">
+           <NavigateTo/>
+        </RetryUntilSuccessful>
+        <PlaceObject pose="{storage_pose}" id="{target_id}"/>
+      </Sequence>
+
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="RecoveryTree">
+    <Fallback>
+      <Sequence>
+        <Log msg="Recovery nível 1"/>
+        <ResetHardware/>
+        <Wait msec="1000"/>
+        <Success/>
+      </Sequence>
+      <Sequence>
+        <Log msg="Recovery nível 2"/>
+        <StopMovement/>
+        <RecalibrateArm/>
+        <Wait msec="1500"/>
+        <Success/>
+      </Sequence>
+      <Sequence>
+        <Log msg="Falha irreparável"/>
+        <AbortMission/>
+      </Sequence>
+    </Fallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MainTree">
+    <Fallback name="MissionOrRecovery">
+      
+      <Sequence name="FullMission">
+        <SubTree ID="AcquireObject"/>
+        <SubTree ID="PlaceObject"/>
+      </Sequence>
+
+      <SubTree ID="RecoveryTree"/>
+    </Fallback>
+  </BehaviorTree>
+
+</root>
