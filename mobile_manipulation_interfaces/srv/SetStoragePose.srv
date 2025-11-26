@@ -1,0 +1,5 @@
+string object_id
+---
+bool success
+geometry_msgs/Pose pose
+float32[] limits
