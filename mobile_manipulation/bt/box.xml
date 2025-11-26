@@ -27,8 +27,6 @@
   <BehaviorTree ID="PlaceRoutine">
     <Sequence name="PlaceSequence">
 
-      <GetStorageLocation object_id="{target_id}" output_pose="{storage_pose}"/>
-
       <Fallback name="CheckDestination">
         <IsDestinationFree dest="{storage_pose}"/>
         <ClearDestination dest="{storage_pose}"/>
@@ -39,7 +37,6 @@
         <RetryUntilSuccessful num_attempts="2">
            <NavigateTo/>
         </RetryUntilSuccessful>
-        <PlaceObject pose="{storage_pose}" id="{target_id}"/>
       </Sequence>
 
     </Sequence>

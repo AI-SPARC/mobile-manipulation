@@ -13,7 +13,7 @@ find_package(nav_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MobileObjectCollision.srv"
-  "srv/SetStoragePose.srv"
+  "srv/GetStorageInfo.srv"
   "srv/StopPose.srv"
   "action/PickObject.action"
   "action/Path.action"

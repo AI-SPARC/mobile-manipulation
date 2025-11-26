@@ -24,7 +24,9 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "mobile_manipulation_interfaces/srv/get_storage_info.hpp"
 #include "mobile_manipulation_interfaces/srv/stop_pose.hpp"
+
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/action/path.hpp"
 #include "mobile_manipulation_interfaces/action/controller.hpp"
@@ -64,20 +66,18 @@ private:
     std::function<BT::NodeStatus(BT::TreeNode&)> tick_fun_;
 };
 
+
+
 class ServerNode : public rclcpp::Node 
 {
 public:
     ServerNode()
-     : Node("pick_and_organize")
+     : Node("server_node")
     {
         this->declare_parameter<std::string>("yaml_file", "");
-        this->declare_parameter<std::string>("label_to_storage_yaml_file", "");
-        this->declare_parameter<std::string>("storage_poses_yaml_file", "");
         this->declare_parameter<std::string>("bt_xml_path", "");
 
         yaml_file = this->get_parameter("yaml_file").as_string();
-        label_to_storage_yaml_file = this->get_parameter("label_to_storage_yaml_file").as_string();
-        storage_poses_yaml_file = this->get_parameter("storage_poses_yaml_file").as_string();
         std::string bt_xml_path = this->get_parameter("bt_xml_path").as_string();
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
@@ -88,6 +88,7 @@ public:
             "/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
 
         client_ = this->create_client<mobile_manipulation_interfaces::srv::StopPose>("stop_pose");
+        storage_client_ = this->create_client<mobile_manipulation_interfaces::srv::GetStorageInfo>("get_storage_info");
         
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(this, "pick_object");
         path_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Path>(this, "path");
@@ -98,34 +99,42 @@ public:
             loadLocationsFromYaml(yaml_file);
         }
 
-        if(!label_to_storage_yaml_file.empty())
-        {
-            loadLabelToStorage(label_to_storage_yaml_file);
-        }
-
-        if(!storage_poses_yaml_file.empty())
-        {
-            loadStoragePoses(storage_poses_yaml_file);
-        }
-
         setup_behavior_tree(bt_xml_path);
 
-        bt_timer_ = this->create_wall_timer(100ms, std::bind(&ServerNode::bt_tick_callback, this));
+        bt_thread_ = std::thread(&ServerNode::bt_loop, this);
             
         RCLCPP_INFO(this->get_logger(), "ServerNode iniciado com Behavior Tree.");
     } 
 
+    ~ServerNode()
+    {
+        if (bt_thread_.joinable()) 
+        {
+            bt_thread_.join();
+        }
+    }
+
 private:
+
+    struct StorageResult 
+    {
+        bool ready = false;
+        bool success = false;
+        geometry_msgs::msg::Pose pose;
+        std::vector<float> limits;
+    }last_storage_result_;
+
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
 
+    rclcpp::Client<mobile_manipulation_interfaces::srv::GetStorageInfo>::SharedPtr storage_client_;
     rclcpp::Client<mobile_manipulation_interfaces::srv::StopPose>::SharedPtr client_;
 
     rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SharedPtr path_client;
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SharedPtr controller_client;
-
-    std::string yaml_file, label_to_storage_yaml_file, storage_poses_yaml_file;
+    
+    std::string yaml_file;
 
     std::unordered_set<std::string> authorized_labels;
     std::unordered_set<std::string> picked;
@@ -133,19 +142,23 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> labels_to_storage;
 
     std::pair<std::string, geometry_msgs::msg::Pose> pick_pose;
-
-    float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
-
-    // Flags de estado
-    bool storing = false;
-    bool action_busy = false;
     std::pair<std::string, geometry_msgs::msg::Pose> cached_object_;
-    bool has_new_object_ = false;
+    
+    std::thread bt_thread_;
+    std::mutex bt_mutex_;
 
     BT::Tree bt_tree_;
-    rclcpp::TimerBase::SharedPtr bt_timer_;
     TaskState current_task_state_ = TaskState::IDLE;
     nav_msgs::msg::Path last_calculated_path_; 
+    
+    float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
+
+    bool storing = false;
+    bool action_busy = false;
+    
+    bool has_new_object_ = false;
+
+
 
     BT::NodeStatus check_task_status()
     {
@@ -162,32 +175,36 @@ private:
         return BT::NodeStatus::RUNNING;
     }
 
-    // --------------------------------------------------------------------------------
-    // CONFIGURAÇÃO DA BEHAVIOR TRfEE
-    // --------------------------------------------------------------------------------
 
     void setup_behavior_tree(const std::string &xml_path)
     {
         BT::BehaviorTreeFactory factory;
 
         // ==============================================================================
-        // 1. CONDIÇÕES
+        // 1. CONDIÇÕES (Leitura de Estado)
         // ==============================================================================
 
+        // [Condition] IsObjectDetected
+        // Protegido por Mutex pois lê flag compartilhada
         factory.registerSimpleCondition("IsObjectDetected", [&](BT::TreeNode &)
         {
+            std::lock_guard<std::mutex> lock(bt_mutex_);
             return has_new_object_ ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
         });
 
+        // [Condition] IsRobotNear
         factory.registerSimpleCondition("IsRobotNear", [&](BT::TreeNode &self)
         {
             auto target = self.getInput<geometry_msgs::msg::Pose>("target");
             auto threshold = self.getInput<double>("threshold");
+
             if (!target || !threshold) return BT::NodeStatus::FAILURE;
 
+        
             double dx = this->pose_x - target.value().position.x;
             double dy = this->pose_y - target.value().position.y;
             double dist = std::sqrt(dx*dx + dy*dy);
+
             return (dist <= threshold.value()) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
         }, 
         { BT::InputPort<geometry_msgs::msg::Pose>("target"), BT::InputPort<double>("threshold") });
@@ -204,53 +221,68 @@ private:
 
 
         // ==============================================================================
-        // 2. AÇÕES SÍNCRONAS
+        // 2. AÇÕES SÍNCRONAS (Rápidas ou Bloqueantes na Thread da BT)
         // ==============================================================================
 
+        // [Action] DetectObject (Consome dados do Cache)
         factory.registerSimpleAction("DetectObject", [&](BT::TreeNode &self)
         {
+            std::lock_guard<std::mutex> lock(bt_mutex_); // TRAVA CRÍTICA
+
             if (!has_new_object_) return BT::NodeStatus::FAILURE;
+            
             std::string raw_id = cached_object_.first;
             geometry_msgs::msg::Pose obj_pose = cached_object_.second;
 
             picked.insert(raw_id);
             pick_pose = cached_object_; 
+            
             self.setOutput("output_pose", obj_pose);
             self.setOutput("output_id", raw_id);
+
+            // Nota: action_busy continua true para impedir novas detecções durante a missão
             action_busy = true;      
             
-            RCLCPP_INFO(this->get_logger(), "BT: Processando objeto salvo: %s", raw_id.c_str());
+            RCLCPP_INFO(this->get_logger(), "BT: Objeto '%s' confirmado. Iniciando sequência.", raw_id.c_str());
             return BT::NodeStatus::SUCCESS;
         }, 
         { BT::OutputPort<geometry_msgs::msg::Pose>("output_pose"), BT::OutputPort<std::string>("output_id") });
 
-        factory.registerSimpleAction("GetStorageLocation", [&](BT::TreeNode &self)
-        {
-            auto id_opt = self.getInput<std::string>("object_id");
-            if (!id_opt) {
-                RCLCPP_ERROR(this->get_logger(), "GetStorageLocation: ID não fornecido!");
-                return BT::NodeStatus::FAILURE;
-            }
-            std::string full_id = id_opt.value();
-            std::string clean_id = full_id;
-            size_t pos = full_id.find('_'); 
-            if (pos != std::string::npos) clean_id = full_id.substr(0, pos);
 
-            try {
-                auto [storage_name, storage_pose] = getClosestStorage(clean_id, this->pose_x, this->pose_y, 0.0);
-                self.setOutput("output_pose", storage_pose);
-                RCLCPP_INFO(this->get_logger(), "BT: Storage encontrado: %s", storage_name.c_str());
-                return BT::NodeStatus::SUCCESS;
-            } catch (const std::exception& e) {
-                RCLCPP_ERROR(this->get_logger(), "BT Error: %s", e.what());
-                return BT::NodeStatus::FAILURE;
-            }
-        }, 
-        { BT::InputPort<std::string>("object_id"), BT::OutputPort<geometry_msgs::msg::Pose>("output_pose") });
+        // // [Action] GetStorageLocation (Síncrono/Bloqueante via Serviço)
+        // factory.registerSimpleAction("GetStorageLocation", [&](BT::TreeNode &self)
+        // {
+        //     auto id_opt = self.getInput<std::string>("object_id");
+        //     if (!id_opt) {
+        //         RCLCPP_ERROR(this->get_logger(), "GetStorageLocation: ID ausente.");
+        //         return BT::NodeStatus::FAILURE;
+        //     }
+
+        //     geometry_msgs::msg::Pose object_current_pose;
+        //     {
+        //         std::lock_guard<std::mutex> lock(bt_mutex_);
+        //         object_current_pose = pick_pose.second;
+        //     }
+
+        //     geometry_msgs::msg::Pose storage_pose_result;
+
+        //     bool success = this->get_storage_info_sync(id_opt.value(), object_current_pose, storage_pose_result);
+
+        //     if (success) 
+        //     {
+        //         self.setOutput("output_pose", storage_pose_result);
+        //         return BT::NodeStatus::SUCCESS;
+        //     } 
+        //     else 
+        //     {
+        //         return BT::NodeStatus::FAILURE;
+        //     }
+        // }, 
+        // { BT::InputPort<std::string>("object_id"), BT::OutputPort<geometry_msgs::msg::Pose>("output_pose") });
 
 
         // ==============================================================================
-        // 3. AÇÕES ASSÍNCRONAS (CORRIGIDO REGISTRO DE BUILDER)
+        // 3. AÇÕES ASSÍNCRONAS (Actions ROS Longas -> Usam AsyncAction Wrapper)
         // ==============================================================================
 
         // --- ComputePath ---
@@ -260,10 +292,8 @@ private:
             {
                 if (current_task_state_ == TaskState::IDLE) {
                     auto target_opt = self.getInput<geometry_msgs::msg::Pose>("target");
-                    if (!target_opt) {
-                        RCLCPP_ERROR(this->get_logger(), "ComputePath: Sem target!");
-                        return BT::NodeStatus::FAILURE;
-                    }
+                    if (!target_opt) return BT::NodeStatus::FAILURE;
+                    
                     this->send_path_goal(target_opt.value());
                     current_task_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
@@ -271,12 +301,11 @@ private:
                 return check_task_status();
             });
         };
-        // Criação manual do manifesto para incluir as portas
         BT::TreeNodeManifest manifest_compute = { BT::NodeType::ACTION, "ComputePath", { BT::InputPort<geometry_msgs::msg::Pose>("target") } };
         factory.registerBuilder(manifest_compute, builder_compute);
 
 
-        // --- NavigateTo (Sem portas, usa registro simplificado) ---
+        // --- NavigateTo (Sem portas) ---
         factory.registerBuilder<AsyncAction>("NavigateTo", [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &)
@@ -299,11 +328,12 @@ private:
                 auto id_opt = self.getInput<std::string>("id");
 
                 if (!pose_opt || !id_opt) {
-                    RCLCPP_ERROR(this->get_logger(), "Pick/Place: Faltando pose ou ID!");
+                    RCLCPP_ERROR(this->get_logger(), "Pick/Place: Dados insuficientes.");
                     return BT::NodeStatus::FAILURE;
                 }
                 bool is_storing = (self.name() == "PlaceObject");
                 this->storing = is_storing;
+                
                 this->send_goal(id_opt.value(), pose_opt.value());
                 current_task_state_ = TaskState::RUNNING;
                 return BT::NodeStatus::RUNNING;
@@ -311,18 +341,15 @@ private:
             return check_task_status();
         };
 
-        // Builder genérico para Pick/Place
         BT::NodeBuilder builder_pick_place = [&](const std::string& name, const BT::NodeConfig& config) {
             return std::make_unique<AsyncAction>(name, config, pick_place_lambda);
         };
 
-        // Definição das portas
         BT::PortsList pick_ports = { 
             BT::InputPort<geometry_msgs::msg::Pose>("pose"), 
             BT::InputPort<std::string>("id") 
         };
 
-        // Registro manual dos manifestos
         BT::TreeNodeManifest manifest_pick = { BT::NodeType::ACTION, "PickObject", pick_ports };
         factory.registerBuilder(manifest_pick, builder_pick_place);
 
@@ -331,24 +358,21 @@ private:
 
 
         // ==============================================================================
-        // 4. DUMMIES & UTILS
+        // 4. UTILS
         // ==============================================================================
 
-        factory.registerSimpleAction("ClearDestination", [&](BT::TreeNode &)
-        {
+        factory.registerSimpleAction("ClearDestination", [&](BT::TreeNode &) {
              std::this_thread::sleep_for(500ms);
              return BT::NodeStatus::SUCCESS;
         }, { BT::InputPort<geometry_msgs::msg::Pose>("dest") });
 
-        factory.registerSimpleAction("Log", [&](BT::TreeNode &self)
-        {
+        factory.registerSimpleAction("Log", [&](BT::TreeNode &self) {
             auto msg = self.getInput<std::string>("msg");
             if(msg) RCLCPP_INFO(this->get_logger(), "%s", msg.value().c_str());
             return BT::NodeStatus::SUCCESS;
         }, { BT::InputPort<std::string>("msg") });
 
-        factory.registerSimpleAction("Wait", [&](BT::TreeNode &self)
-        { 
+        factory.registerSimpleAction("Wait", [&](BT::TreeNode &self) { 
              auto msec = self.getInput<int>("msec");
              if(msec) std::this_thread::sleep_for(std::chrono::milliseconds(msec.value()));
              return BT::NodeStatus::SUCCESS; 
@@ -359,31 +383,61 @@ private:
         factory.registerSimpleAction("RecalibrateArm", [&](BT::TreeNode &){ return BT::NodeStatus::SUCCESS; });
         factory.registerSimpleAction("AbortMission", [&](BT::TreeNode &){ return BT::NodeStatus::FAILURE; });
 
-        // ==============================================================================
-        // 5. CARREGAMENTO DO ARQUIVO
-        // ==============================================================================
-        try
+        try 
         {
             bt_tree_ = factory.createTreeFromFile(xml_path);
-        }
-        catch (const std::exception &e)
+        } 
+        catch (const std::exception &e) 
         {
-            RCLCPP_ERROR(this->get_logger(), "Erro BT XML: %s", e.what());
+            RCLCPP_ERROR(this->get_logger(), "Erro Fatal BT XML: %s", e.what());
         }
     }
 
 
-    void bt_tick_callback()
+    void bt_loop()
     {
-        if(bt_tree_.rootNode())
+        rclcpp::Rate rate(10); // 10Hz
+
+        while (rclcpp::ok())
         {
-            bt_tree_.tickOnce();
+            if (!bt_tree_.rootNode()) 
+            {
+                rate.sleep();
+                continue;
+            }
+
+            BT::NodeStatus status = bt_tree_.rootNode()->status();
+
+            // Leitura segura da flag
+            bool new_obj = false;
+            {
+                std::lock_guard<std::mutex> lock(bt_mutex_);
+                new_obj = has_new_object_;
+            }
+
+            // Só executa se já estiver rodando OU se tiver novidade
+            if (status == BT::NodeStatus::RUNNING || new_obj)
+            {
+                BT::NodeStatus result = bt_tree_.tickOnce();
+
+                // Se a missão acabou (sucesso ou falha)
+                if (result == BT::NodeStatus::SUCCESS || result == BT::NodeStatus::FAILURE)
+                {
+                    std::lock_guard<std::mutex> lock(bt_mutex_);
+                    has_new_object_ = false;
+                    action_busy = false; // Libera o callback
+                    
+                    if (result == BT::NodeStatus::FAILURE) 
+                    {
+                        // Se falhou, remove do picked para poder tentar de novo
+                        picked.erase(cached_object_.first);
+                    }
+                    RCLCPP_INFO(this->get_logger(), "--- Missão BT Finalizada: %s ---", toStr(result).c_str());
+                }
+            }
+            rate.sleep();
         }
     }
-
-    // --------------------------------------------------------------------------------
-    // FUNÇÕES DE CARREGAMENTO (YAML)
-    // --------------------------------------------------------------------------------
 
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
@@ -401,97 +455,6 @@ private:
         }
     }
 
-    void loadLabelToStorage(const std::string &yaml_file)
-    {
-        YAML::Node config = YAML::LoadFile(yaml_file);
-        for (auto it = config.begin(); it != config.end(); ++it)
-        {
-            std::string group_name = it->first.as<std::string>();  
-            const YAML::Node &entries = it->second;                
-            std::vector<std::string> storages;
-            for (const auto &entry : entries)
-            {
-                const YAML::Node &value = entry["storage"];
-                if (value)
-                {
-                    storages.push_back(value.as<std::string>());
-                }
-            }
-            labels_to_storage[group_name] = storages;
-        }
-    }
-
-    void loadStoragePoses(const std::string &yaml_file)
-    {
-        YAML::Node config = YAML::LoadFile(yaml_file);
-        for (auto it = config.begin(); it != config.end(); ++it)
-        {
-            std::string storage_name = it->first.as<std::string>();
-            const YAML::Node &locations = it->second;
-            std::vector<geometry_msgs::msg::Pose> poses;
-            for (const auto &loc : locations)
-            {
-                for (auto loc_it = loc.begin(); loc_it != loc.end(); ++loc_it)
-                {
-                    const YAML::Node &loc_data = loc_it->second;
-                    geometry_msgs::msg::Pose pose;
-                    const YAML::Node &pos = loc_data["position"];
-                    pose.position.x = pos[0].as<double>();
-                    pose.position.y = pos[1].as<double>();
-                    pose.position.z = pos[2].as<double>();
-                    if (loc_data["orientation"])
-                    {
-                        const YAML::Node &ori = loc_data["orientation"];
-                        pose.orientation.x = ori[0].as<double>();
-                        pose.orientation.y = ori[1].as<double>();
-                        pose.orientation.z = ori[2].as<double>();
-                        pose.orientation.w = ori[3].as<double>();
-                    }
-                    else
-                    {
-                        pose.orientation.x = 0.0; pose.orientation.y = 0.0; pose.orientation.z = 0.0; pose.orientation.w = 1.0;
-                    }
-                    poses.push_back(pose);
-                }
-            }
-            storage[storage_name] = poses;
-        }
-    }
-
-    std::pair<std::string, geometry_msgs::msg::Pose> getClosestStorage(const std::string& label, double px, double py, double pz)
-    {
-        double best_dist = std::numeric_limits<double>::max();
-        std::string best_storage_name;
-        geometry_msgs::msg::Pose best_pose;
-
-        if (!labels_to_storage.count(label))
-        {
-            throw std::runtime_error("Label não encontrada: " + label);
-        }
-
-        const auto& storage_list = labels_to_storage[label];
-        for (const auto& storage_name : storage_list)
-        {
-            if (!storage.count(storage_name)) continue;
-            const auto& poses = storage.at(storage_name);
-            for (const auto& pose : poses)
-            {
-                double dx = pose.position.x - px;
-                double dy = pose.position.y - py;
-                double dz = pose.position.z - pz;
-                double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
-                if (dist < best_dist)
-                {
-                    best_dist = dist; best_storage_name = storage_name; best_pose = pose;
-                }
-            }
-        }
-        if (best_storage_name.empty())
-        {
-            throw std::runtime_error("Nenhum storage encontrado para a label: " + label);
-        }
-        return { best_storage_name, best_pose };
-    }
 
     // ---------
     // CALLBACKS
@@ -506,6 +469,8 @@ private:
 
     void detection_callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
+        std::lock_guard<std::mutex> lock(bt_mutex_);
+
         if(action_busy == true || has_new_object_ == true) 
         {
             return;
@@ -545,9 +510,9 @@ private:
     }
     
 
-    // --------------------------------------------------------------------------------
-    // CLIENT FUNCTIONS (Adaptadas para BT)
-    // --------------------------------------------------------------------------------
+    // -----------------
+    // CLIENT FUNCTIONS 
+    // -----------------
 
     void send_request(geometry_msgs::msg::Pose pose)
     {
@@ -567,6 +532,40 @@ private:
                 }
             }
         );
+    }
+
+    bool get_storage_info_sync(const std::string& object_id, const geometry_msgs::msg::Pose& obj_pose, geometry_msgs::msg::Pose& pose_out)
+    {
+        if (!storage_client_->wait_for_service(std::chrono::seconds(1))) {
+            RCLCPP_ERROR(this->get_logger(), "Serviço de storage indisponível.");
+            return false;
+        }
+
+        auto request = std::make_shared<mobile_manipulation_interfaces::srv::GetStorageInfo::Request>();
+        request->object_id = object_id;
+        request->pose = obj_pose;
+
+        // Envia request e pega o Future
+        auto result_future = storage_client_->async_send_request(request);
+
+        // BLOQUEIA AQUI até ter resposta (Seguro pois estamos na thread separada)
+        // Espera até 3 segundos
+        if (result_future.wait_for(std::chrono::seconds(3)) == std::future_status::ready)
+        {
+            auto response = result_future.get();
+            if (response->success) 
+            {
+                pose_out = response->pose;
+                // Se quiser usar limites: response->limits...
+                return true;
+            } else {
+                RCLCPP_WARN(this->get_logger(), "Storage service retornou false.");
+                return false;
+            }
+        }
+        
+        RCLCPP_ERROR(this->get_logger(), "Timeout esperando resposta do Storage Service.");
+        return false;
     }
 
     // --- Action: Path ---
@@ -722,7 +721,6 @@ private:
     {
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result->success)
         {
-            // Lógica de sucesso (Toggle Storing mode)
             if(storing == false)
             {
                 storing = true;
@@ -737,7 +735,6 @@ private:
         }
         else
         {
-            // Falhou ao pegar, remove do set de picked para tentar de novo ou ignorar
             picked.erase(std::get<0>(pick_pose));
             current_task_state_ = TaskState::FAILURE;
             RCLCPP_ERROR(this->get_logger(), "PICK FAILED or ABORTED");
