@@ -158,6 +158,30 @@ ament_target_dependencies(simple_manipulation_node
   mobile_manipulation_interfaces
 )
 
+add_executable(get_storage_info src/get_storage_info.cpp)
+
+ament_target_dependencies(get_storage_info 
+  trajectory_msgs 
+  rclcpp 
+  nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  std_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+  mobile_manipulation_interfaces
+)
+
 target_link_libraries(add_collision
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -205,6 +229,15 @@ target_link_libraries(simple_manipulation_node
   yaml-cpp
 )
 
+target_link_libraries(get_storage_info
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  yaml-cpp
+)
+
 install(DIRECTORY
   launch
   config
@@ -218,6 +251,7 @@ install(TARGETS
   a_star
   controller
   simple_manipulation_node
+  get_storage_info
   DESTINATION lib/${PROJECT_NAME}
 )
 
