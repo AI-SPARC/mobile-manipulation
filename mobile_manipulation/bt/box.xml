@@ -12,10 +12,10 @@
           </Sequence>
 
           <Sequence name="NavigateThenPick">
-             <ComputePath target="{target_pose}"/>
-             <RetryUntilSuccessful num_attempts="2">
+             <ParallelAny>
+                <ComputePath target="{target_pose}"/>
                 <NavigateTo/> 
-             </RetryUntilSuccessful>
+             </ParallelAny>
              <PickObject pose="{target_pose}" id="{target_id}"/>
           </Sequence>
       </Fallback>
@@ -30,17 +30,14 @@
         
         <Sequence name="PlaceIfNear">
           <IsRobotNear target="{storage_pose}" threshold="0.50"/>
-          
           <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
         </Sequence>
 
         <Sequence name="NavigateThenPlace">
-          <ComputePath target="{storage_pose}"/>
-          
-          <RetryUntilSuccessful num_attempts="2">
+          <ParallelAny>
+              <ComputePath target="{storage_pose}"/>
               <NavigateTo/> 
-          </RetryUntilSuccessful>
-          
+          </ParallelAny>
           <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
         </Sequence>
       </Fallback>
