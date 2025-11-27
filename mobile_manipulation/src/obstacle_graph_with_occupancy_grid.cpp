@@ -28,17 +28,17 @@ public:
     {
         this->declare_parameter<std::string>("map_yaml_file", "map.yaml");
         this->declare_parameter<std::string>("map_image_file", "occupancy_grid.png");
-        this->declare_parameter<double>("maxSecurityDistance", 0.15);
+        this->declare_parameter<double>("max_security_distance", 0.30);
         this->declare_parameter<double>("obstacle_graph_resolution", 0.05);
 
         std::string yaml_file = this->get_parameter("map_yaml_file").as_string();
         std::string image_file = this->get_parameter("map_image_file").as_string();
-        maxSecurityDistance_ = static_cast<float>(this->get_parameter("maxSecurityDistance").get_parameter_value().get<double>());
+        maxSecurityDistance_ = static_cast<float>(this->get_parameter("max_security_distance").get_parameter_value().get<double>());
         distanceToObstacle_ = static_cast<float>(this->get_parameter("obstacle_graph_resolution").get_parameter_value().get<double>());
 
         RCLCPP_INFO(this->get_logger(), "YAML file: %s", yaml_file.c_str());
         RCLCPP_INFO(this->get_logger(), "Image file: %s", image_file.c_str());
-        RCLCPP_INFO(this->get_logger(), "maxSecurityDistance is set to %2f", maxSecurityDistance_);
+        RCLCPP_INFO(this->get_logger(), "max_security_distance is set to %2f", maxSecurityDistance_);
         decimals = countDecimals(distanceToObstacle_);
 
         if (!loadOccupancyGrid(yaml_file, image_file)) {
@@ -80,7 +80,7 @@ private:
         return decimals;
     }
 
-    inline float roundToMultiple(float value, float multiple, int decimals) 
+    inline float round_to_multiple(float value, float multiple, int decimals) 
     {
         if (multiple == 0.0f) return value; 
         float result = std::round(value / multiple) * multiple;
@@ -126,8 +126,8 @@ private:
                     float wx = static_cast<float>(origin_x + x * resolution);
                     float wy = static_cast<float>(origin_y + (height - y - 1) * resolution); 
 
-                    float x = roundToMultiple(wx, 0.05, decimals);
-                    float y = roundToMultiple(wy, 0.05, decimals);
+                    float x = round_to_multiple(wx, 0.05, decimals);
+                    float y = round_to_multiple(wy, 0.05, decimals);
 
                     std::pair<float, float> index = std::make_pair(x, y);
 
@@ -162,11 +162,11 @@ private:
                     for(int eita = 0; eita <= opa * 2; eita++)
                     {   
                         
-                        std::pair<float, float> index10 = std::make_pair(roundToMultiple((std::get<0>(it->first) + toma) - (distanceToObstacle_ * eita), distanceToObstacle_, decimals), roundToMultiple((std::get<1>(it->first) + toma), distanceToObstacle_, decimals));
-                        std::pair<float, float> index11 = std::make_pair(roundToMultiple((std::get<0>(it->first) + toma), distanceToObstacle_, decimals), roundToMultiple((std::get<1>(it->first) + toma) - (distanceToObstacle_ * eita), distanceToObstacle_, decimals));
+                        std::pair<float, float> index10 = std::make_pair(round_to_multiple((std::get<0>(it->first) + toma) - (distanceToObstacle_ * eita), distanceToObstacle_, decimals), round_to_multiple((std::get<1>(it->first) + toma), distanceToObstacle_, decimals));
+                        std::pair<float, float> index11 = std::make_pair(round_to_multiple((std::get<0>(it->first) + toma), distanceToObstacle_, decimals), round_to_multiple((std::get<1>(it->first) + toma) - (distanceToObstacle_ * eita), distanceToObstacle_, decimals));
                         
-                        std::pair<float, float> index12 = std::make_pair(roundToMultiple((std::get<0>(it->first) - toma), distanceToObstacle_, decimals), roundToMultiple((std::get<1>(it->first) - toma) + (distanceToObstacle_ * eita), distanceToObstacle_, decimals));
-                        std::pair<float, float> index13 = std::make_pair(roundToMultiple((std::get<0>(it->first) - toma) + (distanceToObstacle_ * eita), distanceToObstacle_, decimals), roundToMultiple((std::get<1>(it->first) - toma), distanceToObstacle_, decimals));
+                        std::pair<float, float> index12 = std::make_pair(round_to_multiple((std::get<0>(it->first) - toma), distanceToObstacle_, decimals), round_to_multiple((std::get<1>(it->first) - toma) + (distanceToObstacle_ * eita), distanceToObstacle_, decimals));
+                        std::pair<float, float> index13 = std::make_pair(round_to_multiple((std::get<0>(it->first) - toma) + (distanceToObstacle_ * eita), distanceToObstacle_, decimals), round_to_multiple((std::get<1>(it->first) - toma), distanceToObstacle_, decimals));
                         
                         
                         occupied_points_.insert(index10);

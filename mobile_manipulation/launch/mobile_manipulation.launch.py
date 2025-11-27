@@ -183,8 +183,8 @@ def generate_launch_description():
 
     occupancy_grid_yaml = os.path.join(
         get_package_share_directory(pkg_name),
-        'config',
-        'empty.yaml'
+        'maps',
+        'storage_1.yaml'
     )
 
     bt_file = os.path.join(
@@ -281,10 +281,6 @@ def generate_launch_description():
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
             {'move_group': "panda_arm"},
         ],
-        remappings=[
-            ('/boxes_detection_array', '/bbox_3d_with_labels')
-            
-        ],
         arguments=["--ros-args", "--log-level", "info"],
     )
 
@@ -294,25 +290,35 @@ def generate_launch_description():
         name="get_storage_info",
         output="screen",
         parameters=[
-            moveit_config.robot_description,
-            moveit_config.robot_description_semantic,
-            moveit_config.robot_description_kinematics,
-            moveit_config.planning_pipelines,
-            robot_description_joint_limits,  
-            moveit_config.trajectory_execution,
-            robot_description_kinematics,
-            moveit_config.planning_scene_monitor,
             {'label_to_storage_yaml_file': label_to_storage_yaml_file},
             {'storage_poses_yaml_file': storage_poses_yaml_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
-        remappings=[
-            ('/boxes_detection_array', '/bbox_3d_with_labels')
-            
-        ],
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    map_dir = os.path.join(
+        get_package_share_directory('mobile_manipulation'),
+        'maps'
+    )
+
+    map_yaml_filename = os.path.join(map_dir, 'storage_1.yaml')
+    map_pgm_filename = os.path.join(map_dir, 'storage_1.png')
+
+    obstacle_graph_with_occupancy_grid = Node(
+        package="mobile_manipulation",
+        executable="obstacle_graph_with_occupancy_grid",
+        name="obstacle_graph_with_occupancy_grid",
+        output="screen",
+        parameters=[
+            {'map_yaml_file': map_yaml_filename},
+            {'map_image_file': map_pgm_filename},
+            {'max_security_distance': 0.3},
+            {'obstacle_graph_resolution': 0.05},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
     
    
     return LaunchDescription(
@@ -333,6 +339,7 @@ def generate_launch_description():
             a_star,
             controller,
             get_storage_info,
+            obstacle_graph_with_occupancy_grid,
 
             Node(
                 package='isaacsim_moveit',

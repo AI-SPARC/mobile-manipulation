@@ -111,12 +111,10 @@ public:
     AStar()
      : Node("a_star")
     {
-        this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<double>("path_resolution", 0.05);
         this->declare_parameter<double>("security_distance", 0.50);
         this->declare_parameter<int>("iterations_before_verification", 10);
 
-        yaml_file = this->get_parameter("yaml_file").as_string();
         distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
         security_distance = static_cast<float>(this->get_parameter("security_distance").get_parameter_value().get<double>());
         iterations_before_verification = this->get_parameter("iterations_before_verification").get_parameter_value().get<int>();
@@ -139,9 +137,11 @@ public:
         subscription_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&AStar::callback_odom, this, std::placeholders::_1));
 
-
-     
-        // load_black_points(yaml_file);
+        subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+            "/obstacles_vertices",
+            10,
+            std::bind(&AStar::topic_callback, this, std::placeholders::_1)
+        );
     }
 private:
 
@@ -201,9 +201,9 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_nav_path_;
 
     //Subscriptions.
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_navigable_removed_vertices;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_odom_;
-    
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_;
+
     //Action server.
     rclcpp_action::Server<mobile_manipulation_interfaces::action::Path>::SharedPtr action_server_;
 
@@ -335,7 +335,7 @@ private:
         
         bool findNavigableGoalVertice = false;
         
-        for(int i = 1; i <= 2; i++)
+        for(int i = 1; i <= 102; i++)
         {
             for (int a = 0; a < 8; a++) 
             {
@@ -435,6 +435,7 @@ private:
                 while (nodes.find(current_vertex) != nodes.end() && 
                     current_vertex != start_tuple) {
                     current_vertex = nodes[current_vertex].parent;
+                    std::cout << current_vertex.first << " " << current_vertex.second << std::endl;
                     path.insert(path.begin(), current_vertex);
                 }
                 
@@ -590,7 +591,6 @@ private:
                     };
 
                     path.erase(path.begin() + i + 1, path.end());
-                    path.push_back(new_goal);
                     break;
                 }
             }
@@ -785,44 +785,24 @@ private:
         pose_y_ = msg->pose.pose.position.y;
         pose_z_ = 0.0;
     }
-     
-    void load_black_points(const std::string &yaml_file)
+
+    void topic_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {
-        YAML::Node config = YAML::LoadFile(yaml_file);
-        std::filesystem::path yaml_path(yaml_file);
-        std::filesystem::path image_path = yaml_path.parent_path() / config["image"].as<std::string>();
+        sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
 
-        double resolution = config["resolution"].as<double>();
-        std::vector<double> origin = config["origin"].as<std::vector<double>>();
-        int negate = config["negate"] ? config["negate"].as<int>() : 0;
-        double occ_th = config["occupied_thresh"] ? config["occupied_thresh"].as<double>() : 0.65;
-
-        cv::Mat image = cv::imread(image_path.string(), cv::IMREAD_UNCHANGED);
-        if (image.empty()) 
+        for (; iter_x != iter_x.end(); ++iter_x, ++iter_y) 
         {
-            throw std::runtime_error("Falha ao carregar imagem: " + image_path.string());
-            return;
-        }
-
-        obstaclesVertices.clear();
-
-        for (int y = 0; y < image.rows; ++y) 
-        {
-            for (int x = 0; x < image.cols; ++x) {
-            unsigned char pixel = image.at<unsigned char>(image.rows - y - 1, x);
-            if (negate) pixel = 255 - pixel;
-            double occ = (255 - pixel) / 255.0;
-
-            if (occ > occ_th) 
-            {  
-                float wx = origin[0] + (x + 0.5f) * resolution;
-                float wy = origin[1] + (y + 0.5f) * resolution;
-                obstaclesVertices.insert({wx, wy});
-            }
-            }
+            float x = *iter_x;
+            float y = *iter_y;
+            std::pair<float, float> index = std::make_pair(
+                round_to_multiple(x, distanceToObstacle_, decimals),
+                round_to_multiple(y, distanceToObstacle_, decimals)
+            );
+            obstaclesVertices.insert(index);
         }
     }
-    
 
     // Action server (pick_object).
 
@@ -908,7 +888,6 @@ private:
             pose_stamped.pose.orientation.y = vertex.orientation_y;
             pose_stamped.pose.orientation.z = vertex.orientation_z;
             pose_stamped.pose.orientation.w = vertex.orientation_w;
-            
             
             result->path.poses.push_back(pose_stamped);
         }
