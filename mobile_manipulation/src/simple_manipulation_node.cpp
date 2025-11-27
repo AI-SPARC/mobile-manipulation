@@ -258,12 +258,12 @@ private:
         
         move_group_arm->setJointValueTarget({
             {"panda_joint1", 0.0},
-            {"panda_joint2", -0.750},
+            {"panda_joint2", -0.5934},
             {"panda_joint3", 0.0},
-            {"panda_joint4", -2.827},
+            {"panda_joint4", -1.17},
             {"panda_joint5", 0.0},
-            {"panda_joint6", 2.077},
-            {"panda_joint7", 0.785},
+            {"panda_joint6", 0.576},
+            {"panda_joint7", 0.8552},
         
         });
 
@@ -409,12 +409,12 @@ private:
             move_group_arm->setStartStateToCurrentState();
             move_group_arm->setPlannerId("RRTConnectkConfigDefault");
             move_group_arm->setPoseTarget(target_pose, "panda_link8");
-            move_group_arm->setPlanningTime(1.0);
+            move_group_arm->setPlanningTime(2.0);
             move_group_arm->setNumPlanningAttempts(10);
             move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
             move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
-            move_group_arm->setGoalPositionTolerance(0.005);
-            move_group_arm->setGoalOrientationTolerance(0.005);
+            move_group_arm->setGoalPositionTolerance(0.0001);
+            move_group_arm->setGoalOrientationTolerance(0.0001);
 
 
     
@@ -450,16 +450,17 @@ private:
         return task_success;
     }
 
-    void calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose)
+    void calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose, bool pick)
     {
         std::string id = received_id;
         size_t pos = received_id.find('_');
-        if (pos != std::string::npos) {
+        if (pos != std::string::npos) 
+        {
             id = received_id.substr(0, pos);
-            std::cout << id << std::endl;
         }
 
-        if (pick_and_place_poses.find(id) == pick_and_place_poses.end()) {
+        if (pick_and_place_poses.find(id) == pick_and_place_poses.end()) 
+        {
             RCLCPP_WARN(this->get_logger(), "ID '%s' não encontrado no YAML.", id.c_str());
             return;
         }
@@ -467,7 +468,8 @@ private:
         const auto &poses = pick_and_place_poses[id];
         geometry_msgs::msg::Pose target_pose_world;
    
-        for (size_t i = 0; i < poses.size(); ++i) {
+        for (size_t i = 0; i < poses.size(); ++i) 
+        {
             const auto &pose_local = poses[i];
 
             tf2::Vector3 local_point(
@@ -528,77 +530,53 @@ private:
             target_pose_world.orientation.z = q_final.z();
             target_pose_world.orientation.w = q_final.w();
 
-           rclcpp::sleep_for(std::chrono::milliseconds(2000));
-            if (positions_for_arm(target_pose_world, 0.5, false)) 
+            if(pick == true)
             {
-                send_request(received_id, false);
+                if (positions_for_arm(target_pose_world, 0.3, false)) 
+                {
+                    send_request(received_id, false);
 
-                std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
-                move_group_arm->attachObject(received_id, "panda_link8", touch_links);
-                
-                rclcpp::sleep_for(std::chrono::milliseconds(200));
+                    std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
+                    move_group_arm->attachObject(received_id, "panda_link8", touch_links);
+                    
+                    rclcpp::sleep_for(std::chrono::milliseconds(200));
 
-                close_gripper();
-                
-                rclcpp::sleep_for(std::chrono::milliseconds(2000));
+                    close_gripper();
+                    
+                    rclcpp::sleep_for(std::chrono::milliseconds(500));
+
+                    set_collision_allowance(received_id, "ground_plane", true);
+
+                    rclcpp::sleep_for(std::chrono::milliseconds(200));
+
+                    ready();
+                }
             }
+            else if(pick == false)
+            {
+                if (positions_for_arm(target_pose_world, 0.5, false)) 
+                {
+                    open_gripper();
+                    
+                    rclcpp::sleep_for(std::chrono::milliseconds(300));
+
+                    move_group_arm->detachObject(received_id);
+
+                    rclcpp::sleep_for(std::chrono::milliseconds(200));
+                    set_collision_allowance(received_id, "ground_plane", false);
+
+                    send_request(received_id, true);
+                }
+            }
+
+            
         }
 
-        set_collision_allowance(received_id, "ground_plane", true);
-
-        rclcpp::sleep_for(std::chrono::milliseconds(400));
-
-        target_pose_world.position.z += 0.2;
-
-        positions_for_arm(target_pose_world, 0.75, false);
-        rclcpp::sleep_for(std::chrono::milliseconds(300));
-        move_group_arm->detachObject(received_id);
-
-        // geometry_msgs::msg::Pose place_pose_base;
-        // place_pose_base.position.x = -0.25;  
-        // place_pose_base.position.y = 0.0;
-        // place_pose_base.position.z = 0.25;
-        // place_pose_base.orientation.x = 1.0;
-        // place_pose_base.orientation.y = 0.0;
-        // place_pose_base.orientation.z = 0.0;
-        // place_pose_base.orientation.w = 0.0;
+        
 
         
-        // geometry_msgs::msg::PoseStamped place_in_base, place_in_world;
 
-        // place_in_base.header.frame_id = "panda_link0";
-        // place_in_base.header.stamp = tf2_ros::toMsg(tf2::TimePointZero);  
-        // place_in_base.pose = place_pose_base;
-
-        // try 
-        // {
-        //     place_in_world = tf_buffer_->transform(place_in_base, "world", tf2::durationFromSec(1.0));
-        // } 
-        // catch (const tf2::TransformException &ex) 
-        // {
-        //     RCLCPP_ERROR(this->get_logger(),
-        //                 "Falha ao transformar pose de descarte para 'world': %s", ex.what());
-        //     return;
-        // }
-
-        // RCLCPP_INFO(this->get_logger(),
-        //             "Pose de Descarte (world): x=%.3f, y=%.3f, z=%.3f",
-        //             place_in_world.pose.position.x,
-        //             place_in_world.pose.position.y,
-        //             place_in_world.pose.position.z);
-
-        // if (positions_for_arm(place_in_world.pose, 0.5, false)) 
-        // {
-        //     rclcpp::sleep_for(std::chrono::milliseconds(400));
-        //     open_gripper();
-        //     move_group_arm->detachObject(received_id);
-        //     rclcpp::sleep_for(std::chrono::milliseconds(200));
-        //     send_request(received_id, true);
-        // }
-        // else 
-        // {
-        //     RCLCPP_ERROR(this->get_logger(), "Falha ao mover para a pose de descarte.");
-        // }
+        
     }
     
     void set_collision_allowance(const std::string& id1, const std::string& id2, bool allow_collision)
@@ -658,8 +636,6 @@ private:
         
         planning_scene_publisher_->publish(update_msg);
         
-        RCLCPP_INFO(this->get_logger(), "Colisão entre %s e %s definida para: %s", 
-        id1.c_str(), id2.c_str(), allow_collision ? "PERMITIDA (Ignorada)" : "PROIBIDA (Detectada)");
     }
     
     // Service client (object_collision).
@@ -757,9 +733,12 @@ private:
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::PickObject::Result>();
 
-        open_gripper();
+        if(goal->pick == true)
+        {
+            open_gripper();
+        }
 
-        calculate_global_pose(goal->obstacle_id, goal->pose);
+        calculate_global_pose(goal->obstacle_id, goal->pose, goal->pick);
 
         if (rclcpp::ok()) 
         {
