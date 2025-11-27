@@ -1,8 +1,7 @@
 # Request
 geometry_msgs/Pose pose
 ---
-# Result
-nav_msgs/Path path
+bool success
 ---
 # Feedback
 bool recalculating_path

@@ -47,6 +47,8 @@
 #include <filesystem>
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "mobile_manipulation_interfaces/action/path.hpp"
+#include <sensor_msgs/point_cloud2_iterator.hpp> 
+#include <mutex>
 
 using namespace std::chrono_literals;
 
@@ -92,8 +94,6 @@ struct pair_hash {
     }
 };
 
-
-
 template<typename T1, typename T2, typename T3>
 std::ostream& operator<<(std::ostream& os, const std::tuple<T1, T2, T3>& t) {
     os << "(" << std::get<0>(t) << ", " 
@@ -101,8 +101,6 @@ std::ostream& operator<<(std::ostream& os, const std::tuple<T1, T2, T3>& t) {
        << std::get<2>(t) << ")";
     return os;
 }
-
-
 
 class AStar : public rclcpp::Node 
 {
@@ -131,8 +129,8 @@ public:
 
         decimals = count_decimals(distanceToObstacle_);
 
-     
         publisher_nav_path_ = this->create_publisher<nav_msgs::msg::Path>("visualize_path", 10);
+        publisher_point_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("visualize_point_cloud", 10);
 
         subscription_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&AStar::callback_odom, this, std::placeholders::_1));
@@ -144,7 +142,6 @@ public:
         );
     }
 private:
-
 
     struct Vertex {
         int key;
@@ -167,14 +164,6 @@ private:
         int v1, v2;
     };
 
-    struct CompareWithTieBreaker {
-        bool operator()(const std::pair<float, int>& a, const std::pair<float, int>& b) const {
-            if (std::abs(a.first - b.first) < 1e-6) {
-                return a.second > b.second;
-            }
-            return a.first > b.first;
-        }
-    };
     struct PairHash {
         std::size_t operator()(const std::pair<float, float>& p) const {
             auto h1 = std::hash<float>{}(p.first);
@@ -183,22 +172,10 @@ private:
         }
     };
 
-    struct TupleCompare {
-        bool operator()(const std::pair<float, std::tuple<float, float, float>>& a, 
-                        const std::pair<float, std::tuple<float, float, float>>& b) const {
-            return a.first > b.first;
-        }
-    };
-
-    struct PositionProb {
-        float x;
-        float y;
-        float prob;
-    };
-    
     //Publishers.
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr publisher_path_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_nav_path_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher_point_cloud_;
 
     //Subscriptions.
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_odom_;
@@ -206,47 +183,41 @@ private:
 
     //Action server.
     rclcpp_action::Server<mobile_manipulation_interfaces::action::Path>::SharedPtr action_server_;
-
-    //Timers.
-    rclcpp::TimerBase::SharedPtr timer_;
-    rclcpp::TimerBase::SharedPtr timer_path_;
-    rclcpp::TimerBase::SharedPtr timer_visualize_path_;
-    rclcpp::TimerBase::SharedPtr parameterTimer;    
-    
+    std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> active_goal_handle_;
 
     size_t i_ = 0; 
+
+    std::mutex map_mutex_;
+    std::mutex goal_mutex_;
+
+    // Variáveis que guardam o caminho atual
+    // path_points: Tem orientação (usado para enviar resultado e visualização Path)
+    std::vector<VertexDijkstra> path_points;
+    // path_without_filter: Apenas X,Y (usado para verificar colisão e visualização PointCloud)
+    std::vector<std::pair<float, float>> path_without_filter;
+
+    std::unordered_set<std::pair<float, float>, PairHash> obstaclesVertices;
+
+    std::string yaml_file;
+
     float pose_x_ = 3.24, pose_y_ = 8.22, pose_z_ = 0.0;
     float distanceToObstacle_, security_distance = 0.5;
     int decimals = 0, iterations_before_verification = 10;
 
-    std::vector<VertexDijkstra> verticesDestino_;
-    std::vector<VertexDijkstra> verticesDijkstra;
-
-    std::unordered_map<int, std::vector<int>> adjacency_list;
-    std::unordered_set<std::pair<float, float>, PairHash> obstaclesVertices;
-    std::unordered_map<int, Vertex> navigableVerticesMapInteger;
-
-    std::string yaml_file;
-
     inline float round_to_multiple(float value, float multiple, int decimals) 
     {
         if (multiple == 0.0) return value; 
-        
         float result = std::round(value / multiple) * multiple;
         float factor = std::pow(10.0, decimals);
         result = std::round(result * factor) / factor;
-        
         return result;
     }
     
     int count_decimals(float number) 
     {
-      
         float fractional = std::fabs(number - std::floor(number));
         int decimals = 0;
         const float epsilon = 1e-9; 
-    
-  
         while (fractional > epsilon && decimals < 20) {
             fractional *= 10;
             fractional -= std::floor(fractional);
@@ -257,19 +228,14 @@ private:
 
     std::vector<std::array<float, 3>> get_offsets(float distanceToObstacle) {
         return {
-           
-        
             {-distanceToObstacle, -distanceToObstacle, 0.0},
             {distanceToObstacle, -distanceToObstacle, 0.0},
             {distanceToObstacle, distanceToObstacle, 0.0},
             {-distanceToObstacle, distanceToObstacle, 0.0}, 
-
             {-distanceToObstacle, 0.0, 0.0},
             {distanceToObstacle, 0.0, 0.0},
             {0.0, distanceToObstacle, 0.0},
             {0.0, -distanceToObstacle, 0.0},
-          
-
         };
     }
     
@@ -281,12 +247,9 @@ private:
         {
             initial_path.push_back(start_tuple);
             initial_path.push_back(goal_tuple);
-
             return std::make_pair(initial_path, true);
         }
 
-    
-        
         struct Node {
             std::pair<float, float> parent;
             float g_score = std::numeric_limits<float>::infinity();
@@ -294,14 +257,10 @@ private:
             bool closed = false;
         };
         
-        
         std::unordered_map<std::pair<float, float>, Node, PairHash> nodes;
-        
         std::unordered_map<std::pair<float, float>, std::vector<std::pair<float, float>>, PairHash> adjacency_list_tuples;
-        
         auto offsets1 = get_offsets(distanceToObstacle_);
         
-   
         float new_x = 0.0, new_y = 0.0;
         bool findNavigableVertice = false;
         
@@ -320,11 +279,7 @@ private:
                     findNavigableVertice = true;
                 }
             }
-
-            if(findNavigableVertice == true)
-            {
-                break;
-            }
+            if(findNavigableVertice == true) break;
         }
         
         if(findNavigableVertice == false) 
@@ -350,12 +305,7 @@ private:
                     findNavigableGoalVertice = true;
                 }
             }
-
-
-            if(findNavigableGoalVertice == true)
-            {
-                break;
-            }
+            if(findNavigableGoalVertice == true) break;
         }
         
         if(findNavigableGoalVertice == false)
@@ -367,10 +317,8 @@ private:
         auto heuristic = [](const std::pair<float, float>& a, const std::pair<float, float>& b) {
             float x1 = std::get<0>(a);
             float y1 = std::get<1>(a);
-            
             float x2 = std::get<0>(b);
             float y2 = std::get<1>(b);
-            
             return std::sqrt(std::pow(x2 - x1, 2) + std::pow(y2 - y1, 2));
         };
         
@@ -400,11 +348,8 @@ private:
             open_set.pop();
             auto current = current_pair.second;
             
-            if (nodes[current].closed)
-                continue;
-                
-            if (current_pair.first > nodes[current].f_score)
-                continue;
+            if (nodes[current].closed) continue;
+            if (current_pair.first > nodes[current].f_score) continue;
                 
             nodes[current].closed = true;
            
@@ -422,61 +367,44 @@ private:
                         adjacency_list_tuples[current].push_back(neighbor_tuple);
                     }
                 }
-    
             }
             
             if (current == goal_tuple) 
             {
                 std::vector<std::pair<float, float>> path;
                 auto current_vertex = current;
-                
                 path.insert(path.begin(), current_vertex);
-                
-                while (nodes.find(current_vertex) != nodes.end() && 
-                    current_vertex != start_tuple) {
+                while (nodes.find(current_vertex) != nodes.end() && current_vertex != start_tuple) {
                     current_vertex = nodes[current_vertex].parent;
-                    std::cout << current_vertex.first << " " << current_vertex.second << std::endl;
                     path.insert(path.begin(), current_vertex);
                 }
-                
                 return std::make_pair(path, false);
             }
             
             if(iterations == iterations_before_verification) 
             {
                 iterations = 0;
-                
                 std::vector<std::pair<float, float>> path1 = straight_line(current, goal_tuple);
 
                 if(!path1.empty()) 
                 {
                     std::vector<std::pair<float, float>> path;
-                    
                     std::vector<std::pair<float, float>> path_to_current;
                     auto current_vertex = current;
-                    
-                    while (nodes.find(current_vertex) != nodes.end() && 
-                        current_vertex != start_tuple) {
+                    while (nodes.find(current_vertex) != nodes.end() && current_vertex != start_tuple) {
                         path_to_current.insert(path_to_current.begin(), current_vertex);
                         current_vertex = nodes[current_vertex].parent;
                     }
                     path_to_current.insert(path_to_current.begin(), start_tuple); 
-                    
                     path.insert(path.end(), path_to_current.begin(), path_to_current.end());
-                    
                     path.insert(path.end(), path1.begin(), path1.end());
-                    
                     return std::make_pair(path, true);
                 }
             }
            
-            
-            
-           
             for (const auto& neighbor : adjacency_list_tuples[current])
             {
-                if (nodes.find(neighbor) != nodes.end() && nodes[neighbor].closed)
-                    continue;
+                if (nodes.find(neighbor) != nodes.end() && nodes[neighbor].closed) continue;
                 
                 float tentative_g_score = nodes[current].g_score + heuristic(current, neighbor);
                 
@@ -488,7 +416,6 @@ private:
                     open_set.push({nodes[neighbor].f_score, neighbor});
                 }
             }
-            
             iterations++;
             adjacency_list_tuples.erase(current);
         }
@@ -499,16 +426,8 @@ private:
 
     std::vector<std::pair<float, float>> straight_line(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple)
     {
-        
-        
-        std::pair<float, float> A {
-            std::get<0>(start_tuple),
-            std::get<1>(start_tuple),
-        };
-        std::pair<float, float> B {
-            std::get<0>(goal_tuple),
-            std::get<1>(goal_tuple),
-        };
+        std::pair<float, float> A { std::get<0>(start_tuple), std::get<1>(start_tuple) };
+        std::pair<float, float> B { std::get<0>(goal_tuple), std::get<1>(goal_tuple) };
 
         float ax = std::get<0>(A), ay = std::get<1>(A);
         float bx = std::get<0>(B), by = std::get<1>(B);
@@ -522,7 +441,6 @@ private:
         float step = distanceToObstacle_;
         float t = 0.0f;
         bool obstacleFound = false;
-        auto offsets1 = get_offsets(distanceToObstacle_);
         
         std::vector<std::pair<float, float>> path;
 
@@ -540,34 +458,25 @@ private:
             path.push_back(neighbor_tuple);
             if (obstaclesVertices.find(neighbor_tuple) != obstaclesVertices.end()) 
             {
-                
                 obstacleFound = true;
                 break;
             }
-
             t += step;
         }
-
         
-        if(obstacleFound == true)
-        {
-            return {};
-        }
-        else
-        {
-            return path;
-        }
+        if(obstacleFound == true) return {};
+        else return path;
     }
 
     void store_edges_in_path(std::vector<std::pair<float, float>>& path, bool straight_line) 
     {
-        verticesDijkstra.clear();
-        
-        if (path.empty()) {
-            return;
-        }
+        path_points.clear();
+        path_without_filter.clear();
 
-        auto start_time1_ = std::chrono::high_resolution_clock::now();
+        
+        if (path.empty()) return;
+
+       
         int k = 0;
 
         if (straight_line == false && path.size() >= 2)
@@ -589,28 +498,19 @@ private:
                         goal.first  - ux * security_distance,
                         goal.second - uy * security_distance
                     };
-
                     path.erase(path.begin() + i + 1, path.end());
                     break;
                 }
             }
         }
 
-
-     
         while (k < static_cast<int>(path.size()) - 1) 
         {
             bool shortcutFound = false;
             for (int i = static_cast<int>(path.size()) - 1; i > k; i--) 
             {
-                std::pair<float, float> A {
-                    std::get<0>(path[k]),
-                    std::get<1>(path[k]),
-                };
-                std::pair<float, float> B {
-                    std::get<0>(path[i]),
-                    std::get<1>(path[i]),
-                };
+                std::pair<float, float> A { std::get<0>(path[k]), std::get<1>(path[k]) };
+                std::pair<float, float> B { std::get<0>(path[i]), std::get<1>(path[i]) };
         
                 float ax = std::get<0>(A), ay = std::get<1>(A);
                 float bx = std::get<0>(B), by = std::get<1>(B);
@@ -618,10 +518,7 @@ private:
                 float dx = bx - ax, dy = by - ay;
                 float distance = std::sqrt(dx * dx + dy * dy);
         
-                if (distance == 0) 
-                {
-                    continue;
-                }
+                if (distance == 0) continue;
         
                 float ux = dx / distance;
                 float uy = dy / distance;
@@ -629,7 +526,6 @@ private:
                 float step = distanceToObstacle_;
                 float t = 0.0f;
                 bool obstacleFound = false;
-                auto offsets1 = get_offsets(distanceToObstacle_);
         
                 while (t < distance && obstacleFound == false) 
                 {
@@ -642,14 +538,11 @@ private:
         
                     std::pair<float, float> neighbor_tuple = std::make_pair(static_cast<float>(new_x), static_cast<float>(new_y));
                     
-                    
                     if (obstaclesVertices.find(neighbor_tuple) != obstaclesVertices.end()) 
                     {
                         obstacleFound = true;
                         break;
                     }
-                
-
                     t += step;
                 }
         
@@ -661,24 +554,9 @@ private:
                 }
             }
         
-       
-
-            if (shortcutFound == true)
-            {
-                k++;
-            } 
-            else if(shortcutFound == false)
-            {
-                break;
-            }
+            if (shortcutFound == true) k++;
+            else break;
         }
-
-      
-        auto end_time1 = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<float> duration1 = end_time1 - start_time1_; 
-
-        RCLCPP_INFO(this->get_logger(), "A* filter execution time: %.10f", duration1.count());
-
 
         if (straight_line == true) 
         {
@@ -693,17 +571,47 @@ private:
             {
                 float ux = dx / dist;
                 float uy = dy / dist;
-
                 last.first  -= ux * security_distance;
                 last.second -= uy * security_distance;
             }
         }
-        
 
+        for (size_t i = 0; i < path.size() - 1; i++) 
+        {
+            float start_x = path[i].first;
+            float start_y = path[i].second;
+            float end_x   = path[i+1].first;
+            float end_y   = path[i+1].second;
+
+            float dx = end_x - start_x;
+            float dy = end_y - start_y;
+            float dist = std::sqrt(dx * dx + dy * dy);
+            
+            float ux = (dist > 0) ? (dx / dist) : 0;
+            float uy = (dist > 0) ? (dy / dist) : 0;
+
+            float traveled = 0.0f;
+            
+            while (traveled < dist)
+            {
+                float px = start_x + ux * traveled;
+                float py = start_y + uy * traveled;
+                
+                path_without_filter.push_back(std::make_pair(px, py));
+                traveled += distanceToObstacle_;
+            }
+        }
+
+        if (!path.empty()) 
+        {
+            path_without_filter.push_back(path.back());
+        }
+
+
+        
         for (size_t i = 0; i < path.size(); i++) 
         {
             VertexDijkstra vertex;
-            
             vertex.x = std::get<0>(path[i]);
             vertex.y = std::get<1>(path[i]);
 
@@ -738,144 +646,22 @@ private:
                 vertex.orientation_z = 0.0;
                 vertex.orientation_w = 1.0;
             }
-
-            verticesDijkstra.push_back(vertex);
+            path_points.push_back(vertex);
         }
 
+        publisher_point_cloud();
         publisher_dijkstra_path();
     }
 
 
     // Publishers.
-
-
     void publisher_dijkstra_path()
     {
         nav_msgs::msg::Path path_msg;
         path_msg.header.stamp = this->now();
         path_msg.header.frame_id = "world";
 
-        for (const auto& vertex : verticesDijkstra)
-        {
-            geometry_msgs::msg::PoseStamped pose_stamped;
-            pose_stamped.header.stamp = this->now();
-            pose_stamped.header.frame_id = "map";
-            
-            pose_stamped.pose.position.x = vertex.x;
-            pose_stamped.pose.position.y = vertex.y;
-            pose_stamped.pose.position.z = 0.0 ;
-            pose_stamped.pose.orientation.x = vertex.orientation_x;
-            pose_stamped.pose.orientation.y = vertex.orientation_y;
-            pose_stamped.pose.orientation.z = vertex.orientation_z;
-            pose_stamped.pose.orientation.w = vertex.orientation_w;
-            
-            path_msg.poses.push_back(pose_stamped);
-        }
-
-        publisher_nav_path_->publish(path_msg);
-    }
-
-
-    // Callbacks.
-    
-    
-    void callback_odom(const nav_msgs::msg::Odometry::SharedPtr msg) 
-    {
-        pose_x_ = msg->pose.pose.position.x;
-        pose_y_ = msg->pose.pose.position.y;
-        pose_z_ = 0.0;
-    }
-
-    void topic_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
-    {
-        sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
-        sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
-        sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
-
-        for (; iter_x != iter_x.end(); ++iter_x, ++iter_y) 
-        {
-            float x = *iter_x;
-            float y = *iter_y;
-            std::pair<float, float> index = std::make_pair(
-                round_to_multiple(x, distanceToObstacle_, decimals),
-                round_to_multiple(y, distanceToObstacle_, decimals)
-            );
-            obstaclesVertices.insert(index);
-        }
-    }
-
-    // Action server (pick_object).
-
-    rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
-        std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Goal> goal)
-    {
-        RCLCPP_INFO(this->get_logger(), "Recebido pedido de Action Path para pose [x: %.2f, y: %.2f]", 
-            goal->pose.position.x, goal->pose.position.y);
-        (void)uuid;
-        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
-    }
-
-    rclcpp_action::CancelResponse handle_cancel(
-        const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
-    {
-        RCLCPP_INFO(this->get_logger(), "Recebido pedido de cancelamento da Action.");
-        (void)goal_handle;
-        return rclcpp_action::CancelResponse::ACCEPT;
-    }
-
-    void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
-    {
-        using namespace std::placeholders;
-        
-        std::thread{std::bind(&AStar::execute, this, std::placeholders::_1), goal_handle}.detach();
-    }
-
-    void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
-    {
-        RCLCPP_INFO(this->get_logger(), "Executando Action de Path Planning...");
-
-        const auto goal = goal_handle->get_goal();
-        auto result = std::make_shared<mobile_manipulation_interfaces::action::Path::Result>();
-        auto feedback = std::make_shared<mobile_manipulation_interfaces::action::Path::Feedback>();
-
-        std::pair<float, float> initial_pose = std::make_pair(pose_x_, pose_y_);
-        
-        std::pair<float, float> goal_pose = std::make_pair(goal->pose.position.x, goal->pose.position.y);
-
-    
-        feedback->recalculating_path = true;
-        feedback->stop_pose.position.x = pose_x_;
-        feedback->stop_pose.position.y = pose_y_;
-        goal_handle->publish_feedback(feedback);
-
-        
-        if (goal_handle->is_canceling()) 
-        {
-            result->path.header.stamp = this->now();
-            result->path.header.frame_id = "world"; 
-            goal_handle->canceled(result);
-            RCLCPP_INFO(this->get_logger(), "Action cancelada antes do cálculo.");
-            return;
-        }
-
-      
-        std::pair<std::vector<std::pair<float, float>>, bool> a_star_result = run_a_star(initial_pose, goal_pose);
-
-        std::vector<std::pair<float, float>> shortestPath = std::get<0>(a_star_result);
-        bool straight_line = std::get<1>(a_star_result);
-
-        store_edges_in_path(shortestPath, straight_line);
-
-        if (shortestPath.empty()) 
-        {
-            goal_handle->abort(result);
-            RCLCPP_WARN(this->get_logger(), "A* falhou em encontrar um caminho.");
-            return;
-        }
-
-        result->path.header.stamp = this->now();
-        result->path.header.frame_id = "world"; 
-        for (const auto& vertex : verticesDijkstra)
+        for (const auto& vertex : path_points)
         {
             geometry_msgs::msg::PoseStamped pose_stamped;
             pose_stamped.header.stamp = this->now();
@@ -889,27 +675,320 @@ private:
             pose_stamped.pose.orientation.z = vertex.orientation_z;
             pose_stamped.pose.orientation.w = vertex.orientation_w;
             
-            result->path.poses.push_back(pose_stamped);
+            path_msg.poses.push_back(pose_stamped);
         }
+        publisher_nav_path_->publish(path_msg);
+    }
 
-       
-        feedback->recalculating_path = false;
-        goal_handle->publish_feedback(feedback);
+    void publisher_point_cloud()
+    {
+        sensor_msgs::msg::PointCloud2 cloud_msg;
+        cloud_msg.header.stamp = this->now();
+        cloud_msg.header.frame_id = "world"; 
 
-       
-        if (rclcpp::ok()) 
+        sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
+        modifier.setPointCloud2FieldsByString(1, "xyz");
+        modifier.resize(path_without_filter.size());
+
+        sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msg, "x");
+        sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msg, "y");
+        sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msg, "z");
+
+        for (const auto& vertex : path_without_filter)
         {
-            goal_handle->succeed(result);
-            RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso. Caminho com %zu pontos.", result->path.poses.size());
+            *iter_x = vertex.first;
+            *iter_y = vertex.second; 
+            *iter_z = 0.0f;        
+
+            ++iter_x;
+            ++iter_y;
+            ++iter_z;
+        }
+        publisher_point_cloud_->publish(cloud_msg);
+    }
+
+
+    // Callbacks.
+    void callback_odom(const nav_msgs::msg::Odometry::SharedPtr msg) 
+    {
+        pose_x_ = msg->pose.pose.position.x;
+        pose_y_ = msg->pose.pose.position.y;
+        pose_z_ = 0.0;
+    }
+
+    void topic_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+
+        sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
+        
+        for (; iter_x != iter_x.end(); ++iter_x, ++iter_y) 
+        {
+            float x = *iter_x;
+            float y = *iter_y;
+            
+            std::pair<float, float> index = std::make_pair(
+                round_to_multiple(x, distanceToObstacle_, decimals),
+                round_to_multiple(y, distanceToObstacle_, decimals)
+            );
+            obstaclesVertices.insert(index);
         }
     }
 
-};
+    // Action server.
 
+    rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
+    std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Goal> goal)
+    {
+        RCLCPP_INFO(this->get_logger(), "Recebido pedido de Path para [x: %.2f, y: %.2f]", 
+            goal->pose.position.x, goal->pose.position.y);
+        (void)uuid;
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
+
+    rclcpp_action::CancelResponse handle_cancel(
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Recebido pedido de cancelamento.");
+        (void)goal_handle;
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+
+    void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
+    {
+        using namespace std::placeholders;
+        
+        {
+            std::lock_guard<std::mutex> lock(goal_mutex_);
+            active_goal_handle_ = goal_handle;
+        }
+
+        std::thread{std::bind(&AStar::execute, this, std::placeholders::_1), goal_handle}.detach();
+    }
+
+    
+    void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "THREAD START: Iniciando Action de Path Planning...");
+
+        const auto goal = goal_handle->get_goal();
+        auto result = std::make_shared<mobile_manipulation_interfaces::action::Path::Result>();
+        auto feedback = std::make_shared<mobile_manipulation_interfaces::action::Path::Feedback>();
+
+        path_points.clear();
+        path_without_filter.clear();
+
+        std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
+        std::pair<float, float> start_pose = {pose_x_, pose_y_};
+        
+        rclcpp::Rate loop_rate(2.0);
+        bool path_needs_calculation = false;
+
+        try {
+            
+            {
+                RCLCPP_INFO(this->get_logger(), "Calculando caminho inicial...");
+                feedback->recalculating_path = false;
+                feedback->stop_pose = geometry_msgs::msg::Pose(); 
+                
+                std::pair<std::vector<std::pair<float, float>>, bool> a_star_result;
+                std::vector<std::pair<float, float>> shortestPath;
+                bool straight_line = false;
+
+                {
+                    std::lock_guard<std::mutex> lock(map_mutex_);
+                    
+                    a_star_result = run_a_star(start_pose, current_goal_pose);
+                    shortestPath = a_star_result.first;
+                    straight_line = a_star_result.second;
+
+                    if (!shortestPath.empty()) {
+                        store_edges_in_path(shortestPath, straight_line);
+                    }
+                } 
+
+                if (shortestPath.empty())
+                {
+                    RCLCPP_WARN(this->get_logger(), "A* Falhou no caminho inicial! Enviando feedback de erro.");
+                    path_needs_calculation = true;
+                    feedback->recalculating_path = true;
+                    
+                    feedback->path.poses.clear();
+                    feedback->path.header.stamp = this->now();
+                    feedback->path.header.frame_id = "world";
+                    
+                    goal_handle->publish_feedback(feedback);
+                }
+                else
+                {
+                    feedback->path.poses.clear();
+                    feedback->path.header.stamp = this->now();
+                    feedback->path.header.frame_id = "world";
+
+                    for (const auto& vertex : path_points) 
+                    {
+                        geometry_msgs::msg::PoseStamped pose_stamped;
+                        pose_stamped.header.stamp = this->now();
+                        pose_stamped.header.frame_id = "world";
+                        pose_stamped.pose.position.x = vertex.x;
+                        pose_stamped.pose.position.y = vertex.y;
+                        pose_stamped.pose.position.z = 0.0;
+                        pose_stamped.pose.orientation.x = vertex.orientation_x;
+                        pose_stamped.pose.orientation.y = vertex.orientation_y;
+                        pose_stamped.pose.orientation.z = vertex.orientation_z;
+                        pose_stamped.pose.orientation.w = vertex.orientation_w;
+                        
+                        feedback->path.poses.push_back(pose_stamped);
+                    }
+                    
+                    RCLCPP_INFO(this->get_logger(), "Sucesso inicial! Publicando feedback com %zu poses.", feedback->path.poses.size());
+                    
+                    goal_handle->publish_feedback(feedback); 
+                    
+                    publisher_dijkstra_path(); 
+                }
+            }
+
+            RCLCPP_INFO(this->get_logger(), "Entrando no loop de monitoramento...");
+            
+            while (rclcpp::ok()) 
+            {
+               
+                {
+                    std::lock_guard<std::mutex> lock(goal_mutex_);
+                    if (active_goal_handle_ != goal_handle) 
+                    {
+                        RCLCPP_WARN(this->get_logger(), "Preempção detectada. Encerrando thread.");
+                        return; 
+                    }
+                }
+
+                
+                if (goal_handle->is_canceling()) 
+                {
+                    RCLCPP_INFO(this->get_logger(), "Cancelamento solicitado.");
+                    result->success = false;
+                    goal_handle->canceled(result);
+                    return;
+                }
+
+                
+                float dist = std::hypot(current_goal_pose.first - pose_x_, current_goal_pose.second - pose_y_);
+                
+                
+                if (dist < 0.15 && !path_needs_calculation) 
+                {
+                    result->success = true;
+                    goal_handle->succeed(result);
+                    RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso (Result enviado).");
+                    return;
+                }
+
+                
+                if (!path_needs_calculation)
+                {
+                    std::lock_guard<std::mutex> lock(map_mutex_); 
+                    
+                    for(size_t i = 0; i < path_without_filter.size(); ++i)
+                    {
+                        if(obstaclesVertices.find(path_without_filter[i]) != obstaclesVertices.end())
+                        {
+                            RCLCPP_WARN(this->get_logger(), "Obstáculo detectado! Parando robô e recalculando.");
+                            
+                            path_needs_calculation = true;
+
+                            size_t stop_index = (i > 0) ? (i - 1) : 0;
+                            
+                            feedback->stop_pose.position.x = path_without_filter[stop_index].first;
+                            feedback->stop_pose.position.y = path_without_filter[stop_index].second;
+                            feedback->stop_pose.orientation.w = 1.0; 
+                            
+                            break; 
+                        }
+                    }
+                }
+
+                
+                if (path_needs_calculation)
+                {
+                    feedback->recalculating_path = true;
+                    goal_handle->publish_feedback(feedback); 
+
+                    std::pair<float, float> current_robot_pose = {pose_x_, pose_y_};
+                    std::pair<std::vector<std::pair<float, float>>, bool> a_star_result;
+                    std::vector<std::pair<float, float>> shortestPath;
+                    bool straight_line;
+
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(map_mutex_);
+                        a_star_result = run_a_star(current_robot_pose, current_goal_pose);
+                        shortestPath = a_star_result.first;
+                        straight_line = a_star_result.second;
+
+                        if (!shortestPath.empty())
+                        {
+                            store_edges_in_path(shortestPath, straight_line);
+                        }
+                    } 
+
+                    if (!shortestPath.empty())
+                    {
+                        feedback->path.poses.clear();
+                        feedback->path.header.stamp = this->now();
+                        feedback->path.header.frame_id = "world";
+
+                        for (const auto& vertex : path_points) 
+                        {
+                            geometry_msgs::msg::PoseStamped pose_stamped;
+                            pose_stamped.header.stamp = this->now();
+                            pose_stamped.header.frame_id = "world";
+                            pose_stamped.pose.position.x = vertex.x;
+                            pose_stamped.pose.position.y = vertex.y;
+                            pose_stamped.pose.position.z = 0.0;
+                            pose_stamped.pose.orientation.x = vertex.orientation_x;
+                            pose_stamped.pose.orientation.y = vertex.orientation_y;
+                            pose_stamped.pose.orientation.z = vertex.orientation_z;
+                            pose_stamped.pose.orientation.w = vertex.orientation_w;
+                            feedback->path.poses.push_back(pose_stamped);
+                        }
+
+                        path_needs_calculation = false; 
+                        feedback->recalculating_path = false;
+                        feedback->stop_pose = geometry_msgs::msg::Pose(); 
+
+                      
+                        goal_handle->publish_feedback(feedback);
+                        RCLCPP_INFO(this->get_logger(), "Caminho recalculado e enviado via Feedback.");
+                        publisher_dijkstra_path(); 
+                    }
+                    else 
+                    {
+                         RCLCPP_WARN(this->get_logger(), "A* falhou no recálculo.");
+                    }
+                }
+
+                loop_rate.sleep();
+            }
+        }
+        catch (const std::exception &e) {
+            RCLCPP_ERROR(this->get_logger(), "EXCEÇÃO NA THREAD DA ACTION: %s", e.what());
+            result->success = false;
+            goal_handle->abort(result);
+        }
+        catch (...) {
+            RCLCPP_ERROR(this->get_logger(), "EXCEÇÃO DESCONHECIDA NA THREAD DA ACTION.");
+            result->success = false;
+            goal_handle->abort(result);
+        }
+    }
+
+
+};
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    
     rclcpp::spin(std::make_shared<AStar>());
     rclcpp::shutdown();
     return 0;

@@ -15,26 +15,26 @@
 #include "mobile_manipulation_interfaces/action/controller.hpp"
 #include "mobile_manipulation_interfaces/srv/stop_pose.hpp"
 
-class DijkstraController3D : public rclcpp::Node
+class RobotController : public rclcpp::Node
 {
 public:
-    DijkstraController3D() : Node("dijkstra_controller_3d"), 
+    RobotController() : Node("controller"), 
                               pose_initialized_(false)
     {
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
         
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/odom", 10, std::bind(&DijkstraController3D::odom_callback, this, std::placeholders::_1));
+            "/odom", 10, std::bind(&RobotController::odom_callback, this, std::placeholders::_1));
             
         this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::Controller>(
             this, 
             "controller",
-            std::bind(&DijkstraController3D::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&DijkstraController3D::handle_cancel, this, std::placeholders::_1),
-            std::bind(&DijkstraController3D::handle_accepted, this, std::placeholders::_1));
+            std::bind(&RobotController::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&RobotController::handle_cancel, this, std::placeholders::_1),
+            std::bind(&RobotController::handle_accepted, this, std::placeholders::_1));
 
         service_ = this->create_service<mobile_manipulation_interfaces::srv::StopPose>("/stop_pose",
-            std::bind(&DijkstraController3D::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+            std::bind(&RobotController::handle_request, this, std::placeholders::_1, std::placeholders::_2));
 
         linear_speed_ = 0.5;
         angular_speed_ = 2.0;
@@ -44,7 +44,7 @@ public:
         // Só iniciando com valores impossíveis para não parar quando não deveria.
         stop_pose_.position.x = -99999.256; 
 
-        RCLCPP_INFO(this->get_logger(), "DijkstraController3D iniciado (Modo Action Loop)!");
+        RCLCPP_INFO(this->get_logger(), "RobotController iniciado (Modo Action Loop)!");
     }
 
 private:
@@ -137,7 +137,7 @@ private:
 
     void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
     {
-        std::thread{std::bind(&DijkstraController3D::execute, this, std::placeholders::_1), goal_handle}.detach();
+        std::thread{std::bind(&RobotController::execute, this, std::placeholders::_1), goal_handle}.detach();
     }
 
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
@@ -267,7 +267,7 @@ private:
 int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<DijkstraController3D>();
+    auto node = std::make_shared<RobotController>();
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;

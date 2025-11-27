@@ -532,7 +532,7 @@ private:
 
             if(pick == true)
             {
-                if (positions_for_arm(target_pose_world, 0.3, false)) 
+                if (positions_for_arm(target_pose_world, 0.15, false)) 
                 {
                     send_request(received_id, false);
 
@@ -554,7 +554,7 @@ private:
             }
             else if(pick == false)
             {
-                if (positions_for_arm(target_pose_world, 0.5, false)) 
+                if (positions_for_arm(target_pose_world, 0.75, false)) 
                 {
                     open_gripper();
                     
