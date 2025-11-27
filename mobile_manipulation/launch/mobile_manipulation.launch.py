@@ -250,8 +250,6 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {'yaml_file': yaml_file},
-            {'label_to_storage_yaml_file': label_to_storage_yaml_file},
-            {'storage_poses_yaml_file': storage_poses_yaml_file},
             {'bt_xml_path': bt_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -290,6 +288,31 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    get_storage_info = Node(
+        package="mobile_manipulation",
+        executable="get_storage_info",
+        name="get_storage_info",
+        output="screen",
+        parameters=[
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            robot_description_joint_limits,  
+            moveit_config.trajectory_execution,
+            robot_description_kinematics,
+            moveit_config.planning_scene_monitor,
+            {'label_to_storage_yaml_file': label_to_storage_yaml_file},
+            {'storage_poses_yaml_file': storage_poses_yaml_file},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        remappings=[
+            ('/boxes_detection_array', '/bbox_3d_with_labels')
+            
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
     
    
     return LaunchDescription(
@@ -309,6 +332,7 @@ def generate_launch_description():
             server_node,
             a_star,
             controller,
+            get_storage_info,
 
             Node(
                 package='isaacsim_moveit',

@@ -18,6 +18,7 @@
 
 #include <tf2/utils.h> 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/LinearMath/Quaternion.h>
 #include "mobile_manipulation_interfaces/srv/get_storage_info.hpp"
 
 class GetStorageInfo : public rclcpp::Node 
@@ -128,14 +129,26 @@ private:
 
                     if (loc_node["orientation"]) 
                     {
-                        const auto& ori = loc_node["orientation"];
-                        info.pose.orientation.x = ori[0].as<double>();
-                        info.pose.orientation.y = ori[1].as<double>();
-                        info.pose.orientation.z = ori[2].as<double>();
-                        info.pose.orientation.w = ori[3].as<double>();
+                        const auto& rpy = loc_node["orientation"];
+                        
+                        double roll  = rpy[0].as<double>();
+                        double pitch = rpy[1].as<double>();
+                        double yaw   = rpy[2].as<double>();
+
+                        tf2::Quaternion q;
+                        q.setRPY(roll, pitch, yaw);
+                        q.normalize();
+
+                        info.pose.orientation.x = q.x();
+                        info.pose.orientation.y = q.y();
+                        info.pose.orientation.z = q.z();
+                        info.pose.orientation.w = q.w();
                     } 
                     else 
                     {
+                        info.pose.orientation.x = 0.0;
+                        info.pose.orientation.y = 0.0;
+                        info.pose.orientation.z = 0.0;
                         info.pose.orientation.w = 1.0;
                     }
                     

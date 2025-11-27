@@ -1,9 +1,5 @@
 storage_01:
-  - position: [1.0, 2.0, 0.0]
-    orientation: [0.0, 0.0, 0.0, 1.0]
-    size: [0.6, 1.0] # Depth (x), Width (y)
+  - position: [-2.0, 1.0, 0.0]
+    orientation: [0.0, 0.0, 0.0]
+    size: [0.15, 0.4] 
 
-storage_02:
-  - position: [3.0, 1.0, 0.0]
-    orientation: [0.0, 0.0, 1.0, 0.0]
-    size: [0.5, 0.8]
