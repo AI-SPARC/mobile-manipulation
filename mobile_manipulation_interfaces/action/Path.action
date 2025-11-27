@@ -1,6 +1,10 @@
+# Request
 geometry_msgs/Pose pose
 ---
-nav_msgs/Path path  
+# Result
+nav_msgs/Path path
 ---
+# Feedback
 bool recalculating_path
 geometry_msgs/Pose stop_pose
+nav_msgs/Path path  
