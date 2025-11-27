@@ -182,6 +182,30 @@ ament_target_dependencies(get_storage_info
   mobile_manipulation_interfaces
 )
 
+add_executable(obstacle_graph_with_occupancy_grid src/obstacle_graph_with_occupancy_grid.cpp)
+
+ament_target_dependencies(obstacle_graph_with_occupancy_grid 
+  trajectory_msgs 
+  rclcpp 
+  nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  std_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+  mobile_manipulation_interfaces
+)
+
 target_link_libraries(add_collision
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -238,10 +262,20 @@ target_link_libraries(get_storage_info
   yaml-cpp
 )
 
+target_link_libraries(obstacle_graph_with_occupancy_grid
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  yaml-cpp
+)
+
 install(DIRECTORY
   launch
   config
   bt
+  maps
   DESTINATION share/${PROJECT_NAME}
 )
 
@@ -252,6 +286,7 @@ install(TARGETS
   controller
   simple_manipulation_node
   get_storage_info
+  obstacle_graph_with_occupancy_grid
   DESTINATION lib/${PROJECT_NAME}
 )
 
