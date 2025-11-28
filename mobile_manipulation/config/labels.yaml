@@ -9,6 +9,10 @@ authorized_labels:
   - box_
   - conveyor_
   - storage_
+  - greenbox_
+  - redbox_
+  - blackbox_
+  - bluebox_
 
 unauthorized_labels:
   - camera
