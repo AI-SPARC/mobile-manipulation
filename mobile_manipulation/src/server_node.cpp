@@ -175,8 +175,7 @@ private:
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SharedPtr path_client;
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SharedPtr controller_client;
 
-    // --- VARIÁVEL NOVA PARA CORREÇÃO ---
-    // Armazena o handle do objetivo de controle ATUALMENTE VÁLIDO
+
     rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::SharedPtr active_controller_goal_handle_;
 
     std::string yaml_file;
@@ -550,6 +549,7 @@ private:
 
     // --- Path Callbacks ---
 
+
     void send_path_goal(const geometry_msgs::msg::Pose & target_pose)
     {
         if (!this->path_client->wait_for_action_server(std::chrono::seconds(5)))
@@ -560,7 +560,6 @@ private:
             return;
         }
 
-       
         {
             std::lock_guard<std::mutex> lock(path_mutex_);
             last_calculated_path_.poses.clear();
@@ -579,6 +578,16 @@ private:
         this->path_client->async_send_goal(goal_msg, send_goal_options);
     }
 
+    void cancel_controller_goal()
+    {
+        if (this->active_controller_goal_handle_)
+        {
+            RCLCPP_WARN(this->get_logger(), "Solicitando PARADA IMEDIATA (Cancelando Action Controller)...");
+            this->controller_client->async_cancel_goal(this->active_controller_goal_handle_);
+            
+        }
+    }
+
     void path_feedback_callback(
         rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::SharedPtr,
         const std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Feedback> feedback)
@@ -590,39 +599,42 @@ private:
 
         if (feedback->recalculating_path)
         {
-            send_controller_goal(feedback->path);        
+
+            cancel_controller_goal();
+        }
+        else 
+        {
+            if (!feedback->path.poses.empty())
+            {
+                RCLCPP_INFO(this->get_logger(), "Novo caminho recebido (recalculating=false). Executando...");
+                send_controller_goal(feedback->path);
+            }
         }
     }
 
     void path_goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>> & goal_handle)
     {
-        if (!goal_handle)
-        {
+        if (!goal_handle) {
             RCLCPP_ERROR(this->get_logger(), "Goal PATH rejeitado");
             path_state_ = TaskState::FAILURE;
-        }
-        else
-        {
+        } else {
             RCLCPP_INFO(this->get_logger(), "Goal PATH aceito, calculando...");
         }
     }
 
     void path_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::WrappedResult & result)
     {
-        if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
-        {
+        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
             if (result.result->success) path_state_ = TaskState::SUCCESS;
             else path_state_ = TaskState::FAILURE;
         }
-        
     }
 
     // --- Controller Callbacks ---
 
     bool send_controller_goal(const nav_msgs::msg::Path &target_path)
     {
-        if (!this->controller_client->wait_for_action_server(std::chrono::seconds(2)))
-        {
+        if (!this->controller_client->wait_for_action_server(std::chrono::seconds(2))) {
             RCLCPP_ERROR(this->get_logger(), "Action server 'controller' not available");
             return false;
         }
@@ -641,50 +653,46 @@ private:
 
     void controller_goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>> & goal_handle)
     {
-        if (!goal_handle)
-        {
+        if (!goal_handle) {
             RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER rejeitado");
             nav_state_ = TaskState::FAILURE;
-        }
-        else
-        {
-            // CORREÇÃO: Salva o handle atual como o "válido"
+        } else {
+            // Salva o handle atual
             this->active_controller_goal_handle_ = goal_handle;
-            
             RCLCPP_INFO(this->get_logger(), "Goal CONTROLLER aceito, executando...");
         }
     }
 
     void controller_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::WrappedResult & result)
     {
-        // CORREÇÃO CRÍTICA:
-        // Verifica se o resultado recebido é do objetivo ATUAL.
-        // Se o ID for diferente, significa que é o fantasma de um objetivo antigo abortado.
-        if (this->active_controller_goal_handle_ && result.goal_id != this->active_controller_goal_handle_->get_goal_id())
-        {
-            RCLCPP_WARN(this->get_logger(), "Ignorando resultado de goal antigo (Preempção ocorrida).");
+        // Ignora resultados de actions canceladas/abortadas antigas para não falhar a BT
+        if (this->active_controller_goal_handle_ && result.goal_id != this->active_controller_goal_handle_->get_goal_id()) {
+            RCLCPP_WARN(this->get_logger(), "Ignorando resultado de controller antigo.");
             return; 
         }
 
-        if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
-        {
+        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
             {
                 std::lock_guard<std::mutex> lock(path_mutex_);
                 last_calculated_path_.poses.clear();
             }
-            
             path_state_ = TaskState::IDLE;
             nav_state_ = TaskState::SUCCESS;
-            RCLCPP_INFO(this->get_logger(), "Navegação concluída! Dados de caminho limpos.");
+            RCLCPP_INFO(this->get_logger(), "Navegação concluída!");
+        } 
+        else if (result.code == rclcpp_action::ResultCode::CANCELED) {
+             RCLCPP_INFO(this->get_logger(), "Navegação cancelada (Parada solicitada).");
+             // Não setamos FAILURE aqui necessariamente, pois foi intencional
         }
-        else
-        {
-            RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER falhou/abortou (Falha Real)");
+        else {
+            RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER falhou/abortou");
             nav_state_ = TaskState::FAILURE;
         }
         
-        // Limpa o ponteiro
-        this->active_controller_goal_handle_.reset();
+        // Limpa o ponteiro se for o atual
+        if (this->active_controller_goal_handle_ && result.goal_id == this->active_controller_goal_handle_->get_goal_id()) {
+            this->active_controller_goal_handle_.reset();
+        }
     }
 
     // --- Pick/Place Callbacks ---
