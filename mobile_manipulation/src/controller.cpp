@@ -9,11 +9,8 @@
 #include <algorithm> 
 #include <thread>
 #include <chrono>
-#include <map>   // Necessário para std::map
-#include <tuple> // Necessário para std::tuple
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "mobile_manipulation_interfaces/action/controller.hpp"
-#include "mobile_manipulation_interfaces/srv/stop_pose.hpp"
 
 class RobotController : public rclcpp::Node
 {
@@ -33,35 +30,28 @@ public:
             std::bind(&RobotController::handle_cancel, this, std::placeholders::_1),
             std::bind(&RobotController::handle_accepted, this, std::placeholders::_1));
 
-        service_ = this->create_service<mobile_manipulation_interfaces::srv::StopPose>("/stop_pose",
-            std::bind(&RobotController::handle_request, this, std::placeholders::_1, std::placeholders::_2));
-
+ 
         linear_speed_ = 0.5;
         angular_speed_ = 2.0;
-        waypoint_tolerance_ = 0.1; 
-        angle_tolerance_ = 0.1;
+        
+        waypoint_tolerance_ = 0.03; 
+        
+        angle_tolerance_ = 0.06;
 
-        // Só iniciando com valores impossíveis para não parar quando não deveria.
-        stop_pose_.position.x = -99999.256; 
-
-        RCLCPP_INFO(this->get_logger(), "RobotController iniciado (Modo Action Loop)!");
+        RCLCPP_INFO(this->get_logger(), "RobotController iniciado com suporte a Preempção!");
     }
 
 private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     
-    // Action server.
     rclcpp_action::Server<mobile_manipulation_interfaces::action::Controller>::SharedPtr action_server_;
 
-    // Service.
-    rclcpp::Service<mobile_manipulation_interfaces::srv::StopPose>::SharedPtr service_;
-
     geometry_msgs::msg::Pose current_pose_;
-    geometry_msgs::msg::Pose stop_pose_;
     
     std::mutex pose_mutex_; 
-    std::mutex stop_pose_mutex;
+    std::mutex goal_mutex_;
+    std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> active_goal_;
 
     bool pose_initialized_;
     double linear_speed_;
@@ -98,32 +88,15 @@ private:
         return a;
     }
 
-    // Service
-    void handle_request(const std::shared_ptr<mobile_manipulation_interfaces::srv::StopPose::Request> request, 
-                        std::shared_ptr<mobile_manipulation_interfaces::srv::StopPose::Response> response)
-    {   
-        {
-            std::lock_guard<std::mutex> lock(stop_pose_mutex);
-            stop_pose_ = request->stop_pose;
-        }
-        
-        response->success = true;
-        RCLCPP_INFO(this->get_logger(), "Stop Pose atualizado via serviço.");
-    }
-
-    // Action server (controller).
-
     rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
         std::shared_ptr<const mobile_manipulation_interfaces::action::Controller::Goal> goal)
     {
         (void)uuid;
-
         if (goal->path.poses.empty()) 
         {
             RCLCPP_WARN(this->get_logger(), "Caminho vazio recebido. Rejeitando goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
-
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     }
 
@@ -137,116 +110,120 @@ private:
 
     void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
     {
+        {
+            std::lock_guard<std::mutex> lock(goal_mutex_);
+            
+            // Se já existe um goal ativo rodando, aborte-o para matar a thread antiga
+            if (active_goal_ && active_goal_->is_active()) 
+            {
+                RCLCPP_WARN(this->get_logger(), "PREEMPÇÃO: Abortando goal antigo para iniciar novo caminho.");
+                auto result = std::make_shared<mobile_manipulation_interfaces::action::Controller::Result>();
+                result->success = false;
+                try {
+                    active_goal_->abort(result);
+                } catch (...) { }
+            }
+            active_goal_ = goal_handle;
+        }
+
         std::thread{std::bind(&RobotController::execute, this, std::placeholders::_1), goal_handle}.detach();
     }
 
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
     {
-        RCLCPP_INFO(this->get_logger(), "Iniciando execução do caminho (Action Thread)...");
+        RCLCPP_INFO(this->get_logger(), "Iniciando execução do caminho...");
 
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::Controller::Result>();
         
         std::vector<geometry_msgs::msg::Pose> path;
-        std::map<std::tuple<float, float, float>, int> index_map;
-        int i = 0;
-
         for (const auto& p : goal->path.poses) 
         {
             path.push_back(p.pose);
-            index_map[std::make_tuple(static_cast<float>(p.pose.position.x), 
-                                      static_cast<float>(p.pose.position.y), 
-                                      static_cast<float>(p.pose.position.z))] = i;
-            i++;
         }
 
         size_t current_idx = 0;
         rclcpp::Rate rate(100);
 
+        // Espera odometria
         while (rclcpp::ok() && !pose_initialized_) 
         {
-             if (goal_handle->is_canceling()) 
-             {
+             if (goal_handle->is_canceling()) {
                 result->success = false;
                 goal_handle->canceled(result);
                 return;
              }
-             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Aguardando odometria...");
              rate.sleep();
         }
 
         while (rclcpp::ok() && current_idx < path.size())
         {
-            if (goal_handle->is_canceling()) 
+            // --- VERIFICAÇÃO DE SAÍDA DE THREAD ---
+            if (goal_handle->is_canceling() || !goal_handle->is_active()) 
             {
                 publish_zero_velocity();
-                result->success = false;
-                goal_handle->canceled(result);
-                RCLCPP_INFO(this->get_logger(), "Execução cancelada.");
-                return;
+                if (goal_handle->is_canceling()) {
+                    result->success = false;
+                    goal_handle->canceled(result);
+                    RCLCPP_INFO(this->get_logger(), "Execução cancelada pelo usuário.");
+                } else {
+                    RCLCPP_INFO(this->get_logger(), "Thread antiga encerrada (Preempção).");
+                }
+                return; 
             }
+            // --------------------------------------
 
             geometry_msgs::msg::Pose local_pose;
-            int stop_index = -1; 
-
-            {
-                std::lock_guard<std::mutex> lock(stop_pose_mutex);
-                auto search_tuple = std::make_tuple(static_cast<float>(stop_pose_.position.x), 
-                                                    static_cast<float>(stop_pose_.position.y), 
-                                                    static_cast<float>(stop_pose_.position.z));
-                
-                if(index_map.find(search_tuple) != index_map.end())
-                {
-                    stop_index = index_map[search_tuple];
-                }
-            }
-
             {
                 std::lock_guard<std::mutex> lock(pose_mutex_);
                 local_pose = current_pose_;
             }
 
-            if(stop_index != -1 && static_cast<int>(current_idx) >= stop_index)
-            {
-                RCLCPP_INFO(this->get_logger(), "Parada solicitada no waypoint %d.", stop_index);
-                break;
-            }
-
-            // 3. Lógica de Controle
+            // --- Lógica de Controle ---
             const auto& target = path[current_idx];
             
             double dx = target.position.x - local_pose.position.x;
             double dy = target.position.y - local_pose.position.y;
             double distance = std::sqrt(dx*dx + dy*dy);
 
-            tf2::Quaternion q(local_pose.orientation.x,
-                              local_pose.orientation.y,
-                              local_pose.orientation.z,
-                              local_pose.orientation.w);
+            tf2::Quaternion q(local_pose.orientation.x, local_pose.orientation.y, local_pose.orientation.z, local_pose.orientation.w);
             double yaw = get_yaw_from_quaternion(q);
             double target_yaw = std::atan2(dy, dx);
             double angle_error = normalize_angle(target_yaw - yaw);
 
             geometry_msgs::msg::Twist cmd;
+            double k_p_angular = 2.5; 
 
-            if (std::fabs(angle_error) > angle_tolerance_) 
+            // Turn in place se o erro for grande (> 20 graus)
+            if (std::fabs(angle_error) > 0.35) 
             {
                 cmd.linear.x = 0.0;
-                cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
+                cmd.angular.z = std::clamp(angle_error * k_p_angular, -angular_speed_, angular_speed_);
             } 
             else 
             {
-                double approach_speed = std::min(linear_speed_, distance * 1.5);
+                // Movimento suave
+                double approach_speed = std::min(linear_speed_, distance * 2.0);
                 cmd.linear.x = std::clamp(approach_speed, 0.0, linear_speed_);
-                cmd.angular.z = std::clamp(angle_error * 2.0, -angular_speed_, angular_speed_);
+                cmd.angular.z = std::clamp(angle_error * k_p_angular, -angular_speed_, angular_speed_);
             }
 
+            // --- CORREÇÃO DE ZONA MORTA DO MOTOR ---
+            double min_angular_cmd = 0.3; 
+            if (std::abs(cmd.angular.z) > 0.001 && std::abs(cmd.angular.z) < min_angular_cmd) 
+            {
+                cmd.angular.z = (cmd.angular.z > 0) ? min_angular_cmd : -min_angular_cmd;
+            }
+
+            // --- SUA INVERSÃO DE HARDWARE ---
             cmd.angular.z = -cmd.angular.z;
+            // -------------------------------
+
             cmd_vel_pub_->publish(cmd);
 
+            // Troca de Waypoint
             if (distance < waypoint_tolerance_) 
             {
-                RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu/%zu.", current_idx + 1, path.size());
                 current_idx++;
             }
 
@@ -257,9 +234,14 @@ private:
 
         if (rclcpp::ok()) 
         {
-            result->success = true;
-            goal_handle->succeed(result);
-            RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso.");
+            std::lock_guard<std::mutex> lock(goal_mutex_);
+            if (active_goal_ == goal_handle && goal_handle->is_active()) 
+            {
+                result->success = true;
+                goal_handle->succeed(result);
+                RCLCPP_INFO(this->get_logger(), "Caminho finalizado com sucesso.");
+                active_goal_.reset();
+            }
         }
     }
 };

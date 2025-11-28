@@ -302,8 +302,8 @@ def generate_launch_description():
         'maps'
     )
 
-    map_yaml_filename = os.path.join(map_dir, 'storage_1.yaml')
-    map_pgm_filename = os.path.join(map_dir, 'storage_1.png')
+    map_yaml_filename = os.path.join(map_dir, 'multiple_storages.yaml')
+    map_pgm_filename = os.path.join(map_dir, 'multiple_storages.png')
 
     obstacle_graph_with_occupancy_grid = Node(
         package="mobile_manipulation",

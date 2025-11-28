@@ -787,7 +787,6 @@ private:
             {
                 RCLCPP_INFO(this->get_logger(), "Calculando caminho inicial...");
                 feedback->recalculating_path = false;
-                feedback->stop_pose = geometry_msgs::msg::Pose(); 
                 
                 std::pair<std::vector<std::pair<float, float>>, bool> a_star_result;
                 std::vector<std::pair<float, float>> shortestPath;
@@ -894,12 +893,6 @@ private:
                             RCLCPP_WARN(this->get_logger(), "Obstáculo detectado! Parando robô e recalculando.");
                             
                             path_needs_calculation = true;
-
-                            size_t stop_index = (i > 0) ? (i - 1) : 0;
-                            
-                            feedback->stop_pose.position.x = path_without_filter[stop_index].first;
-                            feedback->stop_pose.position.y = path_without_filter[stop_index].second;
-                            feedback->stop_pose.orientation.w = 1.0; 
                             
                             break; 
                         }
@@ -953,7 +946,6 @@ private:
 
                         path_needs_calculation = false; 
                         feedback->recalculating_path = false;
-                        feedback->stop_pose = geometry_msgs::msg::Pose(); 
 
                       
                         goal_handle->publish_feedback(feedback);
@@ -980,7 +972,7 @@ private:
             goal_handle->abort(result);
         }
     }
-
+    
 
 };
 

@@ -11,6 +11,7 @@
 #include <cmath> 
 #include <atomic>
 #include <mutex>
+#include <map>
 
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/xml_parsing.h>
@@ -28,7 +29,6 @@
 #include <yaml-cpp/yaml.h>
 
 #include "mobile_manipulation_interfaces/srv/get_storage_info.hpp"
-#include "mobile_manipulation_interfaces/srv/stop_pose.hpp"
 
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/action/path.hpp"
@@ -133,7 +133,6 @@ public:
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
 
-        client_ = this->create_client<mobile_manipulation_interfaces::srv::StopPose>("stop_pose");
         storage_client_ = this->create_client<mobile_manipulation_interfaces::srv::GetStorageInfo>("get_storage_info");
         
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(this, "pick_object");
@@ -145,7 +144,6 @@ public:
             loadLocationsFromYaml(yaml_file);
         }
 
-        is_navigating_ = false;
 
         path_state_ = TaskState::IDLE;
         nav_state_ = TaskState::IDLE;
@@ -155,7 +153,7 @@ public:
 
         bt_thread_ = std::thread(&ServerNode::bt_loop, this);
             
-        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado (Auto-Reset Logic).");
+        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado (Com correção de Preempção).");
     } 
 
     ~ServerNode()
@@ -172,12 +170,15 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
 
     rclcpp::Client<mobile_manipulation_interfaces::srv::GetStorageInfo>::SharedPtr storage_client_;
-    rclcpp::Client<mobile_manipulation_interfaces::srv::StopPose>::SharedPtr client_;
 
     rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SharedPtr path_client;
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SharedPtr controller_client;
-    
+
+    // --- VARIÁVEL NOVA PARA CORREÇÃO ---
+    // Armazena o handle do objetivo de controle ATUALMENTE VÁLIDO
+    rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::SharedPtr active_controller_goal_handle_;
+
     std::string yaml_file;
 
     std::unordered_set<std::string> authorized_labels;
@@ -197,7 +198,6 @@ private:
     
     nav_msgs::msg::Path last_calculated_path_; 
     std::mutex path_mutex_;
-    std::atomic<bool> is_navigating_;
 
     float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
 
@@ -512,19 +512,6 @@ private:
         }
     }
     
-    void send_request(geometry_msgs::msg::Pose pose)
-    {
-        auto request = std::make_shared<mobile_manipulation_interfaces::srv::StopPose::Request>();
-        request->stop_pose = pose;
-        client_->async_send_request(request,
-            [this](rclcpp::Client<mobile_manipulation_interfaces::srv::StopPose>::SharedFuture future_response) 
-            {
-                auto response = future_response.get();  
-                if (response->success) RCLCPP_INFO(this->get_logger(), "Service executado com sucesso!");
-                else RCLCPP_WARN(this->get_logger(), "Falha ao executar service");
-            }
-        );
-    }
 
     bool get_storage_info_sync(const std::string &id, const geometry_msgs::msg::Pose &current_pose, 
         geometry_msgs::msg::Pose &pose_out, std::vector<double> &limits_out) 
@@ -603,10 +590,7 @@ private:
 
         if (feedback->recalculating_path)
         {
-            if (is_navigating_.load())
-            {
-                send_controller_goal(feedback->path);
-            }
+            send_controller_goal(feedback->path);        
         }
     }
 
@@ -647,10 +631,10 @@ private:
         goal_msg.path = target_path;
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SendGoalOptions();
+        
         send_goal_options.goal_response_callback = std::bind(&ServerNode::controller_goal_response_callback, this, std::placeholders::_1);
         send_goal_options.result_callback = std::bind(&ServerNode::controller_result_callback, this, std::placeholders::_1);
 
-        is_navigating_.store(true);
         this->controller_client->async_send_goal(goal_msg, send_goal_options);
         return true;
     }
@@ -664,33 +648,43 @@ private:
         }
         else
         {
+            // CORREÇÃO: Salva o handle atual como o "válido"
+            this->active_controller_goal_handle_ = goal_handle;
+            
             RCLCPP_INFO(this->get_logger(), "Goal CONTROLLER aceito, executando...");
         }
     }
 
     void controller_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::WrappedResult & result)
     {
-        is_navigating_.store(false);
+        // CORREÇÃO CRÍTICA:
+        // Verifica se o resultado recebido é do objetivo ATUAL.
+        // Se o ID for diferente, significa que é o fantasma de um objetivo antigo abortado.
+        if (this->active_controller_goal_handle_ && result.goal_id != this->active_controller_goal_handle_->get_goal_id())
+        {
+            RCLCPP_WARN(this->get_logger(), "Ignorando resultado de goal antigo (Preempção ocorrida).");
+            return; 
+        }
 
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
         {
-            
             {
                 std::lock_guard<std::mutex> lock(path_mutex_);
                 last_calculated_path_.poses.clear();
             }
             
-          
             path_state_ = TaskState::IDLE;
-            
             nav_state_ = TaskState::SUCCESS;
             RCLCPP_INFO(this->get_logger(), "Navegação concluída! Dados de caminho limpos.");
         }
         else
         {
-            RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER falhou/abortou");
+            RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER falhou/abortou (Falha Real)");
             nav_state_ = TaskState::FAILURE;
         }
+        
+        // Limpa o ponteiro
+        this->active_controller_goal_handle_.reset();
     }
 
     // --- Pick/Place Callbacks ---
