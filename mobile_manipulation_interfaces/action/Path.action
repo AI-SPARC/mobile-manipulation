@@ -3,7 +3,5 @@ geometry_msgs/Pose pose
 ---
 bool success
 ---
-# Feedback
 bool recalculating_path
-geometry_msgs/Pose stop_pose
 nav_msgs/Path path  
