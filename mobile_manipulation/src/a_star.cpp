@@ -189,6 +189,7 @@ private:
 
     std::mutex map_mutex_;
     std::mutex goal_mutex_;
+    std::mutex odom_mutex;
 
     std::vector<VertexDijkstra> path_points;
     std::vector<std::pair<float, float>> path_without_filter;
@@ -708,6 +709,7 @@ private:
     // Callbacks.
     void callback_odom(const nav_msgs::msg::Odometry::SharedPtr msg) 
     {
+        std::lock_guard<std::mutex> lock(odom_mutex);
         pose_x_ = msg->pose.pose.position.x;
         pose_y_ = msg->pose.pose.position.y;
         pose_z_ = 0.0;
@@ -903,9 +905,16 @@ private:
                 if (path_needs_calculation)
                 {
                     feedback->recalculating_path = true;
-                    goal_handle->publish_feedback(feedback); 
+                    goal_handle->publish_feedback(feedback);
+                    
+                    rclcpp::sleep_for(std::chrono::milliseconds(100)); 
+                    std::pair<float, float> current_robot_pose;
 
-                    std::pair<float, float> current_robot_pose = {pose_x_, pose_y_};
+                    {
+                        std::lock_guard<std::mutex> lock(odom_mutex);
+                        current_robot_pose = {pose_x_, pose_y_};
+                    }
+                    
                     std::pair<std::vector<std::pair<float, float>>, bool> a_star_result;
                     std::vector<std::pair<float, float>> shortestPath;
                     bool straight_line;
@@ -913,6 +922,7 @@ private:
                     
                     {
                         std::lock_guard<std::mutex> lock(map_mutex_);
+                        
                         a_star_result = run_a_star(current_robot_pose, current_goal_pose);
                         shortestPath = a_star_result.first;
                         straight_line = a_star_result.second;
