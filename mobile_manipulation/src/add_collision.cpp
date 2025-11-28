@@ -1,55 +1,37 @@
 #include <memory>
 #include <vector>
-#include <tuple>
 #include <cmath>
 #include <iostream>
 #include <functional>
-#include <chrono>
-#include <random>
 #include <unordered_set>
 #include <unordered_map>
 #include <fstream>
-#include <thread> 
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include "vision_msgs/msg/detection3_d_array.hpp"
-#include <tf2_ros/transform_listener.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include "sensor_msgs/msg/point_cloud2.hpp"
+#include <shape_msgs/msg/solid_primitive.hpp>
 #include "yaml-cpp/yaml.h"
-#include <moveit/move_group_interface/move_group_interface.hpp>
-#include <moveit/robot_state/robot_state.hpp>
-#include <moveit/robot_model_loader/robot_model_loader.hpp>
-#include <moveit_msgs/msg/move_it_error_codes.hpp>
-#include "trajectory_msgs/msg/joint_trajectory.hpp"
-#include "trajectory_msgs/msg/joint_trajectory_point.hpp"
+
+// MoveIt Headers Necessários (Apenas Scene Interface e Mensagens)
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/collision_object.hpp>
-#include <shape_msgs/msg/solid_primitive.hpp>
+
+// Serviço Customizado
 #include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
 
 using namespace std::chrono_literals;
 
 class AddCollision : public rclcpp::Node 
 {
-
 public:
     AddCollision()
-     : Node("add_colision_objects")
+     : Node("add_collision_objects")
     {
         this->declare_parameter<std::string>("yaml_file", "");
-        this->declare_parameter<std::string>("move_group", "panda_arm");
-
         std::string labels_path = this->get_parameter("yaml_file").as_string();
-        move_group = this->get_parameter("move_group").as_string();
 
-        // CORREÇÃO 1: Nó e Executor separados para o MoveIt (Evita travar o callback)
-        moveit_node_ = std::make_shared<rclcpp::Node>("add_collision_worker");
-        executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
-        executor_->add_node(moveit_node_);
-        executor_thread_ = std::thread([this]() { this->executor_->spin(); });
+        load_labels_from_yaml(labels_path);
 
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             "/boxes_detection_array", 10,
@@ -60,55 +42,40 @@ public:
             std::bind(&AddCollision::handleStopService, this, std::placeholders::_1, std::placeholders::_2));
 
         init_timer_ = this->create_wall_timer(
-            std::chrono::seconds(1),
-            std::bind(&AddCollision::initMoveGroup, this));
-        
-        load_labels_from_yaml(labels_path);
+            std::chrono::seconds(2), 
+            [this]() {
+                this->add_ground_plane();
+                this->init_timer_->cancel(); 
+            });
+            
+        RCLCPP_INFO(this->get_logger(), "Nó de Colisão Iniciado (MoveGroupInterface removido).");
     }   
 
-    ~AddCollision()
-    {
-        executor_->cancel();
-        if (executor_thread_.joinable()) executor_thread_.join();
-    }
-
 private:
-
     struct LabelRule 
     {
         std::string label;
         bool is_prefix;
     };
 
-    // MoveIt
-    rclcpp::Node::SharedPtr moveit_node_;
-    rclcpp::Executor::SharedPtr executor_;
-    std::thread executor_thread_;
-
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
     rclcpp::Service<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr service_;
+    rclcpp::TimerBase::SharedPtr init_timer_;
     
     moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
-    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
-    rclcpp::TimerBase::SharedPtr init_timer_;
-    
-    std::string id_to_remove = "", move_group, stop_moving_obstacle;
+    std::string stop_moving_obstacle = "";
     std::unordered_set<std::string> added;
-    
     std::unordered_map<std::string, geometry_msgs::msg::Pose> last_known_poses_;
-
     std::vector<LabelRule> authorized_labels_;
     std::vector<LabelRule> unauthorized_labels_;
-
     bool activate_movement = true;
-
 
     void load_labels_from_yaml(const std::string& file_path)
     {
         std::ifstream f(file_path.c_str());
         if (!f.good()) {
-            RCLCPP_ERROR(this->get_logger(), "YAML não encontrado: %s", file_path.c_str());
+            RCLCPP_WARN(this->get_logger(), "YAML não encontrado ou vazio: %s", file_path.c_str());
             return;
         }
         try {
@@ -123,20 +90,7 @@ private:
             if (config["authorized_labels"]) load_rules(config["authorized_labels"], authorized_labels_);
             if (config["unauthorized_labels"]) load_rules(config["unauthorized_labels"], unauthorized_labels_);
         } catch (const YAML::Exception& e) {
-            RCLCPP_ERROR(this->get_logger(), "Erro YAML: %s", e.what());
-        }
-    }
-
-    void initMoveGroup() 
-    {
-        try {
-            move_group_arm = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
-                moveit_node_, move_group);
-            add_ground_plane();
-            RCLCPP_INFO(this->get_logger(), "MoveGroup inicializado.");
-            init_timer_->cancel();  
-        } catch (const std::exception &e) {
-            RCLCPP_WARN(this->get_logger(), "Erro init MoveGroup: %s", e.what());
+            RCLCPP_ERROR(this->get_logger(), "Erro parsing YAML: %s", e.what());
         }
     }
 
@@ -145,15 +99,20 @@ private:
         moveit_msgs::msg::CollisionObject ground;
         ground.id = "ground_plane";
         ground.header.frame_id = "world";
+        
         shape_msgs::msg::SolidPrimitive primitive;
         primitive.type = primitive.BOX;
-        primitive.dimensions = {10.0, 10.0, 0.01}; 
+        primitive.dimensions = {20.0, 20.0, 0.01}; 
+        
         geometry_msgs::msg::Pose pose;
         pose.orientation.w = 1.0;
+        
         ground.primitives.push_back(primitive);
         ground.primitive_poses.push_back(pose);
         ground.operation = ground.ADD;
+        
         planning_scene_interface.applyCollisionObjects({ground});
+        RCLCPP_INFO(this->get_logger(), "Ground Plane adicionado à cena.");
     }
 
     bool is_significant_change(const std::string& id, const geometry_msgs::msg::Pose& new_pose)
@@ -168,9 +127,7 @@ private:
             std::pow(new_pose.position.z - old_pose.position.z, 2)
         );
 
-        if (dist > 0.01) return true; 
-
-        return false;
+        return (dist > 0.01); 
     }
 
     void add_collision_box(const std::string &id, const std::array<double, 3> &dimensions, const geometry_msgs::msg::Pose &pose)
@@ -193,6 +150,8 @@ private:
         
         added.insert(id);
         last_known_poses_[id] = pose; 
+        
+        RCLCPP_INFO(this->get_logger(), "Objeto adicionado: %s", id.c_str());
     }
 
     void move_collision_box(const std::string &id, const geometry_msgs::msg::Pose &pose)
@@ -237,11 +196,10 @@ private:
             if (!is_authorized(object_id)) continue;
 
             geometry_msgs::msg::Pose pose = det.bbox.center;
-            pose.position.z += det.bbox.size.z / 2;
+            pose.position.z += det.bbox.size.z / 2.0; 
 
             std::array<double, 3> size_array = {det.bbox.size.x, det.bbox.size.y, det.bbox.size.z};
 
-            // Lógica de Atualização
             if (added.find(object_id) == added.end()) 
             {
                 add_collision_box(object_id, size_array, pose);
@@ -250,10 +208,7 @@ private:
             {
                 if (object_id == stop_moving_obstacle)
                 {
-                    if (activate_movement) 
-                    {
-                        move_collision_box(object_id, pose);
-                    }
+                    if (activate_movement) move_collision_box(object_id, pose);
                 }
                 else 
                 {
@@ -269,7 +224,7 @@ private:
     {
         stop_moving_obstacle = request->obstacle_id;
         activate_movement = request->activate_movement;
-        RCLCPP_INFO(this->get_logger(), "Controle de movimento: ID '%s' -> Ativo: %d", 
+        RCLCPP_INFO(this->get_logger(), "Serviço Move: ID '%s' -> Ativo: %d", 
             stop_moving_obstacle.c_str(), activate_movement);
         response->success = true;
     }

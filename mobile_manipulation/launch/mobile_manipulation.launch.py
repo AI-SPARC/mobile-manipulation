@@ -279,7 +279,9 @@ def generate_launch_description():
             moveit_config.planning_scene_monitor,
             {'yaml_file': labels_yaml_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
-            {'move_group': "panda_arm"},
+        ],
+        remappings=[
+            ('/boxes_detection_array', '/bbox_3d_with_labels')
         ],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -325,7 +327,7 @@ def generate_launch_description():
         [
             ros2_control_hardware_type,
             use_sim_time,  # Declare use_sim_time argument here
-            # rviz_node,
+            rviz_node,
             # world2robot_tf_node,
             # hand2camera_tf_node,
             robot_state_publisher,
