@@ -190,17 +190,14 @@ private:
     std::mutex map_mutex_;
     std::mutex goal_mutex_;
 
-    // Variáveis que guardam o caminho atual
-    // path_points: Tem orientação (usado para enviar resultado e visualização Path)
     std::vector<VertexDijkstra> path_points;
-    // path_without_filter: Apenas X,Y (usado para verificar colisão e visualização PointCloud)
     std::vector<std::pair<float, float>> path_without_filter;
 
     std::unordered_set<std::pair<float, float>, PairHash> obstaclesVertices;
 
     std::string yaml_file;
 
-    float pose_x_ = 3.24, pose_y_ = 8.22, pose_z_ = 0.0;
+    float pose_x_ = 0.0, pose_y_ = 0.0, pose_z_ = 0.0;
     float distanceToObstacle_, security_distance = 0.5;
     int decimals = 0, iterations_before_verification = 10;
 
@@ -597,7 +594,7 @@ private:
                 float px = start_x + ux * traveled;
                 float py = start_y + uy * traveled;
                 
-                path_without_filter.push_back(std::make_pair(px, py));
+                path_without_filter.push_back(std::make_pair(round_to_multiple(px, distanceToObstacle_, decimals), round_to_multiple(py, distanceToObstacle_, decimals)));
                 traveled += distanceToObstacle_;
             }
         }
@@ -782,7 +779,7 @@ private:
         std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
         std::pair<float, float> start_pose = {pose_x_, pose_y_};
         
-        rclcpp::Rate loop_rate(2.0);
+        rclcpp::Rate loop_rate(20.0);
         bool path_needs_calculation = false;
 
         try {
@@ -889,7 +886,7 @@ private:
                 if (!path_needs_calculation)
                 {
                     std::lock_guard<std::mutex> lock(map_mutex_); 
-                    
+
                     for(size_t i = 0; i < path_without_filter.size(); ++i)
                     {
                         if(obstaclesVertices.find(path_without_filter[i]) != obstaclesVertices.end())
