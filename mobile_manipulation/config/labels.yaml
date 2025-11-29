@@ -13,6 +13,8 @@ authorized_labels:
   - redbox_
   - blackbox_
   - bluebox_
+  - willowbench_
+  - wall_
 
 unauthorized_labels:
   - camera
