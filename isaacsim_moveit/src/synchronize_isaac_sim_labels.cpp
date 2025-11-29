@@ -90,7 +90,7 @@ private:
         while (std::regex_search(search_start, input.cend(), match, pair_regex))
         {
             std::string id = match[1].str();
-            std::string last_word = match[3].str(); // última palavra capturada
+            std::string last_word = match[3].str();
 
             result[id] = last_word;
             search_start = match.suffix().first;
