@@ -37,6 +37,29 @@ find_package(message_filters REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
 
+add_executable(d_star src/d_star.cpp)
+
+ament_target_dependencies(d_star 
+  trajectory_msgs 
+  rclcpp 
+  nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  std_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+  mobile_manipulation_interfaces
+)
 
 add_executable(a_star src/a_star.cpp)
 
@@ -110,6 +133,15 @@ ament_target_dependencies(obstacle_graph_with_occupancy_grid
   mobile_manipulation_interfaces
 )
 
+target_link_libraries(d_star
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  yaml-cpp
+)
+
 target_link_libraries(a_star
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -139,6 +171,7 @@ target_link_libraries(obstacle_graph_with_occupancy_grid
 
 
 install(TARGETS
+  d_star
   a_star
   controller
   obstacle_graph_with_occupancy_grid
@@ -147,12 +180,9 @@ install(TARGETS
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
+  
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
+
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()

@@ -48,7 +48,6 @@ public:
                 this->init_timer_->cancel(); 
             });
             
-        RCLCPP_INFO(this->get_logger(), "Nó de Colisão Iniciado (MoveGroupInterface removido).");
     }   
 
 private:

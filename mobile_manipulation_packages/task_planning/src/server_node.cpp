@@ -311,7 +311,12 @@ private:
             });
         };
         factory.registerBuilder(
-            BT::TreeNodeManifest{BT::NodeType::ACTION, "ComputePath", { BT::InputPort<geometry_msgs::msg::Pose>("target") }}, 
+            BT::TreeNodeManifest{
+                BT::NodeType::ACTION, 
+                "ComputePath", 
+                { BT::InputPort<geometry_msgs::msg::Pose>("target") }, 
+                {} 
+            },
             builder_compute
         );
 
@@ -375,7 +380,12 @@ private:
             });
         };
         factory.registerBuilder(
-            BT::TreeNodeManifest{BT::NodeType::ACTION, "PickObject", { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::string>("id") }}, 
+            BT::TreeNodeManifest{
+                BT::NodeType::ACTION, 
+                "PickObject", 
+                { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::string>("id") }, 
+                {} 
+            },
             builder_pick
         );
 
@@ -397,7 +407,12 @@ private:
             });
         };
         factory.registerBuilder(
-            BT::TreeNodeManifest{BT::NodeType::ACTION, "PlaceObject", { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::vector<double>>("limits") }}, 
+            BT::TreeNodeManifest{
+                BT::NodeType::ACTION, 
+                "PlaceObject", 
+                { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::vector<double>>("limits") }, 
+                {} 
+            },
             builder_place
         );
 

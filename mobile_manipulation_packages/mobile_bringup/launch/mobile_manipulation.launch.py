@@ -1,27 +1,12 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
-from moveit_configs_utils import MoveItConfigsBuilder
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument # pyright: ignore[reportMissingImports]
+from launch.substitutions import LaunchConfiguration # pyright: ignore[reportMissingImports]
+from launch_ros.actions import Node # pyright: ignore[reportMissingImports]
+from ament_index_python.packages import get_package_share_directory # pyright: ignore[reportMissingImports]
+from moveit_configs_utils import MoveItConfigsBuilder # pyright: ignore[reportMissingImports]
+from launch.actions import IncludeLaunchDescription # pyright: ignore[reportMissingImports]
+from launch.launch_description_sources import PythonLaunchDescriptionSource # pyright: ignore[reportMissingImports]
 from os import path
 import yaml
 
@@ -221,6 +206,20 @@ def generate_launch_description():
         ],
         arguments=["--ros-args", "--log-level", "info"],
     )
+    
+    d_star = Node(
+        package="navigation",
+        executable="d_star",
+        name="d_star",
+        output="screen",
+        parameters=[
+            {'path_resolution': 0.05},
+            {'security_distance': 0.45},
+            {'iterations_before_verification': 20},
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
 
     controller = Node(
         package="navigation",
@@ -330,7 +329,8 @@ def generate_launch_description():
             simple_manipulation_node,
             add_collision,
             server_node,
-            a_star,
+            # a_star,
+            d_star,
             controller,
             get_storage_info,
             obstacle_graph_with_occupancy_grid,
