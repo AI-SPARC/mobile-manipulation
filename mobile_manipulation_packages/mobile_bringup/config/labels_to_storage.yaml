@@ -1,0 +1,11 @@
+greenbox:
+  - storage: "storage_01"
+
+redbox:
+  - storage: "storage_02"
+
+bluebox:
+  - storage: "storage_03"
+
+blackbox:
+  - storage: "storage_04"

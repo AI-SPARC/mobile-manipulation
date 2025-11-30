@@ -779,7 +779,13 @@ private:
         path_without_filter.clear();
 
         std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
-        std::pair<float, float> start_pose = {pose_x_, pose_y_};
+        std::pair<float, float> start_pose;
+        
+        {
+            std::lock_guard<std::mutex> lock(odom_mutex);
+            start_pose = {pose_x_, pose_y_};
+        }
+        
         
         rclcpp::Rate loop_rate(20.0);
         bool path_needs_calculation = false;

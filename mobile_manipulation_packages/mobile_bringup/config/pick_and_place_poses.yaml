@@ -1,0 +1,24 @@
+cardbox:
+  - location1:
+      position: [0.0, 0.0, 0.105]
+      orientation: [1.57, -0.42, 0.0]
+
+greenbox:
+  - location1:
+      position: [0.0, 0.0, 0.11]
+      orientation: [3.14, 0.0, 0.785]
+  
+redbox:
+  - location1:
+      position: [0.0, 0.0, 0.11]
+      orientation: [3.14, 0.0, 0.785]
+  
+bluebox:
+  - location1:
+      position: [0.0, 0.0, 0.11]
+      orientation: [3.14, 0.0, 0.785]
+
+blackbox:
+  - location1:
+      position: [0.0, 0.0, 0.11]
+      orientation: [3.14, 0.0, 0.785]
