@@ -11,7 +11,7 @@
              <IsRobotNear target="{target_pose}" threshold="1.0"/>
              
              <ParallelAny>
-                <ComputePath target="{target_pose}"/>
+                <ComputePath planner="a_star" target="{target_pose}"/>
                 <NavigateTo/> 
              </ParallelAny>
           </Fallback>
@@ -33,7 +33,7 @@
             <IsRobotNear target="{storage_pose}" threshold="0.50"/>
             
             <ParallelAny>
-                <ComputePath target="{storage_pose}"/>
+                <ComputePath planner="a_star" target="{storage_pose}"/>
                 <NavigateTo/> 
             </ParallelAny>
           </Fallback>

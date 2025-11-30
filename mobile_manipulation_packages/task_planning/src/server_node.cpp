@@ -314,7 +314,10 @@ private:
             BT::TreeNodeManifest{
                 BT::NodeType::ACTION, 
                 "ComputePath", 
-                { BT::InputPort<geometry_msgs::msg::Pose>("target") }, 
+                { 
+                    BT::InputPort<geometry_msgs::msg::Pose>("target"),
+                    BT::InputPort<std::string>("planner") 
+                }, 
                 {} 
             },
             builder_compute
