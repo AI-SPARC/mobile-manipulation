@@ -9,6 +9,8 @@
 #include <thread>
 #include <unordered_map>
 #include <atomic>
+#include <deque>
+#include <mutex>
 
 #include <yaml-cpp/yaml.h>
 #include "rclcpp/rclcpp.hpp"
@@ -58,6 +60,10 @@ public:
         
         executor_->add_node(moveit_node_);
         executor_thread_ = std::thread([this]() { this->executor_->spin(); });
+
+        subscription_ = this->create_subscription<std_msgs::msg::Float32>(
+            "contact_sensor", 10, std::bind(&SimpleManipulation::topic_callback, this, std::placeholders::_1));
+
       
         this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::PickObject>(
             this, 
@@ -109,6 +115,8 @@ private:
         geometry_msgs::msg::Pose pose;
         geometry_msgs::msg::Vector3 size;
     };
+    //Subscribers.
+    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr subscription_;
 
     //Publishers.
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
@@ -124,6 +132,7 @@ private:
     //Timer.
     rclcpp::TimerBase::SharedPtr init_timer_;
 
+    std::mutex contact_sensor_mutex;
    
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
@@ -140,6 +149,8 @@ private:
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
     std::atomic<bool> moveit_ready_{false};
+
+    std::deque<float> contact_sensor_data;
 
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
@@ -450,7 +461,7 @@ private:
         return task_success;
     }
 
-    void calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose, bool pick)
+    bool calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose, bool pick)
     {
         std::string id = received_id;
         size_t pos = received_id.find('_');
@@ -462,7 +473,7 @@ private:
         if (pick_and_place_poses.find(id) == pick_and_place_poses.end()) 
         {
             RCLCPP_WARN(this->get_logger(), "ID '%s' não encontrado no YAML.", id.c_str());
-            return;
+            return false;
         }
 
         const auto &poses = pick_and_place_poses[id];
@@ -544,6 +555,32 @@ private:
                     close_gripper();
                     
                     rclcpp::sleep_for(std::chrono::milliseconds(500));
+                    bool picked = false;
+                    int contador = 0;
+
+                    {
+                        std::lock_guard<std::mutex> lock(contact_sensor_mutex);
+
+                        for(size_t i = 0; i < contact_sensor_data.size(); i++)
+                        {
+                            if(contact_sensor_data[i] > 1.5)
+                            {
+                                contador++;
+                            }
+
+                        }
+
+                        if(contador >= 9)
+                        {
+                            picked = true;
+                        }
+                    }
+                    
+                    if(picked == false)
+                    {
+                        ready();
+                        return false;
+                    }
 
                     set_collision_allowance(received_id, "ground_plane", true);
 
@@ -576,7 +613,7 @@ private:
 
         
 
-        
+        return true;
     }
     
     void set_collision_allowance(const std::string& id1, const std::string& id2, bool allow_collision)
@@ -738,14 +775,29 @@ private:
             open_gripper();
         }
 
-        calculate_global_pose(goal->obstacle_id, goal->pose, goal->pick);
+        bool action_sucess = calculate_global_pose(goal->obstacle_id, goal->pose, goal->pick);
 
         if (rclcpp::ok()) 
         {
-            result->success = true;
+            result->success = action_sucess;
             goal_handle->succeed(result);
             RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso.");
         }
+    }
+
+    // Callback
+
+    void topic_callback(const std_msgs::msg::Float32 & msg)
+    {
+        std::lock_guard<std::mutex> lock(contact_sensor_mutex);
+
+        if (contact_sensor_data.size() > 10) 
+        {
+            contact_sensor_data.pop_front();
+        }
+
+
+        contact_sensor_data.push_back(msg.data);
     }
 
 };

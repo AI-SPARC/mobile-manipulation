@@ -127,7 +127,7 @@ private:
             std::pow(new_pose.position.z - old_pose.position.z, 2)
         );
 
-        return (dist > 0.01); 
+        return (dist > 0.005); 
     }
 
     void add_collision_box(const std::string &id, const std::array<double, 3> &dimensions, const geometry_msgs::msg::Pose &pose)

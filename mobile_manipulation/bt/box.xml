@@ -5,50 +5,52 @@
 
       <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
 
-      <Fallback name="NearOrNavigate">
-          <Sequence name="PickIfNear">
-             <IsRobotNear target="{target_pose}" threshold="0.50"/>
-             <PickObject pose="{target_pose}" id="{target_id}"/>
-          </Sequence>
-
-          <Sequence name="NavigateThenPick">
+      <Sequence name="ApproachAndPick">
+          
+          <Fallback name="EnsureProximity">
+             <IsRobotNear target="{target_pose}" threshold="1.0"/>
+             
              <ParallelAny>
                 <ComputePath target="{target_pose}"/>
                 <NavigateTo/> 
              </ParallelAny>
-             <PickObject pose="{target_pose}" id="{target_id}"/>
-          </Sequence>
-      </Fallback>
+          </Fallback>
+
+          <PickObject pose="{target_pose}" id="{target_id}"/>
+
+      </Sequence>
 
     </Sequence>
   </BehaviorTree>
 
- <BehaviorTree ID="PlaceRoutine">
+
+  <BehaviorTree ID="PlaceRoutine">
     <Sequence name="PlaceSequence">
 
-      <Fallback name="NearOrNavigateToStorage">
-        
-        <Sequence name="PlaceIfNear">
-          <IsRobotNear target="{storage_pose}" threshold="0.50"/>
-          <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
-        </Sequence>
+      <Sequence name="ApproachAndPlace">
+          
+          <Fallback name="EnsureProximityStorage">
+            <IsRobotNear target="{storage_pose}" threshold="0.50"/>
+            
+            <ParallelAny>
+                <ComputePath target="{storage_pose}"/>
+                <NavigateTo/> 
+            </ParallelAny>
+          </Fallback>
 
-        <Sequence name="NavigateThenPlace">
-          <ParallelAny>
-              <ComputePath target="{storage_pose}"/>
-              <NavigateTo/> 
-          </ParallelAny>
           <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
-        </Sequence>
-      </Fallback>
+
+      </Sequence>
 
     </Sequence>
   </BehaviorTree>
 
- <BehaviorTree ID="MainTree">
+
+  <BehaviorTree ID="MainTree">
     <Fallback name="MissionOrRecovery">
       
       <Sequence name="FullMission">
+        
         <SubTree ID="AcquireObject" target_id="{target_id}" target_pose="{target_pose}"/>
         
         <GetStorageInfo object_id="{target_id}" 
@@ -56,7 +58,8 @@
                         storage_limits="{storage_limits}"/>
 
         <SubTree ID="PlaceRoutine" storage_pose="{storage_pose}" storage_limits="{storage_limits}"/>
-    </Sequence>
+    
+      </Sequence>
 
     </Fallback>
   </BehaviorTree>
