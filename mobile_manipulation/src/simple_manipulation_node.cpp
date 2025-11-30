@@ -346,6 +346,52 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Falha ao fechar o gripper.");
         }
     }
+
+    bool attempt_cartesian_move(const geometry_msgs::msg::Pose &target_pose, float maxVelocity, bool avoid_collisions)
+    {
+        const int MAX_CARTESIAN_ATTEMPTS = 5;
+        const double MIN_CARTESIAN_FRACTION = 0.99; 
+        const double eef_step = 0.01; 
+
+
+        std::vector<geometry_msgs::msg::Pose> waypoints;
+        waypoints.push_back(target_pose);
+
+        moveit_msgs::msg::RobotTrajectory trajectory;
+
+        move_group_arm->setStartStateToCurrentState();
+        move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
+        move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
+
+        for (int cart_attempt = 1; cart_attempt <= MAX_CARTESIAN_ATTEMPTS; ++cart_attempt)
+        {
+            double fraction = move_group_arm->computeCartesianPath(waypoints, eef_step, trajectory, avoid_collisions);
+
+            if (fraction >= MIN_CARTESIAN_FRACTION)
+            {
+                RCLCPP_INFO(this->get_logger(), "Planejamento Cartesiano bem-sucedido (%.1f%%). Executando...", fraction * 100.0);
+                
+                auto exec_result = move_group_arm->execute(trajectory);
+
+                if (exec_result == moveit::core::MoveItErrorCode::SUCCESS)
+                {
+                    return true; 
+                }
+                else
+                {
+                    RCLCPP_WARN(this->get_logger(), "Execução Cartesiana falhou (erro no controlador). Tentando novamente...");
+                }
+            }
+            else
+            {
+                RCLCPP_WARN(this->get_logger(), "Planejamento Cartesiano incompleto (fração: %.2f). Tentativa %d/%d", 
+                    fraction, cart_attempt, MAX_CARTESIAN_ATTEMPTS);
+            }
+        }
+
+        RCLCPP_ERROR(this->get_logger(), "Falha no planejamento Cartesiano após %d tentativas.", MAX_CARTESIAN_ATTEMPTS);
+        return false; 
+    }
        
     bool positions_for_arm(const geometry_msgs::msg::Pose &target_pose, float maxVelocity, bool computeCartesian)
     {
@@ -356,9 +402,6 @@ private:
         }
 
         const int MAX_PLANNING_CYCLES = 100;
-        const int MAX_CARTESIAN_ATTEMPTS = 5;
-        const double MIN_CARTESIAN_FRACTION = 0.99;
-
         bool task_success = false; 
 
         for (int cycle = 1; cycle <= MAX_PLANNING_CYCLES; ++cycle)
@@ -367,52 +410,15 @@ private:
 
             if (computeCartesian)
             {
-                RCLCPP_INFO(this->get_logger(), "Tentando planejamento Cartesiano...");
-
-                std::vector<geometry_msgs::msg::Pose> waypoints;
-                waypoints.push_back(target_pose);
-
-                moveit_msgs::msg::RobotTrajectory trajectory;
-                const double eef_step = 0.01;
-
-                move_group_arm->setStartStateToCurrentState();
-                move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
-                move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
-
-                for (int cart_attempt = 1; cart_attempt <= MAX_CARTESIAN_ATTEMPTS; ++cart_attempt)
+                if (attempt_cartesian_move(target_pose, maxVelocity, true))
                 {
-                    double fraction = move_group_arm->computeCartesianPath(waypoints, eef_step, trajectory);
-
-                    if (fraction >= MIN_CARTESIAN_FRACTION)
-                    {
-                        RCLCPP_INFO(this->get_logger(), "Planejamento Cartesiano bem-sucedido (%.1f%%). Executando...", fraction * 100.0);
-                        auto exec_result = move_group_arm->execute(trajectory);
-
-                        if (exec_result == moveit::core::MoveItErrorCode::SUCCESS)
-                        {
-                            task_success = true;
-                            break;
-                        }
-                        else
-                        {
-                            RCLCPP_WARN(this->get_logger(), "Execução Cartesiana falhou. Tentando novamente...");
-                        }
-                    }
-                    else
-                    {
-                        RCLCPP_WARN(this->get_logger(), "Planejamento Cartesiano falhou (fração: %.2f). Tentativa %d/%d", fraction, cart_attempt, MAX_CARTESIAN_ATTEMPTS);
-                    }
-                }
-
-                if (!task_success)
-                {
-                    RCLCPP_ERROR(this->get_logger(), "Falha no planejamento Cartesiano após %d tentativas. Recorrendo ao planejamento normal.", MAX_CARTESIAN_ATTEMPTS);
+                    task_success = true;
                 }
             }
 
             if (task_success)
             {
-                break;
+                break; 
             }
 
             RCLCPP_INFO(this->get_logger(), "Tentando planejamento normal (free-space)...");
@@ -427,15 +433,13 @@ private:
             move_group_arm->setGoalPositionTolerance(0.0001);
             move_group_arm->setGoalOrientationTolerance(0.0001);
 
-
-    
             moveit::planning_interface::MoveGroupInterface::Plan my_plan;
             auto plan_result = move_group_arm->plan(my_plan);
 
             if (plan_result != moveit::core::MoveItErrorCode::SUCCESS)
             {
                 RCLCPP_WARN(this->get_logger(), "Planejamento normal falhou nesta tentativa.");
-                continue;
+                continue; 
             }
 
             RCLCPP_INFO(this->get_logger(), "Planejamento normal bem-sucedido. Executando...");
@@ -444,7 +448,7 @@ private:
             if (exec_result != moveit::core::MoveItErrorCode::SUCCESS)
             {
                 RCLCPP_WARN(this->get_logger(), "Execução normal falhou nesta tentativa.");
-                continue;
+                continue; 
             }
 
             RCLCPP_INFO(this->get_logger(), "Execução normal bem-sucedida.");
@@ -452,7 +456,6 @@ private:
             break;
         }
 
-        
         if (!task_success)
         {
             RCLCPP_ERROR(this->get_logger(), "Falha no planejamento e execução após %d ciclos.", MAX_PLANNING_CYCLES);
@@ -460,6 +463,7 @@ private:
 
         return task_success;
     }
+
 
     bool calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose, bool pick)
     {
@@ -582,7 +586,10 @@ private:
                         return false;
                     }
 
-                    set_collision_allowance(received_id, "ground_plane", true);
+                    target_pose_world.position.z += 0.1;
+                    attempt_cartesian_move(target_pose_world, 0.5, false);
+
+                    // set_collision_allowance(received_id, "ground_plane", true);
 
                     rclcpp::sleep_for(std::chrono::milliseconds(200));
 
