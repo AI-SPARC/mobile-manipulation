@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(mobile_manipulation)
+project(navigation)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -37,54 +37,6 @@ find_package(message_filters REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
 
-add_executable(add_collision src/add_collision.cpp)
-
-ament_target_dependencies(add_collision 
-  trajectory_msgs 
-  rclcpp 
-  nav_msgs 
-  geometry_msgs 
-  PCL 
-  pcl_conversions 
-  sensor_msgs 
-  tf2_geometry_msgs 
-  tf2 
-  tf2_ros 
-  tf2_sensor_msgs 
-  tf2_ros 
-  tf2_eigen 
-  PCL
-  vision_msgs
-  std_msgs
-  moveit_ros_planning_interface 
-  Eigen3
-  mobile_manipulation_interfaces
-)
-
-add_executable(server_node src/server_node.cpp)
-
-ament_target_dependencies(server_node 
-  trajectory_msgs 
-  rclcpp 
-  nav_msgs 
-  geometry_msgs 
-  PCL 
-  pcl_conversions 
-  sensor_msgs 
-  tf2_geometry_msgs 
-  tf2 
-  tf2_ros 
-  tf2_sensor_msgs 
-  tf2_ros 
-  tf2_eigen 
-  PCL
-  vision_msgs
-  std_msgs
-  moveit_ros_planning_interface 
-  Eigen3
-  behaviortree_cpp
-  mobile_manipulation_interfaces
-)
 
 add_executable(a_star src/a_star.cpp)
 
@@ -134,54 +86,6 @@ ament_target_dependencies(controller
   mobile_manipulation_interfaces
 )
 
-add_executable(simple_manipulation_node src/simple_manipulation_node.cpp)
-
-ament_target_dependencies(simple_manipulation_node 
-  trajectory_msgs 
-  rclcpp 
-  nav_msgs 
-  geometry_msgs 
-  PCL 
-  pcl_conversions 
-  sensor_msgs 
-  tf2_geometry_msgs 
-  tf2 
-  tf2_ros 
-  tf2_sensor_msgs 
-  tf2_ros 
-  tf2_eigen 
-  PCL
-  vision_msgs
-  std_msgs
-  moveit_ros_planning_interface 
-  Eigen3
-  mobile_manipulation_interfaces
-)
-
-add_executable(get_storage_info src/get_storage_info.cpp)
-
-ament_target_dependencies(get_storage_info 
-  trajectory_msgs 
-  rclcpp 
-  nav_msgs 
-  geometry_msgs 
-  PCL 
-  pcl_conversions 
-  sensor_msgs 
-  tf2_geometry_msgs 
-  tf2 
-  tf2_ros 
-  tf2_sensor_msgs 
-  tf2_ros 
-  tf2_eigen 
-  PCL
-  vision_msgs
-  std_msgs
-  moveit_ros_planning_interface 
-  Eigen3
-  mobile_manipulation_interfaces
-)
-
 add_executable(obstacle_graph_with_occupancy_grid src/obstacle_graph_with_occupancy_grid.cpp)
 
 ament_target_dependencies(obstacle_graph_with_occupancy_grid 
@@ -206,26 +110,6 @@ ament_target_dependencies(obstacle_graph_with_occupancy_grid
   mobile_manipulation_interfaces
 )
 
-target_link_libraries(add_collision
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
-
-
-target_link_libraries(server_node
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  yaml-cpp
-)
-
-include_directories(
-  ${OpenCV_INCLUDE_DIRS}
-)
 target_link_libraries(a_star
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -244,24 +128,6 @@ target_link_libraries(controller
   yaml-cpp
 )
 
-target_link_libraries(simple_manipulation_node
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBS}
-  yaml-cpp
-)
-
-target_link_libraries(get_storage_info
-  ${rclcpp_LIBRARIES}
-  ${std_msgs_LIBRARIES}
-  ${GLEW_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBS}
-  yaml-cpp
-)
-
 target_link_libraries(obstacle_graph_with_occupancy_grid
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -271,21 +137,10 @@ target_link_libraries(obstacle_graph_with_occupancy_grid
   yaml-cpp
 )
 
-install(DIRECTORY
-  launch
-  config
-  bt
-  maps
-  DESTINATION share/${PROJECT_NAME}
-)
 
 install(TARGETS
-  add_collision
-  server_node
   a_star
   controller
-  simple_manipulation_node
-  get_storage_info
   obstacle_graph_with_occupancy_grid
   DESTINATION lib/${PROJECT_NAME}
 )
