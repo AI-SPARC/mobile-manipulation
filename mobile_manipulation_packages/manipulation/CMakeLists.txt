@@ -85,6 +85,30 @@ ament_target_dependencies(simple_manipulation_node
   mobile_manipulation_interfaces
 )
 
+add_executable(is_gripper_holding src/is_gripper_holding.cpp)
+
+ament_target_dependencies(is_gripper_holding 
+  trajectory_msgs 
+  rclcpp 
+  nav_msgs 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  std_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+  mobile_manipulation_interfaces
+)
+
 target_link_libraries(add_collision
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
@@ -102,9 +126,19 @@ target_link_libraries(simple_manipulation_node
   yaml-cpp
 )
 
+target_link_libraries(is_gripper_holding
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  yaml-cpp
+)
+
 install(TARGETS
   add_collision
   simple_manipulation_node
+  is_gripper_holding
   DESTINATION lib/${PROJECT_NAME}
 )
 
