@@ -12,7 +12,13 @@
                 <NavigateTo/> 
              </Parallel>
           </Fallback>
-          <PickObject pose="{target_pose}" id="{target_id}"/>
+          
+          <RetryUntilSuccessful num_attempts="-1">
+            <Sequence name="AttemptPickAndCheck">
+                <PickObject pose="{target_pose}" id="{target_id}"/>
+                <IsGripperHoldingObject/>
+            </Sequence>
+          </RetryUntilSuccessful>
       </Sequence>
     </Sequence>
   </BehaviorTree>

@@ -9,7 +9,6 @@
 #include <thread>
 #include <unordered_map>
 #include <atomic>
-#include <deque>
 #include <mutex>
 
 #include <manipulation/SimpleManipulation.hpp>
@@ -45,9 +44,6 @@ SimpleManipulation::SimpleManipulation()
     
     executor_->add_node(moveit_node_);
     executor_thread_ = std::thread([this]() { this->executor_->spin(); });
-
-    subscription_ = this->create_subscription<std_msgs::msg::Float32>(
-        "contact_sensor", 10, std::bind(&SimpleManipulation::topic_callback, this, std::placeholders::_1));
 
     this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::PickObject>(
         this, 
@@ -489,33 +485,7 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(500));
                 
-                bool picked = false;
-                int contador = 0;
-
-                {
-                    std::lock_guard<std::mutex> lock(contact_sensor_mutex);
-
-                    for(size_t i = 0; i < contact_sensor_data.size(); i++)
-                    {
-                        if(contact_sensor_data[i] > 0.8)
-                        {
-                            contador++;
-                        }
-
-                    }
-
-                    if(contador >= 9)
-                    {
-                        picked = true;
-                    }
-                }
-                
-                if(picked == false)
-                {
-                    ready();
-                    return false;
-                }
-
+            
                 target_pose_world.position.z += 0.1;
                 attempt_cartesian_move(target_pose_world, 0.5, false);
 
@@ -554,10 +524,6 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
 
         
     }
-
-    
-
-    
 
     return true;
 }
@@ -729,19 +695,5 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
     }
 }
 
-// Callback
-
-void SimpleManipulation::topic_callback(const std_msgs::msg::Float32 & msg)
-{
-    std::lock_guard<std::mutex> lock(contact_sensor_mutex);
-
-    if (contact_sensor_data.size() > 10) 
-    {
-        contact_sensor_data.pop_front();
-    }
-
-
-    contact_sensor_data.push_back(msg.data);
-}
 
 } // namespace manipulation
