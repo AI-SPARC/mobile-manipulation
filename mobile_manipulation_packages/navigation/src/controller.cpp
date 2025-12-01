@@ -33,7 +33,7 @@ public:
         linear_speed_ = 0.5;
         angular_speed_ = 2.0;
         
-        waypoint_tolerance_ = 0.05; 
+        waypoint_tolerance_ = 0.15; 
         
         lookahead_distance_ = 0.15; 
 

@@ -559,6 +559,7 @@ private:
                     close_gripper();
                     
                     rclcpp::sleep_for(std::chrono::milliseconds(500));
+                    
                     bool picked = false;
                     int contador = 0;
 
@@ -567,7 +568,7 @@ private:
 
                         for(size_t i = 0; i < contact_sensor_data.size(); i++)
                         {
-                            if(contact_sensor_data[i] > 1.5)
+                            if(contact_sensor_data[i] > 0.8)
                             {
                                 contador++;
                             }
@@ -595,6 +596,10 @@ private:
 
                     ready();
                 }
+                else
+                {
+                    return false;
+                }
             }
             else if(pick == false)
             {
@@ -610,6 +615,11 @@ private:
                     set_collision_allowance(received_id, "ground_plane", false);
 
                     send_request(received_id, true);
+                    ready();
+                }
+                else
+                {
+                    return false;
                 }
             }
 

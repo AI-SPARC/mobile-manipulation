@@ -262,7 +262,7 @@ private:
         float new_x = 0.0, new_y = 0.0;
         bool findNavigableVertice = false;
         
-        for(int i = 1; i <= 2; i++)
+        for(int i = 1; i <= 20; i++)
         {
             for (int a = 0; a < 8; a++) 
             {
@@ -597,10 +597,12 @@ private:
                 float px = start_x + ux * traveled;
                 float py = start_y + uy * traveled;
                 
-                path_without_filter.push_back(std::make_pair(
-                    round_to_multiple(px, distanceToObstacle_, decimals), 
-                    round_to_multiple(py, distanceToObstacle_, decimals))
-                );
+                std::pair<float, float> point = std::make_pair(round_to_multiple(px, distanceToObstacle_, decimals), round_to_multiple(py, distanceToObstacle_, decimals));
+                
+                if(obstaclesVertices.find(point) == obstaclesVertices.end())
+                {
+                    path_without_filter.push_back(point);
+                }
                 traveled += distanceToObstacle_;
             }
         }
