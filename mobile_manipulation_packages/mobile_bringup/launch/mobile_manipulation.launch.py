@@ -230,10 +230,10 @@ def generate_launch_description():
         'storages.yaml'
     )
   
-    simple_manipulation_node = Node(
+    manipulation = Node(
         package="manipulation",
-        executable="simple_manipulation_node",
-        name="simple_manipulation_node",
+        executable="manipulation",
+        name="manipulation",
         output="screen",
         parameters=[
             moveit_config.robot_description,
@@ -407,7 +407,7 @@ def generate_launch_description():
 
     if 'PickObject' in bt_actions or 'PlaceObject' in bt_actions or 'DetectObject' in bt_actions:
         print("[LAUNCH] >> Manipulação (Pick/Place/Detect) detectada na BT.")
-        final_launch_list.append(simple_manipulation_node)
+        final_launch_list.append(manipulation)
         final_launch_list.append(add_collision)
 
     if 'NavigateTo' in bt_actions or 'FollowPath' in bt_actions:

@@ -33,8 +33,8 @@
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/action/path.hpp"
 #include "mobile_manipulation_interfaces/action/controller.hpp"
+#include <manipulation/IsGripperHolding.hpp>
 
-using namespace std::chrono_literals;
 
 namespace BT
 {
@@ -153,7 +153,10 @@ public:
 
         bt_thread_ = std::thread(&ServerNode::bt_loop, this);
             
-        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado (Com correção de Preempção).");
+        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado.");
+
+        gripper_monitor_node_ = std::make_shared<manipulation::IsGripperHolding>();
+        
     } 
 
     ~ServerNode()
@@ -175,8 +178,9 @@ private:
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SharedPtr path_client;
     rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SharedPtr controller_client;
 
-
     rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::SharedPtr active_controller_goal_handle_;
+
+    std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_;
 
     std::string yaml_file;
 
@@ -290,6 +294,22 @@ private:
             BT::OutputPort<std::vector<double>>("storage_limits")
         });
 
+        factory.registerSimpleCondition("IsGripperHoldingObject", 
+            [this](BT::TreeNode& self) -> BT::NodeStatus 
+            {
+                bool is_holding = this->gripper_monitor_node_->checkIsHolding();
+                
+                if (is_holding) 
+                {
+                    return BT::NodeStatus::SUCCESS; 
+                }
+                else 
+                {
+                    return BT::NodeStatus::FAILURE; 
+                }
+            }
+        );
+
 
         BT::NodeBuilder builder_compute = [&](const std::string& name, const BT::NodeConfig& config)
         {
@@ -391,6 +411,8 @@ private:
             },
             builder_pick
         );
+
+        
 
 
         BT::NodeBuilder builder_place = [&](const std::string& name, const BT::NodeConfig& config)
