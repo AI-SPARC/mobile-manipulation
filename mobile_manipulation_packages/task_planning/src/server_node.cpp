@@ -53,6 +53,7 @@ enum class TaskState
     FAILURE
 };
 
+
 class ParallelAny : public BT::ControlNode
 {
 public:
@@ -63,8 +64,6 @@ public:
 
     BT::NodeStatus tick() override
     {
-        size_t failure_count = 0;
-
         for (size_t i = 0; i < children_nodes_.size(); i++)
         {
             BT::TreeNode* child = children_nodes_[i];
@@ -78,14 +77,9 @@ public:
 
             if (status == BT::NodeStatus::FAILURE)
             {
-                failure_count++;
+                haltChildren();
+                return BT::NodeStatus::FAILURE;
             }
-        }
-
-        if (failure_count == children_nodes_.size())
-        {
-            haltChildren();
-            return BT::NodeStatus::FAILURE;
         }
 
         return BT::NodeStatus::RUNNING;
@@ -97,6 +91,7 @@ public:
         BT::ControlNode::halt();
     }
 };
+
 
 class AsyncAction : public BT::StatefulActionNode
 {
@@ -144,27 +139,31 @@ public:
             loadLocationsFromYaml(yaml_file);
         }
 
-
         path_state_ = TaskState::IDLE;
         nav_state_ = TaskState::IDLE;
         manipulation_state_ = TaskState::IDLE;
+
+        gripper_monitor_node_ = std::make_shared<manipulation::IsGripperHolding>();
+        internal_executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+        internal_executor_->add_node(gripper_monitor_node_);
+        gripper_thread_ = std::thread([this]() {
+            internal_executor_->spin();
+        });
+        
+        RCLCPP_INFO(this->get_logger(), "Internal Gripper Executor started.");
 
         setup_behavior_tree(bt_xml_path);
 
         bt_thread_ = std::thread(&ServerNode::bt_loop, this);
             
         RCLCPP_INFO(this->get_logger(), "ServerNode iniciado.");
-
-        gripper_monitor_node_ = std::make_shared<manipulation::IsGripperHolding>();
-        
     } 
 
     ~ServerNode()
     {
-        if (bt_thread_.joinable()) 
-        {
-            bt_thread_.join();
-        }
+        if (bt_thread_.joinable()) bt_thread_.join();
+        if (internal_executor_) internal_executor_->cancel();
+        if (gripper_thread_.joinable()) gripper_thread_.join();
     }
 
 private:
@@ -181,6 +180,9 @@ private:
     rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::SharedPtr active_controller_goal_handle_;
 
     std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_;
+    
+    rclcpp::executors::SingleThreadedExecutor::SharedPtr internal_executor_;
+    std::thread gripper_thread_;
 
     std::string yaml_file;
 
@@ -190,6 +192,9 @@ private:
     std::pair<std::string, geometry_msgs::msg::Pose> pick_pose;
     std::pair<std::string, geometry_msgs::msg::Pose> cached_object_;
     
+    std::string current_target_id_ = "";
+    geometry_msgs::msg::Pose current_target_pose_;
+
     std::thread bt_thread_;
     std::mutex bt_mutex_;
 
@@ -203,8 +208,6 @@ private:
     std::mutex path_mutex_;
 
     float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
-
-    bool action_busy = false;
     bool has_new_object_ = false;
 
 
@@ -248,16 +251,46 @@ private:
         factory.registerSimpleAction("DetectObject", [&](BT::TreeNode &self)
         {
             std::lock_guard<std::mutex> lock(bt_mutex_);
-            if (!has_new_object_) return BT::NodeStatus::FAILURE;
-            self.setOutput("output_pose", cached_object_.second);
-            self.setOutput("output_id", cached_object_.first);
-            picked.insert(cached_object_.first);
-            pick_pose = cached_object_; 
-            action_busy = true;      
-            RCLCPP_INFO(this->get_logger(), "BT: Objeto '%s' detectado.", cached_object_.first.c_str());
+            
+
+            if (!current_target_id_.empty())
+            {
+                self.setOutput("output_pose", current_target_pose_);
+                self.setOutput("output_id", current_target_id_);
+                
+                pick_pose = std::make_pair(current_target_id_, current_target_pose_);
+                cached_object_ = pick_pose; 
+
+                RCLCPP_INFO(this->get_logger(), "BT: Atualizando pose do alvo ativo: '%s'", current_target_id_.c_str());
+                return BT::NodeStatus::SUCCESS;
+            }
+
+            if (!has_new_object_) return BT::NodeStatus::RUNNING; 
+
+            current_target_id_ = cached_object_.first;
+            current_target_pose_ = cached_object_.second;
+            
+            self.setOutput("output_pose", current_target_pose_);
+            self.setOutput("output_id", current_target_id_);
+            
+            picked.insert(current_target_id_);
+            pick_pose = cached_object_;
+            
+            has_new_object_ = false;
+            
+            RCLCPP_INFO(this->get_logger(), "BT: Novo Alvo definido: '%s'.", current_target_id_.c_str());
             return BT::NodeStatus::SUCCESS;
         }, 
         { BT::OutputPort<geometry_msgs::msg::Pose>("output_pose"), BT::OutputPort<std::string>("output_id") });
+
+
+        factory.registerSimpleAction("ClearTarget", [&](BT::TreeNode &self)
+        {
+            std::lock_guard<std::mutex> lock(bt_mutex_);
+            RCLCPP_INFO(this->get_logger(), "BT: Alvo '%s' finalizado. Limpando rastreamento.", current_target_id_.c_str());
+            current_target_id_ = "";
+            return BT::NodeStatus::SUCCESS;
+        });
 
 
         factory.registerSimpleAction("GetStorageInfo", [&](BT::TreeNode &self)
@@ -272,7 +305,7 @@ private:
             geometry_msgs::msg::Pose current_obj_pose;
             {
                 std::lock_guard<std::mutex> lock(bt_mutex_);
-                current_obj_pose = pick_pose.second;
+                current_obj_pose = current_target_pose_; 
             }
 
             geometry_msgs::msg::Pose storage_pose;
@@ -294,6 +327,7 @@ private:
             BT::OutputPort<std::vector<double>>("storage_limits")
         });
 
+
         factory.registerSimpleCondition("IsGripperHoldingObject", 
             [this](BT::TreeNode& self) -> BT::NodeStatus 
             {
@@ -305,6 +339,7 @@ private:
                 }
                 else 
                 {
+
                     return BT::NodeStatus::FAILURE; 
                 }
             }
@@ -359,7 +394,8 @@ private:
 
                     {
                         std::lock_guard<std::mutex> lock(path_mutex_);
-                        if (!last_calculated_path_.poses.empty()) {
+                        if (!last_calculated_path_.poses.empty()) 
+                        {
                             path_to_send = last_calculated_path_;
                             has_path = true;
                         }
@@ -369,10 +405,15 @@ private:
                     {
                         RCLCPP_INFO(this->get_logger(), "BT: [NavigateTo] Caminho com %zu poses. Executando...", path_to_send.poses.size());
                         bool sent = this->send_controller_goal(path_to_send);
-                        if(sent) {
-                            nav_state_ = TaskState::RUNNING;
+                        
+                        if(sent) 
+                        {
+                           
+                            nav_state_ = TaskState::RUNNING; 
                             return BT::NodeStatus::RUNNING;
-                        } else {
+                        } 
+                        else 
+                        {
                             return BT::NodeStatus::FAILURE;
                         }
                     }
@@ -381,6 +422,7 @@ private:
                         return BT::NodeStatus::RUNNING;
                     }
                 }
+                
                 return check_task_status(nav_state_);
             });
         });
@@ -413,8 +455,6 @@ private:
         );
 
         
-
-
         BT::NodeBuilder builder_place = [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
@@ -472,7 +512,7 @@ private:
                 new_obj = has_new_object_;
             }
 
-            if (status == BT::NodeStatus::RUNNING || new_obj)
+            if (status == BT::NodeStatus::RUNNING || new_obj || !current_target_id_.empty())
             {
                 BT::NodeStatus result = bt_tree_.tickOnce();
 
@@ -480,11 +520,11 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(bt_mutex_);
                     has_new_object_ = false;
-                    action_busy = false; 
                     
                     if (result == BT::NodeStatus::FAILURE) 
                     {
-                        picked.erase(cached_object_.first);
+                         picked.erase(cached_object_.first);
+                         current_target_id_ = ""; 
                     }
                     
                     path_state_ = TaskState::IDLE;
@@ -521,11 +561,13 @@ private:
         pose_z = 0.0;
     }
 
+    // --- DETECTION CALLBACK: ATUALIZA POSIÇÃO EM TEMPO REAL ---
     void detection_callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         std::lock_guard<std::mutex> lock(bt_mutex_);
 
-        if(action_busy == true || has_new_object_ == true) return;
+
+        if (has_new_object_ && current_target_id_.empty()) return; 
 
         for (const auto &det : msg->detections)
         {
@@ -537,16 +579,32 @@ private:
             if (pos != std::string::npos) id = raw_id.substr(0, pos);
 
             if (authorized_labels.find(id) == authorized_labels.end()) continue;
-            
-            if(picked.find(raw_id) == picked.end())
+
+            if (!current_target_id_.empty() && raw_id == current_target_id_)
             {
+                current_target_pose_.position = det.bbox.center.position;
+                current_target_pose_.orientation = det.bbox.center.orientation;
+                
+                cached_object_ = std::make_pair(raw_id, current_target_pose_);
+                
+                
+                continue; 
+            }
+
+
+            if (current_target_id_.empty() && !has_new_object_)
+            {
+                if (picked.find(raw_id) != picked.end()) continue;
+
                 geometry_msgs::msg::Pose pose;
                 pose.position = det.bbox.center.position;
                 pose.orientation = det.bbox.center.orientation;
 
                 cached_object_ = std::make_pair(raw_id, pose);
                 has_new_object_ = true; 
-                break;
+                
+                RCLCPP_INFO(this->get_logger(), "Callback: Novo objeto potencial encontrado: %s", raw_id.c_str());
+                break; 
             }
         }
     }
@@ -595,7 +653,6 @@ private:
         if (!this->path_client->wait_for_action_server(std::chrono::seconds(5)))
         {
             RCLCPP_ERROR(this->get_logger(), "Action server 'path' not available");
-            action_busy = false;
             path_state_ = TaskState::FAILURE; 
             return;
         }
@@ -697,7 +754,6 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER rejeitado");
             nav_state_ = TaskState::FAILURE;
         } else {
-            // Salva o handle atual
             this->active_controller_goal_handle_ = goal_handle;
             RCLCPP_INFO(this->get_logger(), "Goal CONTROLLER aceito, executando...");
         }
@@ -705,7 +761,6 @@ private:
 
     void controller_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::WrappedResult & result)
     {
-        // Ignora resultados de actions canceladas/abortadas antigas para não falhar a BT
         if (this->active_controller_goal_handle_ && result.goal_id != this->active_controller_goal_handle_->get_goal_id()) {
             RCLCPP_WARN(this->get_logger(), "Ignorando resultado de controller antigo.");
             return; 
@@ -716,20 +771,18 @@ private:
                 std::lock_guard<std::mutex> lock(path_mutex_);
                 last_calculated_path_.poses.clear();
             }
-            path_state_ = TaskState::IDLE;
+            
             nav_state_ = TaskState::SUCCESS;
             RCLCPP_INFO(this->get_logger(), "Navegação concluída!");
         } 
         else if (result.code == rclcpp_action::ResultCode::CANCELED) {
-             RCLCPP_INFO(this->get_logger(), "Navegação cancelada (Parada solicitada).");
-             // Não setamos FAILURE aqui necessariamente, pois foi intencional
+             RCLCPP_INFO(this->get_logger(), "Navegação cancelada.");
         }
         else {
             RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER falhou/abortou");
             nav_state_ = TaskState::FAILURE;
         }
         
-        // Limpa o ponteiro se for o atual
         if (this->active_controller_goal_handle_ && result.goal_id == this->active_controller_goal_handle_->get_goal_id()) {
             this->active_controller_goal_handle_.reset();
         }
@@ -782,7 +835,6 @@ private:
         }
         else
         {
-            picked.erase(std::get<0>(pick_pose));
             manipulation_state_ = TaskState::FAILURE;
             RCLCPP_ERROR(this->get_logger(), "PICK FAILED or ABORTED");
         }

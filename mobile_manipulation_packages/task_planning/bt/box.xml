@@ -1,26 +1,28 @@
 <root BTCPP_format="4" main_tree_to_execute="MainTree">
 
   <BehaviorTree ID="AcquireObject">
-    <Sequence name="AcquireSequence">
-      <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
-      
-      <Sequence name="ApproachAndPick">
-          <Fallback name="EnsureProximity">
+    
+    <RetryUntilSuccessful num_attempts="-1">
+      <Sequence name="AcquireSequence">
+        
+        <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
+        
+        <Fallback name="EnsureProximity">
              <IsRobotNear target="{target_pose}" threshold="0.4"/>
-             <Parallel failure_threshold="1" success_threshold="2">
-                <ComputePath planner="a_star" target="{target_pose}"/>
+             
+             <ParallelAny> 
                 <NavigateTo/> 
-             </Parallel>
-          </Fallback>
+                <ComputePath planner="a_star" target="{target_pose}"/>
+             </ParallelAny>
+        </Fallback>
           
-          <RetryUntilSuccessful num_attempts="-1">
-            <Sequence name="AttemptPickAndCheck">
-                <PickObject pose="{target_pose}" id="{target_id}"/>
-                <IsGripperHoldingObject/>
-            </Sequence>
-          </RetryUntilSuccessful>
+        <PickObject pose="{target_pose}" id="{target_id}"/>
+        
+        <IsGripperHoldingObject/>
+        
       </Sequence>
-    </Sequence>
+    </RetryUntilSuccessful>
+
   </BehaviorTree>
 
   <BehaviorTree ID="PlaceRoutine">
@@ -31,14 +33,19 @@
           <Fallback name="EnsureProximityStorage">
             <IsRobotNear target="{storage_pose}" threshold="0.4"/>
             
-            <Parallel name="Nav_Replan_Monitor" failure_threshold="1" success_threshold="3">
-                <ComputePath planner="a_star" target="{storage_pose}"/>
+            <ParallelAny name="Nav_Replan_Monitor">
                 <NavigateTo/> 
-                <IsGripperHoldingObject/>
-            </Parallel>
+                <ComputePath planner="a_star" target="{storage_pose}"/>
+                
+                <KeepRunningUntilFailure>
+                    <IsGripperHoldingObject/>
+                </KeepRunningUntilFailure>
+            </ParallelAny>
           </Fallback>
 
           <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
+          
+          <ClearTarget/> 
 
       </Sequence>
 
@@ -46,9 +53,7 @@
   </BehaviorTree>
 
   <BehaviorTree ID="MainTree">
-    
     <RetryUntilSuccessful num_attempts="-1">
-      
       <Sequence name="FullMission">
         
         <SubTree ID="AcquireObject" target_id="{target_id}" target_pose="{target_pose}"/>
@@ -60,9 +65,7 @@
         <SubTree ID="PlaceRoutine" storage_pose="{storage_pose}" storage_limits="{storage_limits}"/>
     
       </Sequence>
-
     </RetryUntilSuccessful>
-
   </BehaviorTree>
 
 </root>
