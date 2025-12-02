@@ -257,7 +257,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {'path_resolution': 0.05},
-            {'security_distance': 0.2},
+            {'security_distance': 0.4},
             {'iterations_before_verification': 20},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -271,7 +271,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {'path_resolution': 0.05},
-            {'security_distance': 0.2},
+            {'security_distance': 0.4},
             {'iterations_before_verification': 20},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],

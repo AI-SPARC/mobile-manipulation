@@ -130,7 +130,6 @@ public:
         decimals = count_decimals(distanceToObstacle_);
 
         publisher_nav_path_ = this->create_publisher<nav_msgs::msg::Path>("visualize_path", 10);
-        publisher_point_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("visualize_point_cloud", 10);
 
         subscription_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&AStar::callback_odom, this, std::placeholders::_1));
@@ -172,10 +171,10 @@ private:
         }
     };
 
+    
     //Publishers.
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr publisher_path_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_nav_path_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher_point_cloud_;
 
     //Subscriptions.
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_odom_;
@@ -236,81 +235,159 @@ private:
             {0.0, -distanceToObstacle, 0.0},
         };
     }
-    
+
+
+    std::pair<std::pair<float, float>, bool> find_nearest_free_point(
+        std::pair<float, float> origin, 
+        int max_steps) 
+    {
+
+        std::pair<float,float> nearest_rounded = std::make_pair(round_to_multiple(std::get<0>(origin), distanceToObstacle_, decimals), 
+        round_to_multiple(std::get<1>(origin), distanceToObstacle_, decimals));
+        
+        if (obstaclesVertices.find(nearest_rounded) == obstaclesVertices.end()) 
+        {
+            return {origin, true};
+        }
+
+        struct SearchNode {
+            float dist;
+            std::pair<float, float> pos;
+            
+            bool operator>(const SearchNode& other) const {
+                return dist > other.dist;
+            }
+        };
+
+        std::priority_queue<SearchNode, std::vector<SearchNode>, std::greater<SearchNode>> pq;
+
+        pq.push({0.0f, nearest_rounded});
+
+        std::unordered_set<std::pair<float, float>, PairHash> visited;
+        visited.insert(nearest_rounded);
+
+        auto offsets = get_offsets(distanceToObstacle_);
+        int steps = 0;
+
+
+        while(!pq.empty())
+        {
+            if(steps++ > max_steps) break;
+
+            auto current_node = pq.top();
+            pq.pop();
+            
+            std::pair<float, float> current_pos = current_node.pos;
+
+            if (obstaclesVertices.find(current_pos) == obstaclesVertices.end())
+            {
+                return {current_pos, true};
+            }
+
+            for(int i = 0; i < 8; i++)
+            {
+                float nx = round_to_multiple(current_pos.first + offsets[i][0], distanceToObstacle_, decimals);
+                float ny = round_to_multiple(current_pos.second + offsets[i][1], distanceToObstacle_, decimals);
+                std::pair<float, float> neighbor = {nx, ny};
+
+                if(visited.find(neighbor) != visited.end()) continue;
+
+                visited.insert(neighbor);
+
+                float dist_from_origin = std::hypot(neighbor.first - origin.first, neighbor.second - origin.second);
+                
+                pq.push({dist_from_origin, neighbor});
+            }
+        }
+        
+
+        return {origin, false}; 
+    }
+   
     std::pair<std::vector<std::pair<float, float>>, bool> run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
     {
-        std::vector<std::pair<float, float>> initial_path = straight_line(start_tuple, goal_tuple);
+        
 
+
+        auto start_search = find_nearest_free_point(start_tuple, 500);
+        if (!start_search.second) 
+        {
+            RCLCPP_WARN(this->get_logger(), "START BLOCKED: Robot stuck deep inside obstacles.");
+            return {};
+        }
+        std::pair<float, float> valid_start = start_search.first;
+
+        auto goal_search = find_nearest_free_point(goal_tuple, 3000);
+
+        if (!goal_search.second) 
+        {
+            RCLCPP_WARN(this->get_logger(), "GOAL BLOCKED: Destination is unreachable.");
+            return {};
+        }
+
+        std::pair<float, float> valid_goal = goal_search.first;
+
+        if (valid_start == valid_goal) 
+        {
+            std::vector<std::pair<float, float>> path;
+            path.push_back(valid_goal);
+            return {path, true};
+        }
+
+        std::vector<std::pair<float, float>> initial_path = straight_line(valid_start, valid_goal);
         if(!initial_path.empty())
         {
-            initial_path.push_back(start_tuple);
-            initial_path.push_back(goal_tuple);
+            initial_path.push_back(valid_start);
+            initial_path.push_back(valid_goal);
             return std::make_pair(initial_path, true);
         }
 
+        
         struct Node {
             std::pair<float, float> parent;
             float g_score = std::numeric_limits<float>::infinity();
             float f_score = std::numeric_limits<float>::infinity();
             bool closed = false;
         };
-        
+
         std::unordered_map<std::pair<float, float>, Node, PairHash> nodes;
         std::unordered_map<std::pair<float, float>, std::vector<std::pair<float, float>>, PairHash> adjacency_list_tuples;
         auto offsets1 = get_offsets(distanceToObstacle_);
+
         
         float new_x = 0.0, new_y = 0.0;
-        bool findNavigableVertice = false;
-        
-        for(int i = 1; i <= 20; i++)
+    
+ 
+        for (int a = 0; a < 8; a++) 
         {
-            for (int a = 0; a < 8; a++) 
-            {
-                new_x = round_to_multiple(std::get<0>(start_tuple) + (offsets1[a][0] * i), distanceToObstacle_, decimals);
-                new_y = round_to_multiple(std::get<1>(start_tuple) + (offsets1[a][1] * i), distanceToObstacle_, decimals);
+            new_x = round_to_multiple(std::get<0>(valid_start) + (offsets1[a][0]), distanceToObstacle_, decimals);
+            new_y = round_to_multiple(std::get<1>(valid_start) + (offsets1[a][1]), distanceToObstacle_, decimals);
 
-                std::pair<float, float> neighbor_tuple = std::make_pair(static_cast<float>(new_x), static_cast<float>(new_y));
-                
-                if (obstaclesVertices.find(neighbor_tuple) == obstaclesVertices.end())
-                { 
-                    adjacency_list_tuples[start_tuple].push_back(neighbor_tuple);
-                    findNavigableVertice = true;
-                }
+            std::pair<float, float> neighbor_tuple = std::make_pair(static_cast<float>(new_x), static_cast<float>(new_y));
+            
+            if (obstaclesVertices.find(neighbor_tuple) == obstaclesVertices.end())
+            { 
+                adjacency_list_tuples[valid_start].push_back(neighbor_tuple);
             }
-            if(findNavigableVertice == true) break;
         }
+    
         
-        if(findNavigableVertice == false) 
-        {
-            RCLCPP_WARN(this->get_logger(), "The robot is too far of the navigable area.");
-            return {};
-        }
-        
-        bool findNavigableGoalVertice = false;
-        
-        for(int i = 1; i <= 102; i++)
-        {
-            for (int a = 0; a < 8; a++) 
-            {
-                new_x = round_to_multiple(std::get<0>(goal_tuple) + (offsets1[a][0] * i), distanceToObstacle_, decimals);
-                new_y = round_to_multiple(std::get<1>(goal_tuple) + (offsets1[a][1] * i), distanceToObstacle_, decimals);
 
-                std::pair<float, float> neighbor_tuple = std::make_pair(static_cast<float>(new_x), static_cast<float>(new_y));
-                
-                if (obstaclesVertices.find(neighbor_tuple) == obstaclesVertices.end())
-                { 
-                    adjacency_list_tuples[neighbor_tuple].push_back(goal_tuple);
-                    findNavigableGoalVertice = true;
-                }
-            }
-            if(findNavigableGoalVertice == true) break;
-        }
-        
-        if(findNavigableGoalVertice == false)
+
+        for (int a = 0; a < 8; a++) 
         {
-            RCLCPP_WARN(this->get_logger(), "Destination is too far of the navigable area. Increase navigable area.");
-            return {};
+            new_x = round_to_multiple(std::get<0>(valid_goal) + (offsets1[a][0]), distanceToObstacle_, decimals);
+            new_y = round_to_multiple(std::get<1>(valid_goal) + (offsets1[a][1]), distanceToObstacle_, decimals);
+
+            std::pair<float, float> neighbor_tuple = std::make_pair(static_cast<float>(new_x), static_cast<float>(new_y));
+            
+            if (obstaclesVertices.find(neighbor_tuple) == obstaclesVertices.end())
+            { 
+                adjacency_list_tuples[neighbor_tuple].push_back(valid_goal);
+            }
+
         }
+
         
         auto heuristic = [](const std::pair<float, float>& a, const std::pair<float, float>& b) {
             float x1 = std::get<0>(a);
@@ -320,8 +397,8 @@ private:
             return std::sqrt(std::pow(x2 - x1, 2) + std::pow(y2 - y1, 2));
         };
         
-        nodes[start_tuple].g_score = 0;
-        nodes[start_tuple].f_score = heuristic(start_tuple, goal_tuple);
+        nodes[valid_start].g_score = 0;
+        nodes[valid_start].f_score = heuristic(valid_start, valid_goal);
         
         struct PairCompare {
             bool operator()(const std::pair<float, std::pair<float, float>>& a, 
@@ -336,7 +413,7 @@ private:
             PairCompare
         > open_set;
         
-        open_set.push({nodes[start_tuple].f_score, start_tuple});
+        open_set.push({nodes[valid_start].f_score, valid_start});
         
         int iterations = 0;
 
@@ -351,7 +428,7 @@ private:
                 
             nodes[current].closed = true;
            
-            if (current != start_tuple && current != goal_tuple)
+            if (current != valid_start && current != valid_goal)
             {
                 for (int a = 0; a < 8; a++) 
                 {
@@ -367,12 +444,12 @@ private:
                 }
             }
             
-            if (current == goal_tuple) 
+            if (current == valid_goal) 
             {
                 std::vector<std::pair<float, float>> path;
                 auto current_vertex = current;
                 path.insert(path.begin(), current_vertex);
-                while (nodes.find(current_vertex) != nodes.end() && current_vertex != start_tuple) {
+                while (nodes.find(current_vertex) != nodes.end() && current_vertex != valid_start) {
                     current_vertex = nodes[current_vertex].parent;
                     path.insert(path.begin(), current_vertex);
                 }
@@ -382,18 +459,18 @@ private:
             if(iterations == iterations_before_verification) 
             {
                 iterations = 0;
-                std::vector<std::pair<float, float>> path1 = straight_line(current, goal_tuple);
+                std::vector<std::pair<float, float>> path1 = straight_line(current, valid_goal);
 
                 if(!path1.empty()) 
                 {
                     std::vector<std::pair<float, float>> path;
                     std::vector<std::pair<float, float>> path_to_current;
                     auto current_vertex = current;
-                    while (nodes.find(current_vertex) != nodes.end() && current_vertex != start_tuple) {
+                    while (nodes.find(current_vertex) != nodes.end() && current_vertex != valid_start) {
                         path_to_current.insert(path_to_current.begin(), current_vertex);
                         current_vertex = nodes[current_vertex].parent;
                     }
-                    path_to_current.insert(path_to_current.begin(), start_tuple); 
+                    path_to_current.insert(path_to_current.begin(), valid_start); 
                     path.insert(path.end(), path_to_current.begin(), path_to_current.end());
                     path.insert(path.end(), path1.begin(), path1.end());
                     return std::make_pair(path, true);
@@ -410,7 +487,7 @@ private:
                 {
                     nodes[neighbor].parent = current;
                     nodes[neighbor].g_score = tentative_g_score;
-                    nodes[neighbor].f_score = tentative_g_score + heuristic(neighbor, goal_tuple);
+                    nodes[neighbor].f_score = tentative_g_score + heuristic(neighbor, valid_goal);
                     open_set.push({nodes[neighbor].f_score, neighbor});
                 }
             }
@@ -466,39 +543,34 @@ private:
         else return path;
     }
 
-    void store_edges_in_path(std::vector<std::pair<float, float>>& path, bool straight_line) 
+    void store_edges_in_path(std::vector<std::pair<float, float>>& path, bool straight_line, std::pair<float, float> original_goal) 
     {
         path_points.clear();
         path_without_filter.clear();
-
         
         if (path.empty()) return;
 
-       
         int k = 0;
 
         if (straight_line == false && path.size() >= 2)
         {
-            auto goal = path.back();
+            std::pair<float, float> goal = original_goal;
 
-            for (int i = static_cast<int>(path.size()) - 2; i >= 0; --i)
+            for (int i = static_cast<int>(path.size()) - 1; i >= 0; --i)
             {
                 float dx = goal.first  - path[i].first;
                 float dy = goal.second - path[i].second;
-                float dist = std::sqrt(dx * dx + dy * dy);
+                float dist = std::hypot(dx, dy); 
 
                 if (dist >= security_distance)
                 {
-                    float ux = dx / dist;
-                    float uy = dy / dist;
 
-                    std::pair<float, float> new_goal = {
-                        goal.first  - ux * security_distance,
-                        goal.second - uy * security_distance
-                    };
-                    path.erase(path.begin() + i + 1, path.end());
+                    if (i + 1 < static_cast<int>(path.size())) {
+                        path.erase(path.begin() + i + 1, path.end());
+                    }
                     break;
                 }
+                
             }
         }
 
@@ -556,21 +628,31 @@ private:
             else break;
         }
 
-        if (straight_line == true) 
+        if (straight_line == true && !path.empty()) 
         {
             auto& last = path.back();
-            auto& second_last = path[path.size() - 2];
+            float dx = original_goal.first - last.first; 
+            float dy = original_goal.second - last.second;
+            float dist_to_orig = std::hypot(dx, dy);
 
-            float dx = last.first - second_last.first;
-            float dy = last.second - second_last.second;
-            float dist = std::sqrt(dx * dx + dy * dy);
-
-            if (dist > security_distance)  
+            if (dist_to_orig < security_distance)  
             {
-                float ux = dx / dist;
-                float uy = dy / dist;
-                last.first  -= ux * security_distance;
-                last.second -= uy * security_distance;
+
+                if (path.size() >= 2) {
+                    auto& start = path[0];
+                    float total_dx = original_goal.first - start.first;
+                    float total_dy = original_goal.second - start.second;
+                    float total_dist = std::hypot(total_dx, total_dy);
+                    
+                    if (total_dist > security_distance) {
+                        float ux = total_dx / total_dist;
+                        float uy = total_dy / total_dist;
+                        
+                        
+                        last.first = original_goal.first - (ux * security_distance);
+                        last.second = original_goal.second - (uy * security_distance);
+                    }
+                }
             }
         }
 
@@ -611,8 +693,6 @@ private:
             path_without_filter.push_back(path.back());
         }
 
-
-        
         for (size_t i = 0; i < path.size(); i++) 
         {
             VertexDijkstra vertex;
@@ -653,10 +733,8 @@ private:
             path_points.push_back(vertex);
         }
 
-        publisher_point_cloud();
         publisher_dijkstra_path();
     }
-
 
     // Publishers.
     void publisher_dijkstra_path()
@@ -684,32 +762,7 @@ private:
         publisher_nav_path_->publish(path_msg);
     }
 
-    void publisher_point_cloud()
-    {
-        sensor_msgs::msg::PointCloud2 cloud_msg;
-        cloud_msg.header.stamp = this->now();
-        cloud_msg.header.frame_id = "world"; 
 
-        sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
-        modifier.setPointCloud2FieldsByString(1, "xyz");
-        modifier.resize(path_without_filter.size());
-
-        sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msg, "x");
-        sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msg, "y");
-        sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msg, "z");
-
-        for (const auto& vertex : path_without_filter)
-        {
-            *iter_x = vertex.first;
-            *iter_y = vertex.second; 
-            *iter_z = 0.0f;        
-
-            ++iter_x;
-            ++iter_y;
-            ++iter_z;
-        }
-        publisher_point_cloud_->publish(cloud_msg);
-    }
 
 
     // Callbacks.
@@ -786,7 +839,8 @@ private:
 
         std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
         std::pair<float, float> start_pose;
-        
+
+
         {
             std::lock_guard<std::mutex> lock(odom_mutex);
             start_pose = {pose_x_, pose_y_};
@@ -813,10 +867,11 @@ private:
                     shortestPath = a_star_result.first;
                     straight_line = a_star_result.second;
 
-                    if (!shortestPath.empty()) {
-                        store_edges_in_path(shortestPath, straight_line);
+                    if (!shortestPath.empty())
+                    {
+                        store_edges_in_path(shortestPath, straight_line, current_goal_pose);
                     }
-                } 
+                }
 
                 if (shortestPath.empty())
                 {
@@ -929,7 +984,7 @@ private:
 
                         if (!shortestPath.empty())
                         {
-                            store_edges_in_path(shortestPath, straight_line);
+                            store_edges_in_path(shortestPath, straight_line, current_goal_pose);
                         }
                     } 
 
