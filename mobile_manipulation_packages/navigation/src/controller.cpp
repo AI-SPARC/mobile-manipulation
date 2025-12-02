@@ -34,10 +34,9 @@ public:
         angular_speed_ = 2.0;
         
         waypoint_tolerance_ = 0.075; 
-        
         lookahead_distance_ = 0.15; 
 
-        RCLCPP_INFO(this->get_logger(), "RobotController iniciado (Modo Alta Precisão)!");
+        RCLCPP_INFO(this->get_logger(), "RobotController iniciado (Logica de Parada Forçada no Final)");
     }
 
 private:
@@ -116,6 +115,7 @@ private:
         std::thread{std::bind(&RobotController::execute, this, std::placeholders::_1), goal_handle}.detach();
     }
 
+
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Controller>> goal_handle)
     {
         publish_zero_velocity();
@@ -131,9 +131,17 @@ private:
             return;
         }
 
+        // Variáveis de Controle da Nova Lógica
+        rclcpp::Time zone_1_entry_time; // Para zona 0.075 a 0.15
+        bool in_zone_1 = false;
+        
+        rclcpp::Time zone_2_entry_time; // Para zona 0.15 a 0.25
+        bool in_zone_2 = false;
+
         size_t current_idx = 0;
         rclcpp::Rate rate(50); 
 
+        // Espera odometria
         while (rclcpp::ok() && !pose_initialized_) 
         {
              if (goal_handle->is_canceling()) {
@@ -144,6 +152,9 @@ private:
              rate.sleep();
         }
 
+        // ==================================================================================
+        // FASE 1: NAVEGAÇÃO COM ZONAS DE TOLERÂNCIA DINÂMICA
+        // ==================================================================================
         while (rclcpp::ok() && current_idx < path.size())
         {
             if (goal_handle->is_canceling() || !goal_handle->is_active()) 
@@ -162,6 +173,56 @@ private:
                 local_pose = current_pose_;
             }
 
+            // Distância exata para o PONTO FINAL da trajetória
+            double dist_to_final_goal = std::hypot(
+                path.back().position.x - local_pose.position.x,
+                path.back().position.y - local_pose.position.y
+            );
+
+            // --- LÓGICA DAS ZONAS (Seu pedido) ---
+
+            // 1. Sucesso Absoluto (Menor que 0.075)
+            if (dist_to_final_goal < waypoint_tolerance_) // < 0.075
+            {
+                RCLCPP_INFO(this->get_logger(), "Chegou na tolerância fina (%.3f). Indo para rotação.", dist_to_final_goal);
+                break; 
+            }
+
+            // 2. Zona Intermediária (0.075 a 0.15) - Tempo limite: 1.5s
+            if (dist_to_final_goal >= waypoint_tolerance_ && dist_to_final_goal < 0.15)
+            {
+                if (!in_zone_1) {
+                    zone_1_entry_time = this->now();
+                    in_zone_1 = true;
+                }
+                
+                if ((this->now() - zone_1_entry_time).seconds() > 1.5) {
+                    RCLCPP_WARN(this->get_logger(), "Aceitando Zona 1 (%.3fm) após 1.5s. Indo para rotação.", dist_to_final_goal);
+                    break;
+                }
+            }
+            else {
+                in_zone_1 = false; // Saiu da zona ou se aproximou mais
+            }
+
+            // 3. Zona Externa (0.15 a 0.25) - Tempo limite: 4.0s
+            if (dist_to_final_goal >= 0.15 && dist_to_final_goal < 0.25)
+            {
+                if (!in_zone_2) {
+                    zone_2_entry_time = this->now();
+                    in_zone_2 = true;
+                }
+                
+                if ((this->now() - zone_2_entry_time).seconds() > 4.0) {
+                    RCLCPP_WARN(this->get_logger(), "Aceitando Zona 2 (%.3fm) após 4.0s. Indo para rotação.", dist_to_final_goal);
+                    break;
+                }
+            }
+            else {
+                in_zone_2 = false;
+            }
+
+            // --- CÁLCULO DE MOVIMENTO PADRÃO (Lookahead) ---
             size_t target_idx = current_idx;
             double dx, dy, dist_to_target;
             
@@ -187,11 +248,14 @@ private:
             geometry_msgs::msg::Twist cmd;
             double k_p_angular = 2.0; 
 
-            double dist_to_current = std::hypot(
+            // Avanço do índice do waypoint local
+            double dist_to_current_wp = std::hypot(
                 path[current_idx].position.x - local_pose.position.x,
                 path[current_idx].position.y - local_pose.position.y
             );
-
+            if (dist_to_current_wp < waypoint_tolerance_) current_idx++;
+            
+            // Controle de velocidade
             if (std::fabs(angle_error) > 0.8) 
             {
                 cmd.linear.x = 0.0;
@@ -205,26 +269,27 @@ private:
                 cmd.linear.x = std::clamp(distance_slowdown * curvature_slowdown, 0.0, linear_speed_);
                 cmd.angular.z = std::clamp(angle_error * k_p_angular, -angular_speed_, angular_speed_);
             }
-
             cmd.angular.z = -cmd.angular.z; 
 
             cmd_vel_pub_->publish(cmd);
 
-            if (dist_to_current < waypoint_tolerance_) 
-            {
-                current_idx++;
+            // Se chegou no último ponto (pelo índice), mas a distância ainda não satisfez os critérios acima,
+            // o loop continua tentando ajustar a posição fina até cair num timeout de zona.
+            if (current_idx >= path.size()) {
+                // Mantém o índice no final para continuar correções finas se necessário
+                current_idx = path.size() - 1; 
             }
-            
-            if (current_idx >= path.size()) break;
 
             rate.sleep();
         }
 
 
+        // ==================================================================================
+        // FASE 2: ROTAÇÃO FINAL (Com Timeout de Segurança Rígido)
+        // ==================================================================================
+        
         publish_zero_velocity();
-        rclcpp::sleep_for(std::chrono::milliseconds(100));
-
-        RCLCPP_INFO(this->get_logger(), "Posição alcançada. Iniciando alinhamento final...");
+        rclcpp::sleep_for(std::chrono::milliseconds(200)); // Pequena pausa para estabilizar
 
         geometry_msgs::msg::Pose final_pose = path.back();
         tf2::Quaternion q_final(
@@ -234,6 +299,12 @@ private:
         
         bool aligned = false;
         double alignment_tolerance = 0.05; 
+        
+        // Timeout rígido para evitar loop infinito na rotação
+        auto rotation_start_time = this->now();
+        rclcpp::Duration rotation_timeout = rclcpp::Duration::from_seconds(5.0); // 5 segundos max para girar
+
+        RCLCPP_INFO(this->get_logger(), "Iniciando rotação final (Max 5s)...");
 
         while (rclcpp::ok() && !aligned)
         {
@@ -244,6 +315,13 @@ private:
                 return;
              }
 
+             // SAFETY: Se passar de 5 segundos girando, DESISTE e dá sucesso.
+             if ((this->now() - rotation_start_time) > rotation_timeout) {
+                 RCLCPP_WARN(this->get_logger(), "Timeout de Rotação! Parando mesmo sem alinhar perfeitamente.");
+                 aligned = true;
+                 break;
+             }
+
              geometry_msgs::msg::Pose local_pose;
              {
                  std::lock_guard<std::mutex> lock(pose_mutex_);
@@ -252,7 +330,6 @@ private:
 
              tf2::Quaternion q_curr(local_pose.orientation.x, local_pose.orientation.y, local_pose.orientation.z, local_pose.orientation.w);
              double current_yaw = get_yaw_from_quaternion(q_curr);
-             
              double angle_error = normalize_angle(final_target_yaw - current_yaw);
 
              if (std::abs(angle_error) <= alignment_tolerance) {
@@ -262,10 +339,11 @@ private:
 
              geometry_msgs::msg::Twist cmd;
              cmd.linear.x = 0.0;
-             
              double k_p_final = 2.5; 
+             
              cmd.angular.z = std::clamp(angle_error * k_p_final, -angular_speed_, angular_speed_);
              
+             // Torque mínimo
              if (std::abs(cmd.angular.z) < 0.2) cmd.angular.z = (cmd.angular.z > 0) ? 0.2 : -0.2;
 
              cmd.angular.z = -cmd.angular.z; 
@@ -275,7 +353,7 @@ private:
         }
 
         publish_zero_velocity();
-
+        
         if (rclcpp::ok()) 
         {
             std::lock_guard<std::mutex> lock(goal_mutex_);
@@ -284,9 +362,11 @@ private:
                 result->success = true;
                 goal_handle->succeed(result);
                 active_goal_.reset();
+                RCLCPP_INFO(this->get_logger(), "Objetivo finalizado.");
             }
         }
     }
+
 };
 
 int main(int argc, char** argv)
