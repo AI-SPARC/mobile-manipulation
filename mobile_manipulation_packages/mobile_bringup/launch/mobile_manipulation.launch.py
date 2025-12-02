@@ -257,7 +257,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {'path_resolution': 0.05},
-            {'security_distance': 0.45},
+            {'security_distance': 0.2},
             {'iterations_before_verification': 20},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -271,7 +271,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {'path_resolution': 0.05},
-            {'security_distance': 0.45},
+            {'security_distance': 0.2},
             {'iterations_before_verification': 20},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -370,6 +370,18 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    is_gripper_holding = Node(
+        package="manipulation",
+        executable="is_gripper_holding",
+        name="is_gripper_holding",
+        output="screen",
+        parameters=[
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
+
     synchronize_isaac = Node(
         package='isaacsim_moveit',
         executable='synchronize_isaac_sim_labels',
@@ -417,6 +429,9 @@ def generate_launch_description():
     if 'GetStorageInfo' in bt_actions:
         print("[LAUNCH] >> GetStorageInfo detectado.")
         final_launch_list.append(get_storage_info)
+    
+    if 'IsGripperHoldingObject' in bt_actions:
+        final_launch_list.append(is_gripper_holding)
 
    
     return LaunchDescription(final_launch_list)

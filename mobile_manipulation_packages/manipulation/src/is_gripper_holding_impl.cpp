@@ -29,18 +29,23 @@ IsGripperHolding::IsGripperHolding()
 bool IsGripperHolding::checkIsHolding() 
 {
     std::lock_guard<std::mutex> lock(contact_sensor_mutex_);
+    int contador = 0;
 
-    if (contact_sensor_data_.empty()) 
+    for(size_t i = 0; i < contact_sensor_data_.size(); i++)
     {
-        return false; 
+        if(contact_sensor_data_[i] > 0.5)
+        {
+            contador++;
+        }
     }
 
-    float latest_pressure = contact_sensor_data_.back();
-    bool holding = latest_pressure >= PRESSURE_THRESHOLD;
+    if(contador >= 9)
+    {
+        return true;
+    }
 
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "Check Holding Status: %.3f. Result: %s", latest_pressure, holding ? "TRUE" : "FALSE");
     
-    return holding;
+    return false;
 }
 
 
@@ -48,10 +53,11 @@ void IsGripperHolding::topic_callback(const std_msgs::msg::Float32 & msg)
 {
     std::lock_guard<std::mutex> lock(contact_sensor_mutex_); 
 
-    if (contact_sensor_data_.size() >= MAX_SAMPLES) 
+    if (contact_sensor_data_.size() > 10) 
     {
         contact_sensor_data_.pop_front();
     }
+
 
     contact_sensor_data_.push_back(msg.data);
 }

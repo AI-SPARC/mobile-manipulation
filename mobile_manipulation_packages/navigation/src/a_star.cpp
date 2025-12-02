@@ -884,18 +884,6 @@ private:
                 }
 
                 
-                float dist = std::hypot(current_goal_pose.first - pose_x_, current_goal_pose.second - pose_y_);
-                
-                
-                if (dist < 0.15 && !path_needs_calculation) 
-                {
-                    result->success = true;
-                    goal_handle->succeed(result);
-                    RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso (Result enviado).");
-                    return;
-                }
-
-                
                 if (!path_needs_calculation)
                 {
                     std::lock_guard<std::mutex> lock(map_mutex_); 

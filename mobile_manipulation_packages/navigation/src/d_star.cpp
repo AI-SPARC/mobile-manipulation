@@ -874,15 +874,6 @@ private:
                     return;
                 }
 
-                float dist = std::hypot(goal_pose.first - pose_x_, goal_pose.second - pose_y_);
-                if (dist < 0.15 && !previousPath.empty()) 
-                {
-                    result->success = true;
-                    goal_handle->succeed(result);
-                    RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso (Result enviado).");
-                    return;
-                }
-
                 bool path_changed = false;
 
                 {
