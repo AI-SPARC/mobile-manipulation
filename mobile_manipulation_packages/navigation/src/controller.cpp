@@ -33,7 +33,7 @@ public:
         linear_speed_ = 0.5;
         angular_speed_ = 2.0;
         
-        waypoint_tolerance_ = 0.15; 
+        waypoint_tolerance_ = 0.075; 
         
         lookahead_distance_ = 0.15; 
 
@@ -125,6 +125,12 @@ private:
         std::vector<geometry_msgs::msg::Pose> path;
         for (const auto& p : goal->path.poses) path.push_back(p.pose);
 
+        if (path.empty()) {
+            result->success = true;
+            goal_handle->succeed(result);
+            return;
+        }
+
         size_t current_idx = 0;
         rclcpp::Rate rate(50); 
 
@@ -173,14 +179,12 @@ private:
                 if (dist >= lookahead_distance_) break; 
             }
             
-            // Ângulo alvo
             tf2::Quaternion q(local_pose.orientation.x, local_pose.orientation.y, local_pose.orientation.z, local_pose.orientation.w);
             double yaw = get_yaw_from_quaternion(q);
             double target_yaw = std::atan2(dy, dx);
             double angle_error = normalize_angle(target_yaw - yaw);
 
             geometry_msgs::msg::Twist cmd;
-
             double k_p_angular = 2.0; 
 
             double dist_to_current = std::hypot(
@@ -188,21 +192,16 @@ private:
                 path[current_idx].position.y - local_pose.position.y
             );
 
-         
             if (std::fabs(angle_error) > 0.8) 
             {
                 cmd.linear.x = 0.0;
                 cmd.angular.z = std::clamp(angle_error * k_p_angular, -angular_speed_, angular_speed_);
-                
                 if (std::abs(cmd.angular.z) < 0.3) cmd.angular.z = (cmd.angular.z > 0) ? 0.3 : -0.3;
             } 
             else 
             {
-              
                 double curvature_slowdown = std::max(0.2, 1.0 - (std::fabs(angle_error) * 1.5));
-                
                 double distance_slowdown = std::min(linear_speed_, dist_to_target);
-
                 cmd.linear.x = std::clamp(distance_slowdown * curvature_slowdown, 0.0, linear_speed_);
                 cmd.angular.z = std::clamp(angle_error * k_p_angular, -angular_speed_, angular_speed_);
             }
@@ -219,6 +218,60 @@ private:
             if (current_idx >= path.size()) break;
 
             rate.sleep();
+        }
+
+
+        publish_zero_velocity();
+        rclcpp::sleep_for(std::chrono::milliseconds(100));
+
+        RCLCPP_INFO(this->get_logger(), "Posição alcançada. Iniciando alinhamento final...");
+
+        geometry_msgs::msg::Pose final_pose = path.back();
+        tf2::Quaternion q_final(
+            final_pose.orientation.x, final_pose.orientation.y,
+            final_pose.orientation.z, final_pose.orientation.w);
+        double final_target_yaw = get_yaw_from_quaternion(q_final);
+        
+        bool aligned = false;
+        double alignment_tolerance = 0.05; 
+
+        while (rclcpp::ok() && !aligned)
+        {
+             if (goal_handle->is_canceling()) {
+                publish_zero_velocity();
+                result->success = false;
+                goal_handle->canceled(result);
+                return;
+             }
+
+             geometry_msgs::msg::Pose local_pose;
+             {
+                 std::lock_guard<std::mutex> lock(pose_mutex_);
+                 local_pose = current_pose_;
+             }
+
+             tf2::Quaternion q_curr(local_pose.orientation.x, local_pose.orientation.y, local_pose.orientation.z, local_pose.orientation.w);
+             double current_yaw = get_yaw_from_quaternion(q_curr);
+             
+             double angle_error = normalize_angle(final_target_yaw - current_yaw);
+
+             if (std::abs(angle_error) <= alignment_tolerance) {
+                 aligned = true;
+                 break;
+             }
+
+             geometry_msgs::msg::Twist cmd;
+             cmd.linear.x = 0.0;
+             
+             double k_p_final = 2.5; 
+             cmd.angular.z = std::clamp(angle_error * k_p_final, -angular_speed_, angular_speed_);
+             
+             if (std::abs(cmd.angular.z) < 0.2) cmd.angular.z = (cmd.angular.z > 0) ? 0.2 : -0.2;
+
+             cmd.angular.z = -cmd.angular.z; 
+
+             cmd_vel_pub_->publish(cmd);
+             rate.sleep();
         }
 
         publish_zero_velocity();

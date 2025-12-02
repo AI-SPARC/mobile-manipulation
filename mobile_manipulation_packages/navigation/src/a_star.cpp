@@ -49,6 +49,7 @@
 #include "mobile_manipulation_interfaces/action/path.hpp"
 #include <sensor_msgs/point_cloud2_iterator.hpp> 
 #include <mutex>
+#include "geometry_msgs/msg/pose_array.hpp"
 
 using namespace std::chrono_literals;
 
@@ -699,13 +700,35 @@ private:
             vertex.x = std::get<0>(path[i]);
             vertex.y = std::get<1>(path[i]);
 
+            float dx = 0.0f;
+            float dy = 0.0f;
+            bool calculation_possible = false;
+
             if (i < path.size() - 1) 
             {
                 const std::pair<float, float>& current_vertex = path[i];
                 const std::pair<float, float>& next_vertex = path[i + 1];
 
-                float dx = std::get<0>(next_vertex) - std::get<0>(current_vertex);
-                float dy = std::get<1>(next_vertex) - std::get<1>(current_vertex);
+                dx = std::get<0>(next_vertex) - std::get<0>(current_vertex);
+                dy = std::get<1>(next_vertex) - std::get<1>(current_vertex);
+                calculation_possible = true;
+            } 
+            else 
+            {
+                
+                const std::pair<float, float>& current_vertex = path[i];
+                
+                dx = original_goal.first - std::get<0>(current_vertex);
+                dy = original_goal.second - std::get<1>(current_vertex);
+                
+              
+                if (std::sqrt(dx*dx + dy*dy) > 1e-3) {
+                    calculation_possible = true;
+                }
+            }
+
+            if (calculation_possible) 
+            {
                 float distance = std::sqrt(dx * dx + dy * dy);
 
                 if (distance > 0.0f) {
@@ -722,19 +745,27 @@ private:
                 vertex.orientation_y = quaternion.y();
                 vertex.orientation_z = quaternion.z();
                 vertex.orientation_w = quaternion.w();
-            } 
+            }
             else 
             {
-                vertex.orientation_x = 0.0;
-                vertex.orientation_y = 0.0;
-                vertex.orientation_z = 0.0;
-                vertex.orientation_w = 1.0;
+                if (!path_points.empty()) {
+                    vertex.orientation_x = path_points.back().orientation_x;
+                    vertex.orientation_y = path_points.back().orientation_y;
+                    vertex.orientation_z = path_points.back().orientation_z;
+                    vertex.orientation_w = path_points.back().orientation_w;
+                } else {
+                    vertex.orientation_x = 0.0;
+                    vertex.orientation_y = 0.0;
+                    vertex.orientation_z = 0.0;
+                    vertex.orientation_w = 1.0;
+                }
             }
             path_points.push_back(vertex);
         }
 
         publisher_dijkstra_path();
     }
+
 
     // Publishers.
     void publisher_dijkstra_path()
@@ -761,7 +792,6 @@ private:
         }
         publisher_nav_path_->publish(path_msg);
     }
-
 
 
 
