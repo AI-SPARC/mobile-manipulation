@@ -2,6 +2,7 @@ storage_01:
   - position: [-2.05, 8.44263, 0.6]
     orientation: [0.0, 0.0, 0.0]
     size: [0.15, 0.4]
+    max_objects: 20
 
 storage_02:
   - position: [-1.33, 8.44263, 0.6]
