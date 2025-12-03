@@ -14,13 +14,17 @@ StorageNode::StorageNode(const rclcpp::NodeOptions & options)
 
     if(!label_file.empty()) {
         loadLabelToStorage(label_file);
-    } else {
+    } 
+    else 
+    {
         RCLCPP_WARN(this->get_logger(), "Param 'label_to_storage_yaml_file' is empty.");
     }
 
     if(!poses_file.empty()) {
         loadStoragePoses(poses_file);
-    } else {
+    } 
+    else 
+    {
         RCLCPP_WARN(this->get_logger(), "Param 'storage_poses_yaml_file' is empty.");
     }
 

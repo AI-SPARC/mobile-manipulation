@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
 project(task_planning)
 
-
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -O3)
 endif()
@@ -32,7 +31,6 @@ find_package(Boost REQUIRED)
 find_package(TBB REQUIRED)
 find_package(OpenCV REQUIRED)
 
-
 find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
@@ -40,12 +38,11 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
-
 find_package(manipulation REQUIRED)
+find_package(storage_manager REQUIRED) 
 
-message(STATUS "manipulation_INCLUDE_DIRS = ${manipulation_INCLUDE_DIRS}")
-message(STATUS "manipulation_LIBRARY_DIRS = ${manipulation_LIBRARY_DIRS}")
-message(STATUS "manipulation_LIBRARIES    = ${manipulation_LIBRARIES}")
+message(STATUS "storage_manager_INCLUDE_DIRS = ${storage_manager_INCLUDE_DIRS}")
+message(STATUS "storage_manager_LIBRARIES    = ${storage_manager_LIBRARIES}")
 
 add_executable(server_node src/server_node.cpp)
 
@@ -53,13 +50,16 @@ target_include_directories(server_node
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
-    ${manipulation_INCLUDE_DIRS}    
+    ${manipulation_INCLUDE_DIRS}
+    ${storage_manager_INCLUDE_DIRS}  
     ${PCL_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
 )
 
-
-link_directories(${manipulation_LIBRARY_DIRS})
+link_directories(
+  ${manipulation_LIBRARY_DIRS}
+  ${storage_manager_LIBRARY_DIRS} 
+)
 
 ament_target_dependencies(server_node
   rclcpp
@@ -81,6 +81,7 @@ ament_target_dependencies(server_node
   mobile_manipulation_interfaces
   behaviortree_cpp
   Eigen3
+  storage_manager 
 )
 
 target_link_libraries(server_node
@@ -89,9 +90,9 @@ target_link_libraries(server_node
   ${OpenGL_LIBRARIES}
   ${OpenCV_LIBRARIES}
   yaml-cpp
-  ${manipulation_LIBRARIES}  
+  ${manipulation_LIBRARIES}
+  ${storage_manager_LIBRARIES} 
 )
-
 
 install(
   TARGETS server_node
@@ -102,7 +103,6 @@ install(
   DIRECTORY bt
   DESTINATION share/${PROJECT_NAME}
 )
-
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

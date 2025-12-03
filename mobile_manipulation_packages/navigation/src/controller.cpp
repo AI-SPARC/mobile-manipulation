@@ -189,7 +189,7 @@ private:
                     in_zone_1 = true;
                 }
                 
-                if ((this->now() - zone_1_entry_time).seconds() > 1.5) {
+                if ((this->now() - zone_1_entry_time).seconds() > 1.0) {
                     RCLCPP_WARN(this->get_logger(), "Aceitando Zona 1 (%.3fm) após 1.5s. Indo para rotação.", dist_to_final_goal);
                     break;
                 }
@@ -274,7 +274,7 @@ private:
 
 
         publish_zero_velocity();
-        rclcpp::sleep_for(std::chrono::milliseconds(400)); 
+        rclcpp::sleep_for(std::chrono::milliseconds(200)); 
 
         geometry_msgs::msg::Pose final_pose = path.back();
         tf2::Quaternion q_final(

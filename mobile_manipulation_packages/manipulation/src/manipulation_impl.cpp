@@ -265,11 +265,11 @@ void SimpleManipulation::open_gripper()
 
     if (result == moveit::core::MoveItErrorCode::SUCCESS) 
     {
-        RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+        RCLCPP_INFO(this->get_logger(), "Gripper abriu (MoveIt).");
     } 
     else 
     {
-        RCLCPP_ERROR(this->get_logger(), "Falha ao fechar o gripper.");
+        RCLCPP_ERROR(this->get_logger(), "Falha ao abrir o gripper.");
     }
 }
 
@@ -691,6 +691,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
 
     if(goal->pick == true)
     {
+
         open_gripper();
     }
 

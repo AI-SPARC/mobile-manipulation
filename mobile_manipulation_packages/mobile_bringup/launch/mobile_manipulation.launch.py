@@ -11,41 +11,34 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from os import path
 import yaml
 
-
-# --- FUNÇÃO DE PARSING DO XML DA BT ---
-# --- FUNÇÃO DE PARSING DO XML DA BT (CORRIGIDA) ---
 def analyze_bt_xml(xml_path):
     """
     Analisa a BT e retorna:
-    1. Um set com todas as Actions encontradas (Tag Names E atributos ID).
-    2. O tipo de planejador preferido encontrado na tag ComputePath (atributo 'planner').
+    1. Um set com todas as Actions encontradas.
+    2. O tipo de planejador preferido.
     """
     analysis = {
         'actions': set(),
-        'planner_type': 'd_star' # Valor default
+        'planner_type': 'd_star' 
     }
 
     print(f"[LAUNCH DEBUG] Tentando ler BT em: {xml_path}")
 
     try:
         if not os.path.exists(xml_path):
-            print(f"[LAUNCH ERROR] ARQUIVO NÃO ENCONTRADO! Verifique se o XML foi instalado corretamente no 'install/share'.")
+            print(f"[LAUNCH ERROR] ARQUIVO NÃO ENCONTRADO! Verifique se o XML foi instalado corretamente.")
             return analysis
             
         tree = ET.parse(xml_path)
         root = tree.getroot()
         
         for elem in root.iter():
-            # CORREÇÃO 1: Adicionar o próprio nome da tag (Ex: <PickObject> vira 'PickObject')
-            # O split('}') serve para ignorar namespaces de XML se houverem
             tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
             analysis['actions'].add(tag_name)
 
-            # CORREÇÃO 2: Adicionar o atributo ID se existir (Ex: <SubTree ID="PlaceRoutine">)
             if 'ID' in elem.attrib:
                 analysis['actions'].add(elem.attrib['ID'])
             
-            # Verificação do Planner
             if tag_name == 'ComputePath' or elem.attrib.get('ID') == 'ComputePath':
                 if 'planner' in elem.attrib:
                     analysis['planner_type'] = elem.attrib['planner']
@@ -77,7 +70,7 @@ def generate_launch_description():
     ros2_control_hardware_type = DeclareLaunchArgument(
         "ros2_control_hardware_type",
         default_value="isaac",
-        description="ROS2 control hardware interface type to use for the launch file -- possible values: [mock_components, isaac]",
+        description="ROS2 control hardware interface type",
     )
 
     use_sim_time = DeclareLaunchArgument(
@@ -91,9 +84,7 @@ def generate_launch_description():
         .robot_description(
             file_path="config/panda.urdf.xacro",
             mappings={
-                "ros2_control_hardware_type": LaunchConfiguration(
-                    "ros2_control_hardware_type"
-                )
+                "ros2_control_hardware_type": LaunchConfiguration("ros2_control_hardware_type")
             },
         )
         .robot_description_semantic(file_path="config/panda.srdf")
@@ -103,9 +94,11 @@ def generate_launch_description():
         .to_moveit_configs()
     )
 
-  
+    pkg_name_task = 'task_planning'
+    pkg_name_bringup = 'mobile_bringup'
+
     bt_file = os.path.join(
-        get_package_share_directory('task_planning'),
+        get_package_share_directory(pkg_name_task),
         'bt',
         'box.xml'
     )
@@ -114,7 +107,24 @@ def generate_launch_description():
     bt_actions = bt_analysis['actions']
     planner_choice = bt_analysis['planner_type']
 
+    pick_place_yaml = os.path.join(
+        get_package_share_directory(pkg_name_bringup),
+        'config',
+        'pick_and_place_poses.yaml'
+    )
 
+    label_to_storage_yaml = os.path.join(
+        get_package_share_directory(pkg_name_bringup),
+        'config',
+        'labels_to_storage.yaml'
+    )
+
+    storage_poses_yaml = os.path.join(
+        get_package_share_directory(pkg_name_bringup),
+        'config',
+        'storages.yaml'
+    )
+  
     move_group_node = Node(
         package="moveit_ros_move_group",
         executable="move_group",
@@ -125,37 +135,6 @@ def generate_launch_description():
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         arguments=["--ros-args", "--log-level", "info"],
-    )
-
-    _robot_description_kinematics_yaml = load_yaml(
-        "vai_se_ferrar_moveit_config", path.join("config", "kinematics.yaml")
-    )
-    robot_description_kinematics = {
-        "robot_description_kinematics": _robot_description_kinematics_yaml
-    }
-
-    # RViz
-    rviz_config_file = os.path.join(
-        get_package_share_directory("isaacsim_moveit"),
-        "rviz",
-        "moveit.rviz",
-    )
-
-    rviz_node = Node(
-        package="rviz2",
-        executable="rviz2",
-        name="rviz2",
-        output="log",
-        arguments=["-d", rviz_config_file],
-        parameters=[
-            moveit_config.robot_description,
-            moveit_config.robot_description_semantic,
-            moveit_config.robot_description_kinematics,
-            moveit_config.planning_pipelines,
-            moveit_config.joint_limits,
-            # robot_description_kinematics,
-            {"use_sim_time": LaunchConfiguration("use_sim_time")},
-        ],
     )
 
     robot_state_publisher = Node(
@@ -174,6 +153,7 @@ def generate_launch_description():
         "config",
         "ros2_controllers.yaml",
     )
+    
     ros2_control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
@@ -190,11 +170,7 @@ def generate_launch_description():
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=[
-            "joint_state_broadcaster",
-            "--controller-manager",
-            "/controller_manager",
-        ],
+        arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
     )
 
     panda_arm_controller_spawner = Node(
@@ -203,6 +179,11 @@ def generate_launch_description():
         arguments=["panda_arm_controller", "-c", "/controller_manager"],
     )
 
+    robot_description_kinematics = {
+        "robot_description_kinematics": load_yaml(
+            "vai_se_ferrar_moveit_config", path.join("config", "kinematics.yaml")
+        )
+    }
 
     robot_description_joint_limits = {
         "robot_description_planning": load_yaml(
@@ -210,26 +191,6 @@ def generate_launch_description():
         )
     }
 
-    pkg_name = 'mobile_bringup'
-
-    yaml_file = os.path.join(
-        get_package_share_directory(pkg_name),
-        'config',
-        'pick_and_place_poses.yaml'
-    )
-
-    label_to_storage_yaml_file = os.path.join(
-        get_package_share_directory(pkg_name),
-        'config',
-        'labels_to_storage.yaml'
-    )
-
-    storage_poses_yaml_file = os.path.join(
-        get_package_share_directory(pkg_name),
-        'config',
-        'storages.yaml'
-    )
-  
     manipulation = Node(
         package="manipulation",
         executable="manipulation",
@@ -244,7 +205,7 @@ def generate_launch_description():
             moveit_config.trajectory_execution,
             robot_description_kinematics,
             moveit_config.planning_scene_monitor,
-            {'yaml_file': yaml_file},
+            {'yaml_file': pick_place_yaml},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
         arguments=["--ros-args", "--log-level", "info"],
@@ -291,22 +252,25 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+   
     server_node = Node(
         package="task_planning",
         executable="server_node",
         name="server_node",
         output="screen",
         parameters=[
-            {'yaml_file': yaml_file},
+            {'yaml_file': pick_place_yaml},
             {'bt_xml_path': bt_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
+            
+            {'label_to_storage_yaml_file': label_to_storage_yaml},
+            {'storage_poses_yaml_file': storage_poses_yaml},
         ],
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-
     labels_yaml_file = os.path.join(
-        get_package_share_directory(pkg_name),
+        get_package_share_directory(pkg_name_bringup),
         'config',
         'labels.yaml'
     )
@@ -334,24 +298,10 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-    get_storage_info = Node(
-        package="storage_manager",
-        executable="get_storage_info",
-        name="get_storage_info",
-        output="screen",
-        parameters=[
-            {'label_to_storage_yaml_file': label_to_storage_yaml_file},
-            {'storage_poses_yaml_file': storage_poses_yaml_file},
-            {"use_sim_time": LaunchConfiguration("use_sim_time")},
-        ],
-        arguments=["--ros-args", "--log-level", "info"],
-    )
-
     map_dir = os.path.join(
         get_package_share_directory('mobile_bringup'),
         'maps'
     )
-
     map_yaml_filename = os.path.join(map_dir, 'multiple_storages.yaml')
     map_pgm_filename = os.path.join(map_dir, 'multiple_storages.png')
 
@@ -370,18 +320,6 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-    is_gripper_holding = Node(
-        package="manipulation",
-        executable="is_gripper_holding",
-        name="is_gripper_holding",
-        output="screen",
-        parameters=[
-            {"use_sim_time": LaunchConfiguration("use_sim_time")},
-        ],
-        arguments=["--ros-args", "--log-level", "info"],
-    )
-
-
     synchronize_isaac = Node(
         package='isaacsim_moveit',
         executable='synchronize_isaac_sim_labels',
@@ -389,7 +327,6 @@ def generate_launch_description():
         output='screen',
     )
     
-
     final_launch_list = [
         ros2_control_hardware_type,
         use_sim_time,
@@ -398,12 +335,11 @@ def generate_launch_description():
         ros2_control_node,
         joint_state_broadcaster_spawner,
         panda_arm_controller_spawner,
-        server_node,
+        server_node,           
         synchronize_isaac,
-        # rviz_node,
     ]
 
-  
+
     if 'ComputePath' in bt_actions or 'ComputePathToPose' in bt_actions:
         print(f"[LAUNCH] >> Navegação detectada na BT. Algoritmo escolhido: {planner_choice}")
         
@@ -412,7 +348,6 @@ def generate_launch_description():
         elif planner_choice == 'd_star':
             final_launch_list.append(d_star)
         else:
-            print(f"[LAUNCH] >> AVISO: Planner '{planner_choice}' desconhecido. Usando D* padrão.")
             final_launch_list.append(d_star)
 
         final_launch_list.append(obstacle_graph_with_occupancy_grid)
@@ -426,12 +361,6 @@ def generate_launch_description():
         print("[LAUNCH] >> Controlador de caminho (NavigateTo) detectado.")
         final_launch_list.append(controller)
 
-    if 'GetStorageInfo' in bt_actions:
-        print("[LAUNCH] >> GetStorageInfo detectado.")
-        final_launch_list.append(get_storage_info)
-    
-    if 'IsGripperHoldingObject' in bt_actions:
-        final_launch_list.append(is_gripper_holding)
 
-   
+
     return LaunchDescription(final_launch_list)
