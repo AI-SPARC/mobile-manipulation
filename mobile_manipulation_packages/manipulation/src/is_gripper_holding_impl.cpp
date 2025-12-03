@@ -33,7 +33,7 @@ bool IsGripperHolding::checkIsHolding()
 
     for(size_t i = 0; i < contact_sensor_data_.size(); i++)
     {
-        if(contact_sensor_data_[i] > 0.5)
+        if(contact_sensor_data_[i] > 0.1)
         {
             contador++;
         }

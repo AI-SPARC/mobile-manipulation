@@ -8,11 +8,15 @@
         <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
         
         <Fallback name="EnsureProximity">
-             <IsRobotNear target="{target_pose}" threshold="0.45"/>
+             
+             <IsRobotNear target="{target_pose}" 
+                      max_dist="0.7" 
+                      min_dist="0.01" 
+                      adjustment_pose="{nav_target}"/>
              
              <ParallelAny> 
                 <NavigateTo/> 
-                <ComputePath planner="d_star" target="{target_pose}"/>
+                <ComputePath planner="a_star" target="{nav_target}"/>
              </ParallelAny>
         </Fallback>
           
@@ -31,11 +35,14 @@
       <Sequence name="ApproachAndPlace">
           
           <Fallback name="EnsureProximityStorage">
-            <IsRobotNear target="{storage_pose}" threshold="0.45"/>
+            <IsRobotNear target="{storage_pose}" 
+                      max_dist="0.7" 
+                      min_dist="0.01" 
+                      adjustment_pose="{storage_pose}"/>
             
             <ParallelAny name="Nav_Replan_Monitor">
                 <NavigateTo/> 
-                <ComputePath planner="d_star" target="{storage_pose}"/>
+                <ComputePath planner="a_star" target="{storage_pose}"/>
                 
                 <KeepRunningUntilFailure>
                     <IsGripperHoldingObject/>

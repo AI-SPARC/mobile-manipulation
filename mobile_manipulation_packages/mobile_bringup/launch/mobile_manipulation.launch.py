@@ -363,7 +363,7 @@ def generate_launch_description():
         parameters=[
             {'map_yaml_file': map_yaml_filename},
             {'map_image_file': map_pgm_filename},
-            {'max_security_distance': 0.3},
+            {'max_security_distance': 0.45},
             {'obstacle_graph_resolution': 0.05},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],

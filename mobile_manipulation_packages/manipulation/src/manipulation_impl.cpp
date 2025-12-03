@@ -327,64 +327,74 @@ bool SimpleManipulation::positions_for_arm(const geometry_msgs::msg::Pose &targe
         return false;
     }
 
-    const int MAX_PLANNING_CYCLES = 100;
+    const int MAX_PLANNING_CYCLES = 4; 
     bool task_success = false; 
+
+    if (computeCartesian)
+    {
+        if (attempt_cartesian_move(target_pose, maxVelocity, true))
+        {
+            return true;
+        }
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Iniciando planejamento Free-Space para Pose Target...");
+
+    move_group_arm->setStartStateToCurrentState();
+    
+   
+    move_group_arm->setPlannerId("RRTConnectkConfigDefault"); 
+
+    move_group_arm->setPoseTarget(target_pose, "panda_link8");
+
+
+    move_group_arm->setPlanningTime(5.0); 
+    move_group_arm->setNumPlanningAttempts(20); 
+
+    move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
+    move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
+
+
+    double tolerance = 0.005; 
+    move_group_arm->setGoalPositionTolerance(tolerance);
+    move_group_arm->setGoalOrientationTolerance(0.01); 
 
     for (int cycle = 1; cycle <= MAX_PLANNING_CYCLES; ++cycle)
     {
-        RCLCPP_INFO(this->get_logger(), "Ciclo de Planejamento Externo: Tentativa %d de %d", cycle, MAX_PLANNING_CYCLES);
-
-        if (computeCartesian)
-        {
-            if (attempt_cartesian_move(target_pose, maxVelocity, true))
-            {
-                task_success = true;
-            }
-        }
-
-        if (task_success)
-        {
-            break; 
-        }
-
-        RCLCPP_INFO(this->get_logger(), "Tentando planejamento normal (free-space)...");
-
-        move_group_arm->setStartStateToCurrentState();
-        move_group_arm->setPlannerId("RRTConnectkConfigDefault");
-        move_group_arm->setPoseTarget(target_pose, "panda_link8");
-        move_group_arm->setPlanningTime(2.0);
-        move_group_arm->setNumPlanningAttempts(10);
-        move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
-        move_group_arm->setMaxAccelerationScalingFactor(maxVelocity);
-        move_group_arm->setGoalPositionTolerance(0.0001);
-        move_group_arm->setGoalOrientationTolerance(0.0001);
+        RCLCPP_INFO(this->get_logger(), "Ciclo de Planejamento %d/%d (Vel: %.2f)", cycle, MAX_PLANNING_CYCLES, maxVelocity);
 
         moveit::planning_interface::MoveGroupInterface::Plan my_plan;
         auto plan_result = move_group_arm->plan(my_plan);
 
-        if (plan_result != moveit::core::MoveItErrorCode::SUCCESS)
+        if (plan_result == moveit::core::MoveItErrorCode::SUCCESS)
         {
-            RCLCPP_WARN(this->get_logger(), "Planejamento normal falhou nesta tentativa.");
-            continue; 
+            RCLCPP_INFO(this->get_logger(), "Planejamento bem-sucedido. Executando...");
+            
+            
+            auto exec_result = move_group_arm->execute(my_plan);
+
+            if (exec_result == moveit::core::MoveItErrorCode::SUCCESS)
+            {
+                RCLCPP_INFO(this->get_logger(), "Execução bem-sucedida.");
+                task_success = true;
+                break; 
+            }
+            else
+            {
+                RCLCPP_WARN(this->get_logger(), "Execução falhou (Erro de controlador ou Trajectory Tolerance).");
+            }
         }
-
-        RCLCPP_INFO(this->get_logger(), "Planejamento normal bem-sucedido. Executando...");
-        auto exec_result = move_group_arm->execute(my_plan);
-
-        if (exec_result != moveit::core::MoveItErrorCode::SUCCESS)
+        else
         {
-            RCLCPP_WARN(this->get_logger(), "Execução normal falhou nesta tentativa.");
-            continue; 
+            RCLCPP_WARN(this->get_logger(), "Falha ao encontrar plano válido nesta tentativa.");
         }
-
-        RCLCPP_INFO(this->get_logger(), "Execução normal bem-sucedida.");
-        task_success = true; 
-        break;
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     if (!task_success)
     {
-        RCLCPP_ERROR(this->get_logger(), "Falha no planejamento e execução após %d ciclos.", MAX_PLANNING_CYCLES);
+        RCLCPP_ERROR(this->get_logger(), "FALHA FINAL: Não foi possível atingir a pose na velocidade %.2f.", maxVelocity);
     }
 
     return task_success;
@@ -472,7 +482,7 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
 
         if(pick == true)
         {
-            if (positions_for_arm(target_pose_world, 0.15, false)) 
+            if (positions_for_arm(target_pose_world, 1.0, false)) 
             {
                 send_request(received_id, false);
 
@@ -483,7 +493,7 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
 
                 close_gripper();
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(500));
+                rclcpp::sleep_for(std::chrono::milliseconds(200));
                 
             
                 target_pose_world.position.z += 0.1;
@@ -491,7 +501,6 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
 
                 // set_collision_allowance(received_id, "ground_plane", true);
 
-                rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 ready();
             }

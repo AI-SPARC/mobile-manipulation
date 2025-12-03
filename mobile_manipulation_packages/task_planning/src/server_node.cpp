@@ -25,6 +25,8 @@
 #include "std_msgs/msg/bool.hpp"
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #include <yaml-cpp/yaml.h>
 
@@ -234,19 +236,37 @@ private:
 
         factory.registerSimpleCondition("IsRobotNear", [&](BT::TreeNode &self)
         {
-            auto target = self.getInput<geometry_msgs::msg::Pose>("target");
-            auto threshold = self.getInput<double>("threshold");
+            auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target");
+            if (!target_pose_opt) return BT::NodeStatus::FAILURE;
+            geometry_msgs::msg::Pose target = target_pose_opt.value();
 
-            if (!target || !threshold) return BT::NodeStatus::FAILURE;
+            auto max_dist_opt = self.getInput<double>("max_dist");
+            auto min_dist_opt = self.getInput<double>("min_dist");
+            
+            double max_dist = max_dist_opt ? max_dist_opt.value() : 0.5;
+            double min_dist = min_dist_opt ? min_dist_opt.value() : 0.35;
 
-            double dx = this->pose_x - target.value().position.x;
-            double dy = this->pose_y - target.value().position.y;
-            double dist = std::sqrt(dx*dx + dy*dy);
+            double dx = this->pose_x - target.position.x;
+            double dy = this->pose_y - target.position.y;
+            double current_dist = std::sqrt(dx*dx + dy*dy);
 
-            return (dist <= threshold.value()) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+            if (current_dist >= min_dist && current_dist <= max_dist)
+            {
+                return BT::NodeStatus::SUCCESS;
+            }
+   
+            RCLCPP_WARN(this->get_logger(), "BT: Robô longe (%.2fm). Enviando target original como destino.", current_dist);
+
+            self.setOutput("adjustment_pose", target);
+
+            return BT::NodeStatus::FAILURE; 
         }, 
-        { BT::InputPort<geometry_msgs::msg::Pose>("target"), BT::InputPort<double>("threshold") });
-
+        { 
+            BT::InputPort<geometry_msgs::msg::Pose>("target"), 
+            BT::InputPort<double>("max_dist"),
+            BT::InputPort<double>("min_dist"),
+            BT::OutputPort<geometry_msgs::msg::Pose>("adjustment_pose")
+        });
 
         factory.registerSimpleAction("DetectObject", [&](BT::TreeNode &self)
         {
@@ -339,7 +359,7 @@ private:
                 }
                 else 
                 {
-
+                    RCLCPP_INFO(this->get_logger(), "Gripper não está segurando o objeto.");
                     return BT::NodeStatus::FAILURE; 
                 }
             }
@@ -696,7 +716,7 @@ private:
 
         if (feedback->recalculating_path)
         {
-
+            RCLCPP_INFO(this->get_logger(), "cancel controller goal");
             cancel_controller_goal();
         }
         else 
@@ -721,9 +741,19 @@ private:
 
     void path_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::WrappedResult & result)
     {
-        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
-            if (result.result->success) path_state_ = TaskState::SUCCESS;
-            else path_state_ = TaskState::FAILURE;
+        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) 
+        {
+            
+            if (result.result->success) 
+            {
+                path_state_ = TaskState::SUCCESS;
+                RCLCPP_INFO(this->get_logger(), "PATH RESULT SUCESS");
+            }
+            else 
+            {
+                path_state_ = TaskState::FAILURE;
+                RCLCPP_INFO(this->get_logger(), "PATH RESULT FAILURE");
+            }
         }
     }
 
@@ -735,6 +765,8 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Action server 'controller' not available");
             return false;
         }
+
+        RCLCPP_INFO(this->get_logger(), "Mandando para o controller");
 
         auto goal_msg = mobile_manipulation_interfaces::action::Controller::Goal();
         goal_msg.path = target_path;
