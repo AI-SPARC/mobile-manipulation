@@ -164,6 +164,13 @@ public:
     }
 
 private:
+    struct ObjectInfo 
+    {
+        std::string id;
+        geometry_msgs::msg::Pose pose;
+        geometry_msgs::msg::Vector3 size; 
+    };
+
     std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_;
     std::shared_ptr<storage_manager::StorageNode> storage_node_;
     std::shared_ptr<storage_manager::OrganizeNode> organize_node_;
@@ -181,7 +188,7 @@ private:
     std::unordered_set<std::string> picked;
     
     std::pair<std::string, geometry_msgs::msg::Pose> pick_pose;
-    std::pair<std::string, geometry_msgs::msg::Pose> cached_object_;
+    ObjectInfo cached_object_;
     
     std::string current_target_id_ = "";
     geometry_msgs::msg::Pose current_target_pose_;
@@ -277,6 +284,7 @@ private:
             
             self.setOutput("output_pose", current_target_pose_);
             self.setOutput("output_id", current_target_id_);
+            self.setOutput("output_id", current_target_id_);
             
             picked.insert(current_target_id_);
             pick_pose = cached_object_;
@@ -287,7 +295,11 @@ private:
 
             return BT::NodeStatus::SUCCESS;
         }, 
-        { BT::OutputPort<geometry_msgs::msg::Pose>("output_pose"), BT::OutputPort<std::string>("output_id") });
+        { 
+            BT::OutputPort<geometry_msgs::msg::Pose>("output_pose"), 
+            BT::OutputPort<std::string>("output_id"),
+            BT::OutputPort<geometry_msgs::msg::Vector3("object_size")
+        });
 
 
         factory.registerSimpleAction("ClearTarget", [&](BT::TreeNode &self)
@@ -435,20 +447,25 @@ private:
         factory.registerSimpleAction("IncrementOrganizedStorageIndexes", [&](BT::TreeNode &self)
         {
             auto id_opt = self.getInput<std::string>("storage_id");
-            if (!id_opt) 
+            auto newIndexes = self.getInput<std::vector<int>>("new_indexes");
+            if (!id_opt || !newIndexes) 
             {
                 return BT::NodeStatus::FAILURE;
             }
 
             std::string storage_name = id_opt.value();
+            std::vector<int> new_indexes = newIndexes.value();
             
-            storage_node_->incrementStorageCount(storage_name, -1);
+            storage_node_->addNewIndexes(storage_name, new_indexes);
             
-            RCLCPP_WARN(this->get_logger(), "ROLLBACK: Liberando vaga no storage '%s' devido a falha.", storage_name.c_str());
+            RCLCPP_WARN(this->get_logger(), "Adicionando novos índices ocupados no armazém '%s'.", storage_name.c_str());
 
             return BT::NodeStatus::SUCCESS;
         }, 
-        { BT::InputPort<std::string>("storage_id") });
+        { 
+            BT::InputPort<std::string>("storage_id"),
+            BT::InputPort<std::vector<int>>("new_indexes") 
+        });
 
         factory.registerSimpleAction("DecrementStorageCount", [&](BT::TreeNode &self)
         {

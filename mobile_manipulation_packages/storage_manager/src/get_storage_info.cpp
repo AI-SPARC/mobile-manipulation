@@ -128,6 +128,30 @@ void StorageNode::incrementStorageCount(const std::string& storage_name, int amo
     }
 }
 
+void StorageNode::addNewIndexes(const std::string& storage_name, const std::vector<int>& new_indexes)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (storage_map_.find(storage_name) != storage_map_.end()) 
+    {
+        for (auto& info : storage_map_[storage_name]) 
+        {
+            info.indexes = new_indexes; 
+
+            RCLCPP_INFO(this->get_logger(), 
+                        "Indexes atualizados para '%s'. Novo IDX: [%d, %d, %d]", 
+                        storage_name.c_str(), 
+                        new_indexes.size() > 0 ? new_indexes[0] : -1,
+                        new_indexes.size() > 1 ? new_indexes[1] : -1,
+                        new_indexes.size() > 2 ? new_indexes[2] : -1);
+        }
+    }
+    else 
+    {
+        RCLCPP_WARN(this->get_logger(), "Tentativa de atualizar indexes para storage '%s' que não existe.", storage_name.c_str());
+    }
+}
+
 void StorageNode::loadLabelToStorage(const std::string &yaml_file)
 {
     std::lock_guard<std::mutex> lock(mutex_);

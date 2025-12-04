@@ -100,7 +100,7 @@ def generate_launch_description():
     bt_file = os.path.join(
         get_package_share_directory(pkg_name_task),
         'bt',
-        'storage_boxes.xml'
+        'organize_boxes.xml'
     )
 
 

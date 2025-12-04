@@ -45,6 +45,7 @@ public:
 
 
     void incrementStorageCount(const std::string& storage_name, int amount = 1);
+    void addNewIndexes(const std::string& storage_name, const std::vector<int>& new_indexes);
 
 private:
     // --- ESTRUTURAS INTERNAS ---
@@ -63,6 +64,7 @@ private:
 
     std::mutex mutex_;
     
+    // Dá pra otimizar fortemente isso aqui. Quem sabe um dia.
     std::unordered_map<std::string, std::vector<std::string>> labels_to_storage_;
     std::unordered_map<std::string, std::vector<StorageInfo>> storage_map_;
 
