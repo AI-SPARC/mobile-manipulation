@@ -89,6 +89,7 @@ StorageResult StorageNode::getBestStorage(const std::string& label, const geomet
         result.pose = selected_info.pose;
         result.current_count = selected_info.actual_objects;
         result.max_count = selected_info.max_objects;
+        result.indexes = selected_info.indexes;
 
         result.size.x = selected_info.size_x; 
         result.size.y = selected_info.size_y; 
@@ -164,6 +165,8 @@ void StorageNode::loadStoragePoses(const std::string &yaml_file)
 
             for (const auto &node : it->second) {
                 StorageInfo info;
+
+                info.indexes = {0, 0, 0};
                 
                 if (node["position"]) {
                     info.pose.position.x = node["position"][0].as<double>();

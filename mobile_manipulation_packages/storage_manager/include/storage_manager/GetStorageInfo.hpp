@@ -16,7 +16,7 @@
 #include <tf2/utils.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/LinearMath/Quaternion.h>
-
+#include "geometry_msgs/msg/vector3.hpp"
 #include <yaml-cpp/yaml.h>
 
 namespace storage_manager 
@@ -28,7 +28,8 @@ struct StorageResult
     std::string storage_name;
     geometry_msgs::msg::Pose pose;      
     std::vector<double> limits; 
-     geometry_msgs::msg::Vector3 size;          
+    std::vector<int> indexes;
+    geometry_msgs::msg::Vector3 size;          
     int current_count = 0;
     int max_count = -1;
 };
@@ -51,6 +52,7 @@ private:
         geometry_msgs::msg::Pose pose;
         double size_x;
         double size_y;
+        std::vector<int> indexes;
         int max_objects = -1;   
         int actual_objects = 0; 
     };

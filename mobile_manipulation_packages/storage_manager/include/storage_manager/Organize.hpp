@@ -37,21 +37,18 @@ public:
      * @param idx_z Índice da camada (0 a K).
      * @return geometry_msgs::msg::Pose A pose calculada.
      */
-    geometry_msgs::msg::Pose placeObjectInBox(
+    std::pair<geometry_msgs::msg::Pose, std::vector<int>> placeObjectInBox(
         const geometry_msgs::msg::Pose &storage_pose, 
         const geometry_msgs::msg::Vector3 &storage_size,
         const geometry_msgs::msg::Vector3 &object_size,
+        const float object_padding,
+        const float z_lift_offset,
         int idx_x,
         int idx_y,
         int idx_z);
 
 private:
-    struct Config
-    {
-        double object_padding = 0.02; 
-        double z_lift_offset = 0.01; 
-    } config_;
-
+   
     std::string yaml_file_;
 };
 
