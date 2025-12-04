@@ -19,7 +19,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(mobile_manipulation_interfaces REQUIRED)
-
+find_package(rclcpp_components REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(Boost REQUIRED)
@@ -43,6 +43,7 @@ target_include_directories(${PROJECT_NAME}_lib PUBLIC
 
 ament_target_dependencies(${PROJECT_NAME}_lib
   rclcpp
+  rclcpp_components
   geometry_msgs
   vision_msgs
   std_msgs

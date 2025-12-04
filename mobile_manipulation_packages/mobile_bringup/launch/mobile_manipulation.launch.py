@@ -103,6 +103,7 @@ def generate_launch_description():
         'box.xml'
     )
 
+
     bt_analysis = analyze_bt_xml(bt_file)
     bt_actions = bt_analysis['actions']
     planner_choice = bt_analysis['planner_type']
@@ -252,7 +253,31 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-   
+
+
+    server_arguments = ["--ros-args", "--log-level", "info"]
+    
+
+    server_arguments.append("--")
+
+    if 'GetStorageInfo' not in bt_actions:
+        print("[LAUNCH] >> 'GetStorageInfo' não encontrado. Desativando StorageNode.")
+        server_arguments.append("--no-storage")
+    else:
+        print("[LAUNCH] >> 'GetStorageInfo' detectado. Ativando StorageNode.")
+
+    if 'Organize' not in bt_actions:
+        print("[LAUNCH] >> 'Organize' não encontrado. Desativando OrganizeNode.")
+        server_arguments.append("--no-organize")
+    else:
+        print("[LAUNCH] >> 'Organize' detectado. Ativando OrganizeNode.")
+
+    if 'IsGripperHoldingObject' not in bt_actions:
+        print("[LAUNCH] >> 'IsGripperHoldingObject' não encontrado. Desativando GripperNode.")
+        server_arguments.append("--no-gripper")
+    else:
+        print("[LAUNCH] >> 'IsGripperHoldingObject' detectado. Ativando GripperNode.")
+
     server_node = Node(
         package="task_planning",
         executable="server_node",
@@ -266,7 +291,8 @@ def generate_launch_description():
             {'label_to_storage_yaml_file': label_to_storage_yaml},
             {'storage_poses_yaml_file': storage_poses_yaml},
         ],
-        arguments=["--ros-args", "--log-level", "info"],
+        # AQUI USAMOS A LISTA GERADA DINAMICAMENTE
+        arguments=server_arguments, 
     )
 
     labels_yaml_file = os.path.join(
@@ -360,7 +386,5 @@ def generate_launch_description():
     if 'NavigateTo' in bt_actions or 'FollowPath' in bt_actions:
         print("[LAUNCH] >> Controlador de caminho (NavigateTo) detectado.")
         final_launch_list.append(controller)
-
-
 
     return LaunchDescription(final_launch_list)

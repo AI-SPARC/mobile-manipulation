@@ -10,7 +10,7 @@
         <Fallback name="EnsureProximity">
              
              <IsRobotNear target="{target_pose}" 
-                      max_dist="0.7" 
+                      max_dist="0.6" 
                       min_dist="0.01" 
                       adjustment_pose="{nav_target}"/>
              
@@ -22,7 +22,6 @@
           
         <PickObject pose="{target_pose}" id="{target_id}"/>
         
-        <IsGripperHoldingObject/>
         
       </Sequence>
     </RetryUntilSuccessful>
@@ -36,7 +35,7 @@
           
           <Fallback name="EnsureProximityStorage">
             <IsRobotNear target="{storage_pose}" 
-                      max_dist="0.7" 
+                      max_dist="0.6" 
                       min_dist="0.01" 
                       adjustment_pose="{storage_pose}"/>
             

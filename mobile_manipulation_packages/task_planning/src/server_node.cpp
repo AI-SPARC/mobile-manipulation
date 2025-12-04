@@ -36,6 +36,8 @@
 
 #include <manipulation/IsGripperHolding.hpp> 
 #include <storage_manager/GetStorageInfo.hpp> 
+#include <storage_manager/Organize.hpp> 
+
 
 namespace BT
 {
@@ -113,11 +115,13 @@ class ServerNode : public rclcpp::Node
 public:
     ServerNode(
         std::shared_ptr<manipulation::IsGripperHolding> gripper_node,
-        std::shared_ptr<storage_manager::StorageNode> storage_node
+        std::shared_ptr<storage_manager::StorageNode> storage_node,
+        std::shared_ptr<storage_manager::OrganizeNode> organize_node
     )
      : Node("server_node"),
        gripper_monitor_node_(gripper_node),
-       storage_node_(storage_node)          
+       storage_node_(storage_node),
+       organize_node_(organize_node)          
     {
         // Parâmetros
         this->declare_parameter<std::string>("yaml_file", "");
@@ -162,6 +166,7 @@ public:
 private:
     std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_;
     std::shared_ptr<storage_manager::StorageNode> storage_node_;
+    std::shared_ptr<storage_manager::OrganizeNode> organize_node_;
 
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
@@ -685,8 +690,6 @@ private:
             if (!feedback->path.poses.empty())
             {
                 RCLCPP_INFO(this->get_logger(), "Novo caminho recebido e armazenado. Aguardando BT executar.");
-                
-
             }
         }
     }
@@ -760,7 +763,8 @@ private:
             return; 
         }
 
-        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) 
+        {
             {
                 std::lock_guard<std::mutex> lock(path_mutex_);
                 last_calculated_path_.poses.clear();
@@ -769,16 +773,18 @@ private:
             nav_state_ = TaskState::SUCCESS;
             RCLCPP_INFO(this->get_logger(), "Navegação concluída!");
         } 
-        else if (result.code == rclcpp_action::ResultCode::CANCELED) {
+        else if (result.code == rclcpp_action::ResultCode::CANCELED) 
+        {
              RCLCPP_INFO(this->get_logger(), "Navegação cancelada.");
-
+            
             {
                 std::lock_guard<std::mutex> lock(path_mutex_);
                 last_calculated_path_.poses.clear(); 
             }
-             nav_state_ = TaskState::IDLE;
+            nav_state_ = TaskState::IDLE;
         }
-        else {
+        else 
+        {
             RCLCPP_ERROR(this->get_logger(), "Goal CONTROLLER falhou/abortou");
             nav_state_ = TaskState::FAILURE;
         }
@@ -842,20 +848,57 @@ private:
 
 };
 
+bool has_flag(const std::vector<std::string>& args, const std::string& flag) {
+    return std::find(args.begin(), args.end(), flag) != args.end();
+}
 
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
 
-  auto storage_node = std::make_shared<storage_manager::StorageNode>();
-  auto gripper_node = std::make_shared<manipulation::IsGripperHolding>();
-  auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node);
+  std::vector<std::string> args(argv, argv + argc);
+
+  bool enable_organize = !has_flag(args, "--no-organize");
+  bool enable_storage  = !has_flag(args, "--no-storage");
+  bool enable_gripper  = !has_flag(args, "--no-gripper");
+
+
+  rclcpp::NodeOptions organize_opts;
+  organize_opts.arguments({"--ros-args", "-r", "__node:=organize_node"});
+
+  rclcpp::NodeOptions storage_opts;
+  storage_opts.arguments({"--ros-args", "-r", "__node:=storage_node"});
+
+  rclcpp::NodeOptions gripper_opts;
+  gripper_opts.arguments({"--ros-args", "-r", "__node:=gripper_monitor_node"});
+  
+
+  std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
+  std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
+  std::shared_ptr<manipulation::IsGripperHolding> gripper_node = nullptr;
 
   rclcpp::executors::MultiThreadedExecutor executor;
-  
+
+  if (enable_organize) 
+  {
+      organize_node = std::make_shared<storage_manager::OrganizeNode>(organize_opts);
+      executor.add_node(organize_node);
+  }
+
+  if (enable_storage) 
+  {
+      storage_node = std::make_shared<storage_manager::StorageNode>(storage_opts);
+      executor.add_node(storage_node);
+  }
+
+  if (enable_gripper) 
+  {
+      gripper_node = std::make_shared<manipulation::IsGripperHolding>(gripper_opts);
+      executor.add_node(gripper_node);
+  }
+
+  auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node);
   executor.add_node(server_node);
-  executor.add_node(storage_node);
-  executor.add_node(gripper_node);
 
   executor.spin();
 

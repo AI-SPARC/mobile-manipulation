@@ -1,4 +1,5 @@
 #include <storage_manager/GetStorageInfo.hpp>
+#include "rclcpp_components/register_node_macro.hpp"
 
 namespace storage_manager 
 {
@@ -209,3 +210,5 @@ StorageNode::StorageLimits StorageNode::calculateLimits(const geometry_msgs::msg
 
 
 } // namespace storage_manager
+
+RCLCPP_COMPONENTS_REGISTER_NODE(storage_manager::StorageNode)

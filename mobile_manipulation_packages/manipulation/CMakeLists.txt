@@ -24,7 +24,7 @@ find_package(mobile_manipulation_interfaces REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(vision_msgs REQUIRED)
 find_package(message_filters REQUIRED)
-
+find_package(rclcpp_components REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(OpenGL REQUIRED)
@@ -64,7 +64,7 @@ ament_target_dependencies(manipulation_lib
   mobile_manipulation_interfaces
   vision_msgs
   message_filters
-
+  rclcpp_components
   tf2
   tf2_ros
   tf2_sensor_msgs

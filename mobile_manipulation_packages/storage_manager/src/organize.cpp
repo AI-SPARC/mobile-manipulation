@@ -1,4 +1,5 @@
 #include <storage_manager/Organize.hpp> 
+#include "rclcpp_components/register_node_macro.hpp"
 
 namespace storage_manager
 {
@@ -6,7 +7,7 @@ namespace storage_manager
 OrganizeNode::OrganizeNode(const rclcpp::NodeOptions & options)
 : Node("organize_node", options)
 {
-    RCLCPP_INFO(this->get_logger(), "Organize Node iniciado (Stateless Calculator).");
+    RCLCPP_INFO(this->get_logger(), "Organize Node iniciado.");
 }
 
 geometry_msgs::msg::Pose OrganizeNode::placeObjectInBox(
@@ -73,3 +74,5 @@ geometry_msgs::msg::Pose OrganizeNode::placeObjectInBox(
 }
 
 } // namespace storage_manager
+
+RCLCPP_COMPONENTS_REGISTER_NODE(storage_manager::OrganizeNode)
