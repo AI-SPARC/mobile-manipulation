@@ -58,7 +58,9 @@ private:
         geometry_msgs::msg::Pose pose;
         geometry_msgs::msg::Vector3 size;
     };
-    
+
+    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr subscription_;
+
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
     rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_publisher_;
     
@@ -81,11 +83,13 @@ private:
     std::unordered_map<std::string, std::vector<geometry_msgs::msg::Pose>> pick_and_place_poses;
     std::pair<std::string, geometry_msgs::msg::Pose> object;
 
+    std::mutex contact_sensor_mutex;
+    std::deque<float> contact_sensor_data;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
     std::atomic<bool> moveit_ready_{false};
-
+    
 
     void loadLocationsFromYaml(const std::string &yaml_path);
     void initMoveGroup();
@@ -105,6 +109,7 @@ private:
     void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>> goal_handle);
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>> goal_handle);
 
+    void topic_callback(const std_msgs::msg::Float32 & msg);
 };
 
 } // namespace manipulation

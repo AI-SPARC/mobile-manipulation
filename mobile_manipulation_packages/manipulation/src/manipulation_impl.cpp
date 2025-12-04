@@ -45,6 +45,9 @@ SimpleManipulation::SimpleManipulation()
     executor_->add_node(moveit_node_);
     executor_thread_ = std::thread([this]() { this->executor_->spin(); });
 
+    subscription_ = this->create_subscription<std_msgs::msg::Float32>(
+            "contact_sensor", 10, std::bind(&SimpleManipulation::topic_callback, this, std::placeholders::_1));
+
     this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::PickObject>(
         this, 
         "pick_object",
@@ -389,7 +392,6 @@ bool SimpleManipulation::positions_for_arm(const geometry_msgs::msg::Pose &targe
             RCLCPP_WARN(this->get_logger(), "Falha ao encontrar plano válido nesta tentativa.");
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     if (!task_success)
@@ -489,18 +491,46 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
                 move_group_arm->attachObject(received_id, "panda_link8", touch_links);
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(200));
+                rclcpp::sleep_for(std::chrono::milliseconds(100));
 
                 close_gripper();
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(200));
+                rclcpp::sleep_for(std::chrono::milliseconds(100));
                 
-            
+                bool picked = false;
+                int contador = 0;
+
+                {
+                    std::lock_guard<std::mutex> lock(contact_sensor_mutex);
+
+                    for(size_t i = 0; i < contact_sensor_data.size(); i++)
+                    {
+                        if(contact_sensor_data[i] > 0.8)
+                        {
+                            contador++;
+                        }
+
+                    }
+
+                    if(contador >= 9)
+                    {
+                        picked = true;
+                    }
+                }
+                
+                if(picked == false)
+                {
+                    move_group_arm->detachObject(received_id);
+                    ready();
+                    return false;
+                }
+
                 target_pose_world.position.z += 0.1;
-                attempt_cartesian_move(target_pose_world, 0.5, false);
+                attempt_cartesian_move(target_pose_world, 1.0, false);
 
                 // set_collision_allowance(received_id, "ground_plane", true);
 
+                // rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 ready();
             }
@@ -511,7 +541,7 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
         }
         else if(pick == false)
         {
-            if (positions_for_arm(target_pose_world, 0.75, false)) 
+            if (positions_for_arm(target_pose_world, 1.0, false)) 
             {
                 open_gripper();
                 
@@ -703,6 +733,19 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
         goal_handle->succeed(result);
         RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso.");
     }
+}
+
+void SimpleManipulation::topic_callback(const std_msgs::msg::Float32 & msg)
+{
+    std::lock_guard<std::mutex> lock(contact_sensor_mutex);
+
+    if (contact_sensor_data.size() > 10) 
+    {
+        contact_sensor_data.pop_front();
+    }
+
+
+    contact_sensor_data.push_back(msg.data);
 }
 
 
