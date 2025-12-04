@@ -6,7 +6,7 @@
 
   <xacro:macro name="panda_system_multi" params="prefix parent *origin initial_positions_file ros2_control_hardware_type">
     
-    <joint name="${prefix}base_joint" type="fixed">
+    <joint name="${prefix}base_joint" type="floating">
       <xacro:insert_block name="origin" />
       <parent link="${parent}" />
       <child link="${prefix}panda_link0" />

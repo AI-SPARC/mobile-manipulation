@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot xmlns:xacro="http://wiki.ros.org/xacro">
 
-  <xacro:macro name="panda_srdf" params="prefix">
+  <xacro:macro name="panda_srdf" params="prefix virtual_joint_type:='fixed'">
     
     <group name="${prefix}panda_arm">
       <chain base_link="${prefix}panda_link0" tip_link="${prefix}panda_link8" />
@@ -63,7 +63,8 @@
         <joint name="${prefix}panda_finger_joint2" value="0.0"/>
     </group_state>
 
-    <virtual_joint name="${prefix}virtual_joint" type="fixed" parent_frame="world" child_link="${prefix}panda_link0" />
+    <!-- Virtual joint com tipo parametrizável -->
+    <virtual_joint name="${prefix}virtual_joint" type="floating" parent_frame="world" child_link="${prefix}panda_link0" />
 
     <disable_collisions link1="${prefix}panda_link0" link2="${prefix}panda_link1" reason="Adjacent"/>
     <disable_collisions link1="${prefix}panda_link0" link2="${prefix}panda_link2" reason="Never"/>

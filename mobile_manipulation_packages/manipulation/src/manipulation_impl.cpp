@@ -199,13 +199,13 @@ void SimpleManipulation::ready()
 
     
     move_group_arm->setJointValueTarget({
-        {"panda_joint1", 0.0},
-        {"panda_joint2", -0.5934},
-        {"panda_joint3", 0.0},
-        {"panda_joint4", -1.17},
-        {"panda_joint5", 0.0},
-        {"panda_joint6", 0.576},
-        {"panda_joint7", 0.8552},
+        {"robot1_panda_joint1", 0.0},
+        {"robot1_panda_joint2", -0.5934},
+        {"robot1_panda_joint3", 0.0},
+        {"robot1_panda_joint4", -1.17},
+        {"robot1_panda_joint5", 0.0},
+        {"robot1_panda_joint6", 0.576},
+        {"robot1_panda_joint7", 0.8552},
     
     });
 
@@ -232,8 +232,8 @@ void SimpleManipulation::close_gripper()
     move_group_gripper->setStartStateToCurrentState();
     
     move_group_gripper->setJointValueTarget({
-        {"panda_finger_joint1", 0.003},
-        {"panda_finger_joint2", 0.003},
+        {"robot1_panda_finger_joint1", 0.003},
+        {"robot1_panda_finger_joint2", 0.003},
     });
 
     move_group_gripper->allowReplanning(true);
@@ -260,8 +260,8 @@ void SimpleManipulation::open_gripper()
     move_group_gripper->setStartStateToCurrentState();
 
     move_group_gripper->setJointValueTarget({
-            {"panda_finger_joint1", 0.038},
-            {"panda_finger_joint2", 0.038},
+            {"robot1_panda_finger_joint1", 0.038},
+            {"robot1_panda_finger_joint2", 0.038},
     });
     move_group_gripper->allowReplanning(true);
 

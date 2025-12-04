@@ -8,14 +8,16 @@
     
     <link name="world"/>
 
+
     <xacro:panda_system_multi 
         prefix="robot1_" 
         parent="world"
         initial_positions_file="$(arg initial_positions_file)" 
         ros2_control_hardware_type="$(arg ros2_control_hardware_type)">
-        <origin xyz="0 0 0.01" rpy="0 0 0" />
+        <origin xyz="0 0 0.0" rpy="0 0 0" />
     </xacro:panda_system_multi>
 
+    <!-- ROBOT2 e ROBOT3: Fixos no world -->
     <xacro:panda_system_multi 
         prefix="robot2_" 
         parent="world"
