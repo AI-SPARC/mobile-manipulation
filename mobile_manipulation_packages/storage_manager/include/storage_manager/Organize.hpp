@@ -40,7 +40,6 @@ public:
     geometry_msgs::msg::Pose placeObjectInBox(
         const geometry_msgs::msg::Pose &storage_pose, 
         const geometry_msgs::msg::Vector3 &storage_size,
-        const geometry_msgs::msg::Quaternion &object_orientation,
         const geometry_msgs::msg::Vector3 &object_size,
         int idx_x,
         int idx_y,

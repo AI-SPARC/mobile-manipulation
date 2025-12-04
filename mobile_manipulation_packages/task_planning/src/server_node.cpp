@@ -327,11 +327,15 @@ private:
 
             auto result = storage_node_->getBestStorage(label, current_obj_pose);
 
+
             if (result.success) 
             {
                 self.setOutput("storage_pose", result.pose);
                 self.setOutput("storage_limits", result.limits);
+                self.setOutput("storage_id", result.storage_name);
                 RCLCPP_INFO(this->get_logger(), "Storage: %s (Ocupação: %d)", result.storage_name.c_str(), result.current_count);
+
+                storage_node_->incrementStorageCount(result.storage_name, 1);
                 return BT::NodeStatus::SUCCESS;
             } 
             
@@ -341,27 +345,27 @@ private:
         { 
             BT::InputPort<std::string>("object_id"),
             BT::OutputPort<geometry_msgs::msg::Pose>("storage_pose"),
-            BT::OutputPort<std::vector<double>>("storage_limits")
-            // BT::OutputPort<std::string>("storage_id")
+            BT::OutputPort<std::vector<double>>("storage_limits"),
+            BT::OutputPort<std::string>("storage_id")
         });
 
-        // factory.registerSimpleAction("DecrementStorageCount", [&](BT::TreeNode &self)
-        // {
-        //     auto id_opt = self.getInput<std::string>("storage_id");
-        //     if (!id_opt) 
-        //     {
-        //         return BT::NodeStatus::FAILURE;
-        //     }
+        factory.registerSimpleAction("DecrementStorageCount", [&](BT::TreeNode &self)
+        {
+            auto id_opt = self.getInput<std::string>("storage_id");
+            if (!id_opt) 
+            {
+                return BT::NodeStatus::FAILURE;
+            }
 
-        //     std::string storage_name = id_opt.value();
+            std::string storage_name = id_opt.value();
             
-        //     storage_node_->incrementStorageCount(storage_name, -1);
+            storage_node_->incrementStorageCount(storage_name, -1);
             
-        //     RCLCPP_WARN(this->get_logger(), "ROLLBACK: Liberando vaga no storage '%s' devido a falha.", storage_name.c_str());
+            RCLCPP_WARN(this->get_logger(), "ROLLBACK: Liberando vaga no storage '%s' devido a falha.", storage_name.c_str());
 
-        //     return BT::NodeStatus::SUCCESS;
-        // }, 
-        // { BT::InputPort<std::string>("storage_id") });
+            return BT::NodeStatus::SUCCESS;
+        }, 
+        { BT::InputPort<std::string>("storage_id") });
 
 
         factory.registerSimpleCondition("IsGripperHoldingObject", 

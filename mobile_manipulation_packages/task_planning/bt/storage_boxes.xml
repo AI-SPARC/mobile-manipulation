@@ -1,0 +1,78 @@
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="AcquireObject">
+    <RetryUntilSuccessful num_attempts="-1">
+      <Sequence name="AcquireSequence">
+        <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
+        
+        <Fallback name="EnsureProximity">
+             <IsRobotNear target="{target_pose}" 
+                      max_dist="0.6" 
+                      min_dist="0.01" 
+                      adjustment_pose="{nav_target}"/>
+             
+             <ParallelAny> 
+                <NavigateTo/> 
+                <ComputePath planner="a_star" target="{nav_target}"/>
+             </ParallelAny>
+        </Fallback>
+          
+        <PickObject pose="{target_pose}" id="{target_id}"/>
+      </Sequence>
+    </RetryUntilSuccessful>
+  </BehaviorTree>
+
+  <BehaviorTree ID="PlaceRoutine">
+    <Fallback name="PlaceOrCleanup">
+        
+        <Sequence name="ApproachAndPlace">
+            
+            <Fallback name="EnsureProximityStorage">
+                <IsRobotNear target="{storage_pose}" 
+                          max_dist="0.6" 
+                          min_dist="0.01" 
+                          adjustment_pose="{storage_pose}"/>
+                
+                <ParallelAny name="Nav_Replan_Monitor">
+                    <NavigateTo/> 
+                    <ComputePath planner="a_star" target="{storage_pose}"/>
+                    
+                    <KeepRunningUntilFailure>
+                        <IsGripperHoldingObject/>
+                    </KeepRunningUntilFailure>
+                </ParallelAny>
+            </Fallback>
+
+            <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
+            
+            <ClearTarget/> 
+        </Sequence>
+
+        <Sequence name="FailureRecovery">
+            <DecrementStorageCount storage_id="{storage_id}"/>
+            
+            <AlwaysFailure/>
+        </Sequence>
+
+    </Fallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MainTree">
+    <RetryUntilSuccessful num_attempts="-1">
+      <Sequence name="FullMission">
+        
+        <SubTree ID="AcquireObject" target_id="{target_id}" target_pose="{target_pose}"/>
+        
+        <GetStorageInfo object_id="{target_id}" 
+                        storage_pose="{storage_pose}" 
+                        storage_limits="{storage_limits}"
+                        storage_id="{storage_id}"/> 
+
+        <SubTree ID="PlaceRoutine" 
+                 storage_pose="{storage_pose}" 
+                 storage_limits="{storage_limits}"
+                 storage_id="{storage_id}"/> </Sequence>
+    </RetryUntilSuccessful>
+  </BehaviorTree>
+
+</root>

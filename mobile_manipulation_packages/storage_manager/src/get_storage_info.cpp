@@ -62,7 +62,8 @@ StorageResult StorageNode::getBestStorage(const std::string& label, const geomet
             bool is_unlimited = (info.max_objects == -1);
             bool has_space = (info.actual_objects < info.max_objects);
 
-            if (!is_unlimited && !has_space) {
+            if (!is_unlimited && !has_space) 
+            {
                 continue; 
             }
 
@@ -71,7 +72,8 @@ StorageResult StorageNode::getBestStorage(const std::string& label, const geomet
             double dz = info.pose.position.z - robot_pose.position.z;
             double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
 
-            if (dist < best_dist) {
+            if (dist < best_dist) 
+            {
                 best_dist = dist;
                 selected_name = storage_name;
                 selected_info = info;
@@ -80,7 +82,8 @@ StorageResult StorageNode::getBestStorage(const std::string& label, const geomet
         }
     }
 
-    if (found) {
+    if (found) 
+    {
         result.success = true;
         result.storage_name = selected_name;
         result.pose = selected_info.pose;
@@ -92,7 +95,9 @@ StorageResult StorageNode::getBestStorage(const std::string& label, const geomet
         
         RCLCPP_INFO(this->get_logger(), "Selected '%s' for item '%s'. Count: %d/%d", 
             selected_name.c_str(), label.c_str(), result.current_count, result.max_count);
-    } else {
+    } 
+    else 
+    {
         RCLCPP_WARN(this->get_logger(), "No valid storage found for '%s'", label.c_str());
     }
 
@@ -103,10 +108,15 @@ void StorageNode::incrementStorageCount(const std::string& storage_name, int amo
 {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    if (storage_map_.find(storage_name) != storage_map_.end()) {
-        for (auto& info : storage_map_[storage_name]) {
+    if (storage_map_.find(storage_name) != storage_map_.end()) 
+    {
+        for (auto& info : storage_map_[storage_name]) 
+        {
             info.actual_objects += amount;
-            if (info.actual_objects < 0) info.actual_objects = 0;
+            if (info.actual_objects < 0) 
+            {
+                info.actual_objects = 0;
+            }
         }
         RCLCPP_INFO(this->get_logger(), "Updated count for '%s' by %d.", storage_name.c_str(), amount);
     }
@@ -115,17 +125,25 @@ void StorageNode::incrementStorageCount(const std::string& storage_name, int amo
 void StorageNode::loadLabelToStorage(const std::string &yaml_file)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    try {
+    try 
+    {
         YAML::Node config = YAML::LoadFile(yaml_file);
-        for (auto it = config.begin(); it != config.end(); ++it) {
+
+        for (auto it = config.begin(); it != config.end(); ++it) 
+        {
             std::string group = it->first.as<std::string>();
             std::vector<std::string> targets;
-            for (const auto &entry : it->second) {
+
+            for (const auto &entry : it->second) 
+            {
                 if (entry["storage"]) targets.push_back(entry["storage"].as<std::string>());
             }
+
             labels_to_storage_[group] = targets;
         }
-    } catch (const YAML::Exception &e) {
+    } 
+    catch (const YAML::Exception &e) 
+    {
         RCLCPP_ERROR(this->get_logger(), "YAML Label Error: %s", e.what());
     }
 }
