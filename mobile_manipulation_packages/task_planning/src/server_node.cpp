@@ -266,39 +266,38 @@ private:
 
             if (!current_target_id_.empty())
             {
+                
                 self.setOutput("output_pose", current_target_pose_);
                 self.setOutput("output_id", current_target_id_);
+                self.setOutput("object_size", cached_object_.size);
                 
-                pick_pose = std::make_pair(current_target_id_, current_target_pose_);
-                cached_object_ = pick_pose; 
                 return BT::NodeStatus::SUCCESS;
             }
 
             if (!has_new_object_) 
             {
-                return BT::NodeStatus::RUNNING; 
+                return BT::NodeStatus::RUNNING;
             }
 
-            current_target_id_ = cached_object_.first;
-            current_target_pose_ = cached_object_.second;
+            current_target_id_ = cached_object_.id;
+            current_target_pose_ = cached_object_.pose;
             
             self.setOutput("output_pose", current_target_pose_);
             self.setOutput("output_id", current_target_id_);
-            self.setOutput("output_id", current_target_id_);
+            self.setOutput("object_size", cached_object_.size); 
             
             picked.insert(current_target_id_);
-            pick_pose = cached_object_;
-            
             has_new_object_ = false;
             
-            RCLCPP_INFO(this->get_logger(), "BT: Novo Alvo: '%s'.", current_target_id_.c_str());
+            RCLCPP_INFO(this->get_logger(), "BT: Alvo '%s' (Size: %.2fx%.2fx%.2f) processado.", 
+                current_target_id_.c_str(), cached_object_.size.x, cached_object_.size.y, cached_object_.size.z);
 
             return BT::NodeStatus::SUCCESS;
         }, 
         { 
             BT::OutputPort<geometry_msgs::msg::Pose>("output_pose"), 
             BT::OutputPort<std::string>("output_id"),
-            BT::OutputPort<geometry_msgs::msg::Vector3("object_size")
+            BT::OutputPort<geometry_msgs::msg::Vector3>("object_size") 
         });
 
 
@@ -415,7 +414,7 @@ private:
 
 
           
-            self.setOutput("final_placement_pose", std::get<0>(result));
+            self.setOutput("output_final_pose", std::get<0>(result));
             self.setOutput("new_indexes", std::get<1>(result));
             
             RCLCPP_INFO(this->get_logger(), 
@@ -441,7 +440,7 @@ private:
             BT::InputPort<float>("object_padding"),
             BT::InputPort<float>("z_lift_offset"),
             BT::OutputPort<std::vector<int>>("new_indexes"),
-            BT::OutputPort<geometry_msgs::msg::Pose>("final_placement_pose")
+            BT::OutputPort<geometry_msgs::msg::Pose>("output_final_pose")
         });
 
         factory.registerSimpleAction("IncrementOrganizedStorageIndexes", [&](BT::TreeNode &self)
@@ -594,6 +593,7 @@ private:
         factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "PickObject", { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::string>("id") }, {} }, builder_pick);
 
         
+     
         BT::NodeBuilder builder_place = [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
@@ -605,7 +605,9 @@ private:
                     {
                         return BT::NodeStatus::FAILURE;
                     }
-                    std::string id_dummy = cached_object_.first; 
+                    
+                    std::string id_dummy = cached_object_.id; 
+                    
                     this->send_goal(id_dummy, pose.value(), false); 
                     manipulation_state_ = TaskState::RUNNING;
                     
@@ -656,7 +658,7 @@ private:
                     
                     if (result == BT::NodeStatus::FAILURE) 
                     {
-                         picked.erase(cached_object_.first);
+                         picked.erase(cached_object_.id);
                          current_target_id_ = ""; 
                     }
                     
@@ -698,10 +700,26 @@ private:
     {
         std::lock_guard<std::mutex> lock(bt_mutex_);
 
-        if (has_new_object_ && current_target_id_.empty()) 
+        if (!current_target_id_.empty() || has_new_object_) 
         {
+            
+            for (const auto &det : msg->detections)
+            {
+                if (det.results.empty()) continue;
+                std::string raw_id = det.results[0].hypothesis.class_id;
+
+                if (raw_id == current_target_id_)
+                {
+                    current_target_pose_.position = det.bbox.center.position;
+                    current_target_pose_.orientation = det.bbox.center.orientation;
+                    cached_object_.pose = current_target_pose_; 
+                    cached_object_.size = det.bbox.size;
+                    return;
+                }
+            }
             return; 
         }
+
 
         for (const auto &det : msg->detections)
         {
@@ -712,46 +730,42 @@ private:
 
             std::string raw_id = det.results[0].hypothesis.class_id;
             
-            std::string id = raw_id;
+            std::string label = raw_id;
             size_t pos = raw_id.find('_'); 
-
             if (pos != std::string::npos) 
             {
-                id = raw_id.substr(0, pos);
+                label = raw_id.substr(0, pos);
             }
 
-            if (authorized_labels.find(id) == authorized_labels.end()) 
+            if (authorized_labels.find(label) == authorized_labels.end()) 
             {
                 continue;
             }
 
-            if (!current_target_id_.empty() && raw_id == current_target_id_)
+            if (picked.find(raw_id) != picked.end()) 
             {
-                current_target_pose_.position = det.bbox.center.position;
-                current_target_pose_.orientation = det.bbox.center.orientation;
-                cached_object_ = std::make_pair(raw_id, current_target_pose_);
-
-                continue; 
+                continue;
             }
 
-            if (current_target_id_.empty() && !has_new_object_)
-            {
-                if (picked.find(raw_id) != picked.end()) 
-                {
-                    continue;
-                }
+            
+            geometry_msgs::msg::Pose pose;
+            pose.position = det.bbox.center.position;
+            pose.orientation = det.bbox.center.orientation;
+            
+            cached_object_.id = raw_id;
+            cached_object_.pose = pose;
+            cached_object_.size = det.bbox.size;
+            
+            has_new_object_ = true; 
+            
+            RCLCPP_INFO(this->get_logger(), "Nova detecção salva: '%s' (Size: %.2fx%.2fx%.2f)", 
+                raw_id.c_str(), cached_object_.size.x, cached_object_.size.y, cached_object_.size.z);
 
-                geometry_msgs::msg::Pose pose;
-                pose.position = det.bbox.center.position;
-                pose.orientation = det.bbox.center.orientation;
-
-                cached_object_ = std::make_pair(raw_id, pose);
-                has_new_object_ = true; 
-
-                break; 
-            }
+            break;
         }
     }
+
+
 
     // --- Path Callbacks ---
 

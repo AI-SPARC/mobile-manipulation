@@ -53,9 +53,9 @@
                                     new_indexes="{indexes}"
                                     output_final_pose="{final_placement_pose}"/> 
 
-                <PlaceObject pose="{final_placement_pose}" id="{target_id}"/> 
+                <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
 
-                <IncrementOrganizedStorageIndexes storage_id="{storage_id}" index="{new_indexes}"/>
+                <IncrementOrganizedStorageIndexes storage_id="{storage_id}" new_indexes="{new_indexes}"/>
             </Sequence>
             
             <ClearTarget/> 
