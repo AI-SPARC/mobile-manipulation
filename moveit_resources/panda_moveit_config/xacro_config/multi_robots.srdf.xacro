@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="multi_panda_system">
+
+  <xacro:include filename="panda.srdf.xacro" />
+
+  <xacro:panda_srdf prefix="robot1_" />
+  <xacro:panda_srdf prefix="robot2_" />
+  <xacro:panda_srdf prefix="robot3_" />
+
+</robot>

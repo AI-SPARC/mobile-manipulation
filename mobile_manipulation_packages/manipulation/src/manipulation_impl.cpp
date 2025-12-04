@@ -170,10 +170,12 @@ void SimpleManipulation::initMoveGroup()
     try 
     {
         move_group_arm = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
-            moveit_node_, "panda_arm"); 
+            moveit_node_, "robot1_panda_arm"); 
         
         move_group_gripper = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
-            moveit_node_, "hand"); 
+            moveit_node_, "robot1_hand"); 
+
+        std::cout << "alo" << std::endl;
 
         move_group_arm->startStateMonitor(); 
 
@@ -348,7 +350,7 @@ bool SimpleManipulation::positions_for_arm(const geometry_msgs::msg::Pose &targe
    
     move_group_arm->setPlannerId("RRTConnectkConfigDefault"); 
 
-    move_group_arm->setPoseTarget(target_pose, "panda_link8");
+    move_group_arm->setPoseTarget(target_pose, "robot1_panda_link8");
 
 
     move_group_arm->setPlanningTime(5.0); 
@@ -489,7 +491,7 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 send_request(received_id, false);
 
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
-                move_group_arm->attachObject(received_id, "panda_link8", touch_links);
+                move_group_arm->attachObject(received_id, "robot1_panda_link8", touch_links);
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(100));
 
