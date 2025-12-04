@@ -143,7 +143,8 @@ private:
 
         while (rclcpp::ok() && !pose_initialized_) 
         {
-             if (goal_handle->is_canceling()) {
+             if (goal_handle->is_canceling()) 
+             {
                 result->success = false;
                 goal_handle->canceled(result);
                 return;
@@ -184,7 +185,8 @@ private:
 
             if (dist_to_final_goal >= waypoint_tolerance_ && dist_to_final_goal < 0.15)
             {
-                if (!in_zone_1) {
+                if (!in_zone_1) 
+                {
                     zone_1_entry_time = this->now();
                     in_zone_1 = true;
                 }
@@ -194,23 +196,26 @@ private:
                     break;
                 }
             }
-            else {
+            else 
+            {
                 in_zone_1 = false;
             }
 
             if (dist_to_final_goal >= 0.15 && dist_to_final_goal < 0.25)
             {
-                if (!in_zone_2) {
+                if (!in_zone_2) 
+                {
                     zone_2_entry_time = this->now();
                     in_zone_2 = true;
                 }
                 
-                if ((this->now() - zone_2_entry_time).seconds() > 4.0) {
+                if ((this->now() - zone_2_entry_time).seconds() > 3.0) {
                     RCLCPP_WARN(this->get_logger(), "Aceitando Zona 2 (%.3fm) após 4.0s. Indo para rotação.", dist_to_final_goal);
                     break;
                 }
             }
-            else {
+            else 
+            {
                 in_zone_2 = false;
             }
 
@@ -228,7 +233,10 @@ private:
                 dy = d_y;
                 dist_to_target = dist;
 
-                if (dist >= lookahead_distance_) break; 
+                if (dist >= lookahead_distance_) 
+                {
+                    break; 
+                }
             }
             
             tf2::Quaternion q(local_pose.orientation.x, local_pose.orientation.y, local_pose.orientation.z, local_pose.orientation.w);
@@ -243,7 +251,10 @@ private:
                 path[current_idx].position.x - local_pose.position.x,
                 path[current_idx].position.y - local_pose.position.y
             );
-            if (dist_to_current_wp < waypoint_tolerance_) current_idx++;
+            if (dist_to_current_wp < waypoint_tolerance_) 
+            {
+                current_idx++;
+            }
             
             if (std::fabs(angle_error) > 0.8) 
             {
@@ -286,7 +297,7 @@ private:
         double alignment_tolerance = 0.05; 
         
         auto rotation_start_time = this->now();
-        rclcpp::Duration rotation_timeout = rclcpp::Duration::from_seconds(4.0); 
+        rclcpp::Duration rotation_timeout = rclcpp::Duration::from_seconds(2.0); 
 
         RCLCPP_INFO(this->get_logger(), "Iniciando rotação final (Max 5s)...");
 
