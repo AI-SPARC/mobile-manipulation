@@ -89,7 +89,12 @@ StorageResult StorageNode::getBestStorage(const std::string& label, const geomet
         result.pose = selected_info.pose;
         result.current_count = selected_info.actual_objects;
         result.max_count = selected_info.max_objects;
-        
+
+        result.size.x = selected_info.size_x; 
+        result.size.y = selected_info.size_y; 
+        result.size.z = 0.0;                  
+
+  
         auto lims = calculateLimits(selected_info.pose, selected_info.size_x, selected_info.size_y);
         result.limits = {lims.min_x, lims.max_x, lims.min_y, lims.max_y};
         

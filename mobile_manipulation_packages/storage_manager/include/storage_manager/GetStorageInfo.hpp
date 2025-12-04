@@ -27,7 +27,8 @@ struct StorageResult
     bool success = false;
     std::string storage_name;
     geometry_msgs::msg::Pose pose;      
-    std::vector<double> limits;      
+    std::vector<double> limits; 
+     geometry_msgs::msg::Vector3 size;          
     int current_count = 0;
     int max_count = -1;
 };
