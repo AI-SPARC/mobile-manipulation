@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="multi_panda_system">
+
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+    <xacro:arg name="ros2_control_hardware_type" default="isaac" />
+
+    <xacro:include filename="panda_system_macro.urdf.xacro" />
+    
+    <link name="world"/>
+
+
+    <xacro:panda_system_multi 
+        prefix="robot1_" 
+        parent="world"
+        initial_positions_file="$(arg initial_positions_file)" 
+        ros2_control_hardware_type="$(arg ros2_control_hardware_type)">
+        <origin xyz="0 0 0.0" rpy="0 0 0" />
+    </xacro:panda_system_multi>
+
+    <!-- ROBOT2 e ROBOT3: Fixos no world -->
+    <xacro:panda_system_multi 
+        prefix="robot2_" 
+        parent="world"
+        initial_positions_file="$(arg initial_positions_file)" 
+        ros2_control_hardware_type="$(arg ros2_control_hardware_type)">
+        <origin xyz="0 1.0 0.01" rpy="0 0 0" />
+    </xacro:panda_system_multi>
+
+    <xacro:panda_system_multi 
+        prefix="robot3_" 
+        parent="world"
+        initial_positions_file="$(arg initial_positions_file)" 
+        ros2_control_hardware_type="$(arg ros2_control_hardware_type)">
+        <origin xyz="0 -1.0 0.01" rpy="0 0 0" />
+    </xacro:panda_system_multi>
+
+</robot>

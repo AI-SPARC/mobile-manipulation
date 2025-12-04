@@ -371,7 +371,7 @@ def generate_launch_description():
         robot_state_publisher, 
         move_group_node, 
         ros2_control_node, 
-        # rviz_node,
+        rviz_node,
         *spawners,
         
         server_node, 

@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="multi_panda_system">
+
+  <xacro:include filename="$(find vai_se_ferrar_moveit_config)/suction_xacro_config/panda_arm.xacro" />
+
+  <xacro:panda_arm prefix="robot1_" />
+
+  <xacro:panda_arm prefix="robot2_" />
+
+  <xacro:panda_arm prefix="robot3_" />
+
+</robot>

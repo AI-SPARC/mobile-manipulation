@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="multi_panda_system">
+
+  <xacro:include filename="panda.srdf.xacro" />
+
+  <!-- Robot1: base móvel - usa virtual joint "planar" -->
+  <xacro:panda_srdf prefix="robot1_" virtual_joint_type="floating" />
+  
+  <!-- Robot2 e Robot3: fixos - usa virtual joint "fixed" -->
+  <xacro:panda_srdf prefix="robot2_" virtual_joint_type="fixed" />
+  <xacro:panda_srdf prefix="robot3_" virtual_joint_type="fixed" />
+
+</robot>

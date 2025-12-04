@@ -170,10 +170,10 @@ void SimpleManipulation::initMoveGroup()
     try 
     {
         move_group_arm = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
-            moveit_node_, "robot1_panda_arm"); 
+            moveit_node_, "panda_arm"); 
         
         move_group_gripper = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
-            moveit_node_, "robot1_hand"); 
+            moveit_node_, "hand"); 
 
         std::cout << "alo" << std::endl;
 
@@ -199,13 +199,13 @@ void SimpleManipulation::ready()
 
     
     move_group_arm->setJointValueTarget({
-        {"robot1_panda_joint1", 0.0},
-        {"robot1_panda_joint2", -0.5934},
-        {"robot1_panda_joint3", 0.0},
-        {"robot1_panda_joint4", -1.17},
-        {"robot1_panda_joint5", 0.0},
-        {"robot1_panda_joint6", 0.576},
-        {"robot1_panda_joint7", 0.8552},
+        {"panda_joint1", 0.0},
+        {"panda_joint2", -0.5934},
+        {"panda_joint3", 0.0},
+        {"panda_joint4", -1.17},
+        {"panda_joint5", 0.0},
+        {"panda_joint6", 0.576},
+        {"panda_joint7", 0.8552},
     
     });
 
@@ -218,7 +218,7 @@ void SimpleManipulation::ready()
 
         if (exec_result == moveit::core::MoveItErrorCode::SUCCESS) 
         {
-            RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+            RCLCPP_INFO(this->get_logger(), "Gripper na posição padrão.");
         }
     }
 }
@@ -232,8 +232,8 @@ void SimpleManipulation::close_gripper()
     move_group_gripper->setStartStateToCurrentState();
     
     move_group_gripper->setJointValueTarget({
-        {"robot1_panda_finger_joint1", 0.003},
-        {"robot1_panda_finger_joint2", 0.003},
+        {"panda_finger_joint1", 0.003},
+        {"panda_finger_joint2", 0.003},
     });
 
     move_group_gripper->allowReplanning(true);
@@ -260,8 +260,8 @@ void SimpleManipulation::open_gripper()
     move_group_gripper->setStartStateToCurrentState();
 
     move_group_gripper->setJointValueTarget({
-            {"robot1_panda_finger_joint1", 0.038},
-            {"robot1_panda_finger_joint2", 0.038},
+            {"panda_finger_joint1", 0.038},
+            {"panda_finger_joint2", 0.038},
     });
     move_group_gripper->allowReplanning(true);
 
@@ -350,7 +350,7 @@ bool SimpleManipulation::positions_for_arm(const geometry_msgs::msg::Pose &targe
    
     move_group_arm->setPlannerId("RRTConnectkConfigDefault"); 
 
-    move_group_arm->setPoseTarget(target_pose, "robot1_panda_link8");
+    move_group_arm->setPoseTarget(target_pose, "panda_link8");
 
 
     move_group_arm->setPlanningTime(5.0); 
@@ -491,7 +491,7 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 send_request(received_id, false);
 
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
-                move_group_arm->attachObject(received_id, "robot1_panda_link8", touch_links);
+                move_group_arm->attachObject(received_id, "panda_link8", touch_links);
                 
                 rclcpp::sleep_for(std::chrono::milliseconds(100));
 

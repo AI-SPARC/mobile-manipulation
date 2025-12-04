@@ -305,6 +305,7 @@ private:
             auto id_opt = self.getInput<std::string>("object_id");
             if (!id_opt) 
             {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: O Input 'object_id' não foi fornecido.");
                 return BT::NodeStatus::FAILURE;
             }
 
@@ -324,7 +325,6 @@ private:
                 current_obj_pose = current_target_pose_; 
             }
 
-
             auto result = storage_node_->getBestStorage(label, current_obj_pose);
 
 
@@ -333,9 +333,14 @@ private:
                 self.setOutput("storage_pose", result.pose);
                 self.setOutput("storage_limits", result.limits);
                 self.setOutput("storage_id", result.storage_name);
-                RCLCPP_INFO(this->get_logger(), "Storage: %s (Ocupação: %d)", result.storage_name.c_str(), result.current_count);
+                self.setOutput("indexes", result.indexes);
+                self.setOutput("storage_size", result.size); 
 
-                storage_node_->incrementStorageCount(result.storage_name, 1);
+                RCLCPP_INFO(this->get_logger(), "Storage: %s (Ocupação: %d | Índices: [%d, %d, %d])", 
+                    result.storage_name.c_str(), 
+                    result.current_count,
+                    result.indexes[0], result.indexes[1], result.indexes[2]);
+
                 return BT::NodeStatus::SUCCESS;
             } 
             
@@ -346,8 +351,104 @@ private:
             BT::InputPort<std::string>("object_id"),
             BT::OutputPort<geometry_msgs::msg::Pose>("storage_pose"),
             BT::OutputPort<std::vector<double>>("storage_limits"),
-            BT::OutputPort<std::string>("storage_id")
+            BT::OutputPort<std::string>("storage_id"),
+            BT::OutputPort<std::vector<int>>("indexes"), 
+            BT::OutputPort<geometry_msgs::msg::Vector3>("storage_size") 
         });
+
+        factory.registerSimpleAction("ComputePoseToOrganize", [&](BT::TreeNode &self)
+        {
+            auto storagePose = self.getInput<geometry_msgs::msg::Pose>("storage_pose");
+            auto storageSize = self.getInput<geometry_msgs::msg::Vector3>("storage_size");
+            auto objectSize = self.getInput<geometry_msgs::msg::Vector3>("object_size");
+            auto indexes = self.getInput<std::vector<int>>("indexes");
+            auto objectPadding = self.getInput<float>("object_padding");
+            auto zLiftOffset = self.getInput<float>("z_lift_offset");
+
+ 
+            if (!storagePose || !storageSize || !objectSize || !indexes || !objectPadding || !zLiftOffset)
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: Missing mandatory inputs for ComputePoseToOrganize.");
+                return BT::NodeStatus::FAILURE;
+            }
+            
+            geometry_msgs::msg::Pose storage_pose = storagePose.value();
+            geometry_msgs::msg::Vector3 storage_size = storageSize.value();
+            geometry_msgs::msg::Vector3 object_size = objectSize.value();
+
+            std::vector<int> idx_vec = indexes.value();
+            float object_padding = objectPadding.value();
+            float z_lift_offset = zLiftOffset.value();
+
+            if (idx_vec.size() != 3) 
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: Indexes vector size must be 3 (x, y, z).");
+                return BT::NodeStatus::FAILURE;
+            }
+            
+            int idx_x = idx_vec[0];
+            int idx_y = idx_vec[1];
+            int idx_z = idx_vec[2];
+            
+            std::pair<geometry_msgs::msg::Pose, std::vector<int>> result = organize_node_->placeObjectInBox(
+                storage_pose, 
+                storage_size, 
+                object_size, 
+                object_padding, 
+                z_lift_offset, 
+                idx_x, 
+                idx_y, 
+                idx_z 
+            );
+
+
+          
+            self.setOutput("final_placement_pose", std::get<0>(result));
+            self.setOutput("new_indexes", std::get<1>(result));
+            
+            RCLCPP_INFO(this->get_logger(), 
+                "Pose Calculada | XYZ: [%.3f, %.3f, %.3f] | Quat: [%.3f, %.3f, %.3f, %.3f]",
+                std::get<0>(result).position.x, 
+                std::get<0>(result).position.y, 
+                std::get<0>(result).position.z,
+                std::get<0>(result).orientation.x, 
+                std::get<0>(result).orientation.y, 
+                std::get<0>(result).orientation.z, 
+                std::get<0>(result).orientation.w);
+
+            return BT::NodeStatus::SUCCESS;
+        
+            
+     
+        }, 
+        { 
+            BT::InputPort<geometry_msgs::msg::Pose>("storage_pose"),
+            BT::InputPort<geometry_msgs::msg::Vector3>("storage_size"),
+            BT::InputPort<geometry_msgs::msg::Vector3>("object_size"),
+            BT::InputPort<std::vector<int>>("indexes"),
+            BT::InputPort<float>("object_padding"),
+            BT::InputPort<float>("z_lift_offset"),
+            BT::OutputPort<std::vector<int>>("new_indexes"),
+            BT::OutputPort<geometry_msgs::msg::Pose>("final_placement_pose")
+        });
+
+        factory.registerSimpleAction("IncrementOrganizedStorageIndexes", [&](BT::TreeNode &self)
+        {
+            auto id_opt = self.getInput<std::string>("storage_id");
+            if (!id_opt) 
+            {
+                return BT::NodeStatus::FAILURE;
+            }
+
+            std::string storage_name = id_opt.value();
+            
+            storage_node_->incrementStorageCount(storage_name, -1);
+            
+            RCLCPP_WARN(this->get_logger(), "ROLLBACK: Liberando vaga no storage '%s' devido a falha.", storage_name.c_str());
+
+            return BT::NodeStatus::SUCCESS;
+        }, 
+        { BT::InputPort<std::string>("storage_id") });
 
         factory.registerSimpleAction("DecrementStorageCount", [&](BT::TreeNode &self)
         {

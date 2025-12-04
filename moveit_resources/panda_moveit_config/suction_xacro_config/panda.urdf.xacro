@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find moveit_resources_panda_description)/xacro_urdf/panda_suction_gripper_urdf.urdf.xacro" />
+  <xacro:include filename="panda.ros2_control.xacro" />
+
+  <xacro:macro name="panda_system_multi" params="prefix parent *origin initial_positions_file ros2_control_hardware_type">
+    
+    <joint name="${prefix}base_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}" />
+      <child link="${prefix}panda_link0" />
+    </joint>
+
+    <xacro:panda_robot prefix="${prefix}" />
+
+    <xacro:panda_ros2_control 
+        name="${prefix}PandaSystem" 
+        prefix="${prefix}" 
+        initial_positions_file="${initial_positions_file}" 
+        ros2_control_hardware_type="${ros2_control_hardware_type}"/>
+
+  </xacro:macro>
+</robot>
