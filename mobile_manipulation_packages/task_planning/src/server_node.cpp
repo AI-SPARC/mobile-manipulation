@@ -894,7 +894,6 @@ private:
         {
             RCLCPP_WARN(this->get_logger(), "Solicitando PARADA IMEDIATA (Cancelando Action Controller)...");
             this->controller_client->async_cancel_goal(this->active_controller_goal_handle_);
-            
         }
     }
 
@@ -909,6 +908,11 @@ private:
 
         if (feedback->recalculating_path)
         {
+            {
+                std::lock_guard<std::mutex> lock(path_mutex_);
+                last_calculated_path_.poses.clear(); 
+            }
+            
             RCLCPP_INFO(this->get_logger(), "Planner recalculando: cancelando controller atual...");
             cancel_controller_goal();
         }
@@ -1002,12 +1006,7 @@ private:
         } 
         else if (result.code == rclcpp_action::ResultCode::CANCELED) 
         {
-             RCLCPP_INFO(this->get_logger(), "Navegação cancelada.");
-            
-            {
-                std::lock_guard<std::mutex> lock(path_mutex_);
-                last_calculated_path_.poses.clear(); 
-            }
+            RCLCPP_INFO(this->get_logger(), "Navegação cancelada.");
             nav_state_ = TaskState::IDLE;
         }
         else 
