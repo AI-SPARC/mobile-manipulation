@@ -93,7 +93,7 @@ StorageResult StorageNode::getBestStorage(const std::string& label, const geomet
 
         result.size.x = selected_info.size_x; 
         result.size.y = selected_info.size_y; 
-        result.size.z = 0.0;                  
+        result.size.z = selected_info.size_z;                  
 
   
         auto lims = calculateLimits(selected_info.pose, selected_info.size_x, selected_info.size_y);
@@ -208,14 +208,19 @@ void StorageNode::loadStoragePoses(const std::string &yaml_file)
                     info.pose.orientation.w = 1.0;
                 }
 
-                if (node["size"]) {
+                if (node["size"]) 
+                {
                     info.size_x = node["size"][0].as<double>();
                     info.size_y = node["size"][1].as<double>();
-                } else {
+                    info.size_z = node["size"][1].as<double>();
+                } 
+                else 
+                {
                     info.size_x = 0.5; info.size_y = 0.5;
                 }
 
-                if (node["max_objects"]) {
+                if (node["max_objects"]) 
+                {
                     info.max_objects = node["max_objects"].as<int>();
                 }
 

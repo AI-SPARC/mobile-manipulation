@@ -53,6 +53,7 @@ private:
         geometry_msgs::msg::Pose pose;
         double size_x;
         double size_y;
+        double size_z;
         std::vector<int> indexes;
         int max_objects = -1;   
         int actual_objects = 0; 

@@ -100,7 +100,7 @@ def generate_launch_description():
     bt_file = os.path.join(
         get_package_share_directory(pkg_name_task),
         'bt',
-        'organize_boxes.xml'
+        'storage_boxes.xml'
     )
 
 
@@ -260,23 +260,23 @@ def generate_launch_description():
 
     server_arguments.append("--")
 
-    if 'GetStorageInfo' not in bt_actions:
-        print("[LAUNCH] >> 'GetStorageInfo' não encontrado. Desativando StorageNode.")
-        server_arguments.append("--no-storage")
-    else:
-        print("[LAUNCH] >> 'GetStorageInfo' detectado. Ativando StorageNode.")
+    # if 'GetStorageInfo' not in bt_actions:
+    #     print("[LAUNCH] >> 'GetStorageInfo' não encontrado. Desativando StorageNode.")
+    #     server_arguments.append("--no-storage")
+    # else:
+    #     print("[LAUNCH] >> 'GetStorageInfo' detectado. Ativando StorageNode.")
 
-    if 'Organize' not in bt_actions:
-        print("[LAUNCH] >> 'Organize' não encontrado. Desativando OrganizeNode.")
-        server_arguments.append("--no-organize")
-    else:
-        print("[LAUNCH] >> 'Organize' detectado. Ativando OrganizeNode.")
+    # if 'ComputePoseToOrganize' not in bt_actions:
+    #     print("[LAUNCH] >> 'ComputePoseToOrganize' não encontrado. Desativando OrganizeNode.")
+    #     server_arguments.append("--no-organize")
+    # else:
+    #     print("[LAUNCH] >> 'Organize' detectado. Ativando OrganizeNode.")
 
-    if 'IsGripperHoldingObject' not in bt_actions:
-        print("[LAUNCH] >> 'IsGripperHoldingObject' não encontrado. Desativando GripperNode.")
-        server_arguments.append("--no-gripper")
-    else:
-        print("[LAUNCH] >> 'IsGripperHoldingObject' detectado. Ativando GripperNode.")
+    # if 'IsGripperHoldingObject' not in bt_actions:
+    #     print("[LAUNCH] >> 'IsGripperHoldingObject' não encontrado. Desativando GripperNode.")
+    #     server_arguments.append("--no-gripper")
+    # else:
+    #     print("[LAUNCH] >> 'IsGripperHoldingObject' detectado. Ativando GripperNode.")
 
     server_node = Node(
         package="task_planning",

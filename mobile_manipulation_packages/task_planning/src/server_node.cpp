@@ -352,6 +352,9 @@ private:
                     result.current_count,
                     result.indexes[0], result.indexes[1], result.indexes[2]);
 
+                RCLCPP_INFO(this->get_logger(), "Storage: %.2f, %.2f, %.2f", 
+                result.size.x, result.size.y, result.size.z);
+
                 return BT::NodeStatus::SUCCESS;
             } 
             
@@ -377,9 +380,39 @@ private:
             auto zLiftOffset = self.getInput<float>("z_lift_offset");
 
  
-            if (!storagePose || !storageSize || !objectSize || !indexes || !objectPadding || !zLiftOffset)
+            if (!storagePose )
             {
-                RCLCPP_ERROR(this->get_logger(), "ERRO: Missing mandatory inputs for ComputePoseToOrganize.");
+                RCLCPP_ERROR(this->get_logger(), "ERRO: StoragePOse.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            if (!storageSize)
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: storageSize.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            if (!objectSize )
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: objectSize.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            if (!indexes)
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: indexes.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            if (!objectPadding)
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: objectPadding.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            if (!zLiftOffset)
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO:zLiftOffset.");
                 return BT::NodeStatus::FAILURE;
             }
             
@@ -442,6 +475,64 @@ private:
             BT::OutputPort<std::vector<int>>("new_indexes"),
             BT::OutputPort<geometry_msgs::msg::Pose>("output_final_pose")
         });
+
+        factory.registerSimpleAction("ComputePoseToStore", [&](BT::TreeNode &self)
+        {
+            auto storagePose = self.getInput<geometry_msgs::msg::Pose>("storage_pose");
+            auto storageSize = self.getInput<geometry_msgs::msg::Vector3>("storage_size");
+            auto zLiftOffset = self.getInput<float>("z_lift_offset");
+
+ 
+            if (!storagePose )
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: storagePose.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            if (!storageSize)
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: storageSize.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            if (!zLiftOffset)
+            {
+                RCLCPP_ERROR(this->get_logger(), "ERRO: zLiftOffset.");
+                return BT::NodeStatus::FAILURE;
+            }
+            
+            geometry_msgs::msg::Pose storage_pose = storagePose.value();
+            geometry_msgs::msg::Vector3 storage_size = storageSize.value();
+            float z_lift_offset = zLiftOffset.value();
+
+
+            geometry_msgs::msg::Pose output_final_pose = storage_pose;
+            std::cout << output_final_pose.position.z << std::endl;
+            output_final_pose.position.z = output_final_pose.position.z + storage_size.z + z_lift_offset;
+            std::cout << output_final_pose.position.z << std::endl;
+          
+            self.setOutput("output_final_pose", output_final_pose);
+            
+            RCLCPP_INFO(this->get_logger(), 
+                "Pose Calculada | XYZ: [%.3f, %.3f, %.3f] | Quat: [%.3f, %.3f, %.3f, %.3f]",
+                output_final_pose.position.x, 
+                output_final_pose.position.y, 
+                output_final_pose.position.z,
+                output_final_pose.orientation.x, 
+                output_final_pose.orientation.y, 
+                output_final_pose.orientation.z, 
+                output_final_pose.orientation.w);
+
+            return BT::NodeStatus::SUCCESS;
+        
+        }, 
+        { 
+            BT::InputPort<geometry_msgs::msg::Pose>("storage_pose"),
+            BT::InputPort<geometry_msgs::msg::Vector3>("storage_size"),
+            BT::InputPort<float>("z_lift_offset"),
+            BT::OutputPort<geometry_msgs::msg::Pose>("output_final_pose")
+        });
+
 
         factory.registerSimpleAction("IncrementOrganizedStorageIndexes", [&](BT::TreeNode &self)
         {

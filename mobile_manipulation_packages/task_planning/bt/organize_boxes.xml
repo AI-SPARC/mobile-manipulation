@@ -3,6 +3,7 @@
   <BehaviorTree ID="AcquireObject">
     <RetryUntilSuccessful num_attempts="-1">
       <Sequence name="AcquireSequence">
+        
         <DetectObject output_pose="{target_pose}" output_id="{target_id}" object_size="{object_size}"/>
         
         <Fallback name="EnsureProximity">
@@ -48,14 +49,14 @@
                                     storage_size="{storage_size}"
                                     object_size="{object_size}"
                                     indexes="{indexes}"
-                                    object_padding="0.1"
+                                    object_padding="0.025"
                                     z_lift_offset="0.025"
                                     new_indexes="{indexes}"
                                     output_final_pose="{final_placement_pose}"/> 
 
-                <PlaceObject pose="{storage_pose}" limits="{storage_limits}"/>
+                <PlaceObject pose="{final_placement_pose}"/>
 
-                <IncrementOrganizedStorageIndexes storage_id="{storage_id}" new_indexes="{new_indexes}"/>
+                <IncrementOrganizedStorageIndexes storage_id="{storage_id}" new_indexes="{indexes}"/>
             </Sequence>
             
             <ClearTarget/> 
@@ -64,8 +65,7 @@
         <Sequence name="FailureRecovery">
             <DecrementStorageCount storage_id="{storage_id}"/>
             
-            <AlwaysFailure/>
-        </Sequence>
+            <AlwaysFailure/> </Sequence>
 
     </Fallback>
   </BehaviorTree>
@@ -74,7 +74,10 @@
     <RetryUntilSuccessful num_attempts="-1">
       <Sequence name="FullMission">
         
-        <SubTree ID="AcquireObject" target_id="{target_id}" target_pose="{target_pose}"/>
+        <SubTree ID="AcquireObject" 
+                 target_id="{target_id}" 
+                 target_pose="{target_pose}"
+                 object_size="{object_size}"/>
         
         <GetStorageInfo object_id="{target_id}"
                         indexes="{indexes}" 
@@ -86,7 +89,10 @@
         <SubTree ID="PlaceRoutine" 
                  storage_pose="{storage_pose}" 
                  storage_limits="{storage_limits}"
-                 storage_id="{storage_id}"/> </Sequence>
+                 storage_id="{storage_id}"
+                 storage_size="{storage_size}"
+                 object_size="{object_size}"
+                 indexes="{indexes}"/> </Sequence>
     </RetryUntilSuccessful>
   </BehaviorTree>
 
