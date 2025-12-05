@@ -870,18 +870,15 @@ private:
         std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
         std::pair<float, float> start_pose;
 
-
         {
             std::lock_guard<std::mutex> lock(odom_mutex);
             start_pose = {pose_x_, pose_y_};
         }
         
-        
         rclcpp::Rate loop_rate(20.0);
         bool path_needs_calculation = false;
 
         try {
-            
             {
                 RCLCPP_INFO(this->get_logger(), "Calculando caminho inicial...");
                 feedback->recalculating_path = false;
@@ -914,6 +911,7 @@ private:
                     feedback->path.header.frame_id = "world";
                     
                     goal_handle->publish_feedback(feedback);
+                    
                 }
                 else
                 {
@@ -940,7 +938,6 @@ private:
                     RCLCPP_INFO(this->get_logger(), "Sucesso inicial! Publicando feedback com %zu poses.", feedback->path.poses.size());
                     
                     goal_handle->publish_feedback(feedback); 
-                    
                     publisher_dijkstra_path(); 
                 }
             }
@@ -949,18 +946,31 @@ private:
             
             while (rclcpp::ok()) 
             {
-               
+
+                bool is_preempted = false;
+                bool is_canceled = false;
+
                 {
                     std::lock_guard<std::mutex> lock(goal_mutex_);
                     if (active_goal_handle_ != goal_handle) 
                     {
-                        RCLCPP_WARN(this->get_logger(), "Preempção detectada. Encerrando thread.");
-                        return; 
+                        is_preempted = true;
                     }
+                    if (goal_handle->is_canceling()) 
+                    {
+                        is_canceled = true;
+                    }
+                } 
+
+                if (is_preempted)
+                {
+                    RCLCPP_WARN(this->get_logger(), "Preempção detectada. Encerrando thread antiga.");
+                    result->success = false;
+                    goal_handle->abort(result); 
+                    return; 
                 }
 
-                
-                if (goal_handle->is_canceling()) 
+                if (is_canceled) 
                 {
                     RCLCPP_INFO(this->get_logger(), "Cancelamento solicitado.");
                     result->success = false;
@@ -978,15 +988,12 @@ private:
                         if(obstaclesVertices.find(path_without_filter[i]) != obstaclesVertices.end())
                         {
                             RCLCPP_WARN(this->get_logger(), "Obstáculo detectado! Parando robô e recalculando.");
-                            
                             path_needs_calculation = true;
-                            
                             break; 
                         }
                     }
                 }
 
-                
                 if (path_needs_calculation)
                 {
                     feedback->recalculating_path = true;
@@ -1004,7 +1011,6 @@ private:
                     std::vector<std::pair<float, float>> shortestPath;
                     bool straight_line;
 
-                    
                     {
                         std::lock_guard<std::mutex> lock(map_mutex_);
                         
@@ -1042,16 +1048,17 @@ private:
                         path_needs_calculation = false; 
                         feedback->recalculating_path = false;
 
-                      
                         goal_handle->publish_feedback(feedback);
                         RCLCPP_INFO(this->get_logger(), "Caminho recalculado e enviado via Feedback.");
                         publisher_dijkstra_path(); 
                     }
                     else 
                     {
-                         RCLCPP_WARN(this->get_logger(), "A* falhou no recálculo.");
+                            RCLCPP_WARN(this->get_logger(), "A* falhou no recálculo.");
                     }
                 }
+
+
 
                 loop_rate.sleep();
             }
