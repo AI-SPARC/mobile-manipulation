@@ -1,7 +1,0 @@
-<map id="denso_robot_moveit.parse_yaml" name="denso_robot_moveit.parse_yaml">
-<area shape="rect" id="Node000001" title=" " alt="" coords="545,13,780,38"/>
-<area shape="rect" id="Node000002" href="$namespacedenso__robot__moveit.html#a605026a5aaa2aaf7fa0b4fcb853cd01a" title=" " alt="" coords="271,13,497,38"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="532,28,497,28,497,23,532,23"/>
-<area shape="rect" id="Node000003" href="$namespacedenso__robot__moveit.html#a9531a9a323d5773dd3bab9f998571a2c" title=" " alt="" coords="5,5,223,45"/>
-<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="257,28,223,28,223,23,257,23"/>
-</map>
