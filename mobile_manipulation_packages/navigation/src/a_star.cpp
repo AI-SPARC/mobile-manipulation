@@ -50,6 +50,7 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp> 
 #include <mutex>
 #include "geometry_msgs/msg/pose_array.hpp"
+#include <Eigen/Geometry> // Necessário para Quaternoins (se não tiver, verifique seus includes)
 
 using namespace std::chrono_literals;
 
@@ -191,8 +192,9 @@ private:
     std::mutex goal_mutex_;
     std::mutex odom_mutex;
 
-    std::vector<VertexDijkstra> path_points;
-    std::vector<std::pair<float, float>> path_without_filter;
+    // REMOVIDOS DA CLASSE PARA EVITAR DATA RACE:
+    // std::vector<VertexDijkstra> path_points;
+    // std::vector<std::pair<float, float>> path_without_filter;
 
     std::unordered_set<std::pair<float, float>, PairHash> obstaclesVertices;
 
@@ -307,9 +309,6 @@ private:
    
     std::pair<std::vector<std::pair<float, float>>, bool> run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
     {
-        
-
-
         auto start_search = find_nearest_free_point(start_tuple, 500);
         if (!start_search.second) 
         {
@@ -544,10 +543,18 @@ private:
         else return path;
     }
 
-    void store_edges_in_path(std::vector<std::pair<float, float>>& path, bool straight_line, std::pair<float, float> original_goal) 
+    // [CORREÇÃO] Recebe os vetores por referência (argumentos locais)
+    void store_edges_in_path(
+        std::vector<std::pair<float, float>>& path, 
+        bool straight_line, 
+        std::pair<float, float> original_goal,
+        std::vector<VertexDijkstra>& out_path_points,              // Argumento adicionado
+        std::vector<std::pair<float, float>>& out_path_no_filter   // Argumento adicionado
+    ) 
     {
-        path_points.clear();
-        path_without_filter.clear();
+        // Limpa os vetores locais
+        out_path_points.clear();
+        out_path_no_filter.clear();
         
         if (path.empty()) return;
 
@@ -682,7 +689,8 @@ private:
                 
                 if(obstaclesVertices.find(point) == obstaclesVertices.end())
                 {
-                    path_without_filter.push_back(point);
+                    // Usa o vetor local
+                    out_path_no_filter.push_back(point);
                 }
                 
                 traveled += distanceToObstacle_;
@@ -691,7 +699,8 @@ private:
 
         if (!path.empty()) 
         {
-            path_without_filter.push_back(path.back());
+            // Usa o vetor local
+            out_path_no_filter.push_back(path.back());
         }
 
         for (size_t i = 0; i < path.size(); i++) 
@@ -748,11 +757,11 @@ private:
             }
             else 
             {
-                if (!path_points.empty()) {
-                    vertex.orientation_x = path_points.back().orientation_x;
-                    vertex.orientation_y = path_points.back().orientation_y;
-                    vertex.orientation_z = path_points.back().orientation_z;
-                    vertex.orientation_w = path_points.back().orientation_w;
+                if (!out_path_points.empty()) { // Usa o vetor local
+                    vertex.orientation_x = out_path_points.back().orientation_x;
+                    vertex.orientation_y = out_path_points.back().orientation_y;
+                    vertex.orientation_z = out_path_points.back().orientation_z;
+                    vertex.orientation_w = out_path_points.back().orientation_w;
                 } else {
                     vertex.orientation_x = 0.0;
                     vertex.orientation_y = 0.0;
@@ -760,21 +769,23 @@ private:
                     vertex.orientation_w = 1.0;
                 }
             }
-            path_points.push_back(vertex);
+            // Usa o vetor local
+            out_path_points.push_back(vertex);
         }
 
-        publisher_dijkstra_path();
+        // Passa o vetor local para a função de publisher
+        publisher_dijkstra_path(out_path_points);
     }
 
 
-    // Publishers.
-    void publisher_dijkstra_path()
+    // [CORREÇÃO] Recebe o vetor como argumento
+    void publisher_dijkstra_path(const std::vector<VertexDijkstra>& points_to_publish)
     {
         nav_msgs::msg::Path path_msg;
         path_msg.header.stamp = this->now();
         path_msg.header.frame_id = "world";
 
-        for (const auto& vertex : path_points)
+        for (const auto& vertex : points_to_publish)
         {
             geometry_msgs::msg::PoseStamped pose_stamped;
             pose_stamped.header.stamp = this->now();
@@ -859,26 +870,29 @@ private:
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
     {
         RCLCPP_INFO(this->get_logger(), "THREAD START: Iniciando Action de Path Planning...");
-
+        
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::Path::Result>();
         auto feedback = std::make_shared<mobile_manipulation_interfaces::action::Path::Feedback>();
 
-        path_points.clear();
-        path_without_filter.clear();
+        std::vector<VertexDijkstra> local_path_points;
+        std::vector<std::pair<float, float>> local_path_without_filter;
 
         std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
         std::pair<float, float> start_pose;
+
 
         {
             std::lock_guard<std::mutex> lock(odom_mutex);
             start_pose = {pose_x_, pose_y_};
         }
         
+        
         rclcpp::Rate loop_rate(20.0);
         bool path_needs_calculation = false;
 
         try {
+            
             {
                 RCLCPP_INFO(this->get_logger(), "Calculando caminho inicial...");
                 feedback->recalculating_path = false;
@@ -896,7 +910,7 @@ private:
 
                     if (!shortestPath.empty())
                     {
-                        store_edges_in_path(shortestPath, straight_line, current_goal_pose);
+                        store_edges_in_path(shortestPath, straight_line, current_goal_pose, local_path_points, local_path_without_filter);
                     }
                 }
 
@@ -911,7 +925,6 @@ private:
                     feedback->path.header.frame_id = "world";
                     
                     goal_handle->publish_feedback(feedback);
-                    
                 }
                 else
                 {
@@ -919,7 +932,8 @@ private:
                     feedback->path.header.stamp = this->now();
                     feedback->path.header.frame_id = "world";
 
-                    for (const auto& vertex : path_points) 
+                    // [CORREÇÃO] Itera sobre o vetor local
+                    for (const auto& vertex : local_path_points) 
                     {
                         geometry_msgs::msg::PoseStamped pose_stamped;
                         pose_stamped.header.stamp = this->now();
@@ -938,7 +952,9 @@ private:
                     RCLCPP_INFO(this->get_logger(), "Sucesso inicial! Publicando feedback com %zu poses.", feedback->path.poses.size());
                     
                     goal_handle->publish_feedback(feedback); 
-                    publisher_dijkstra_path(); 
+                    
+                    // [CORREÇÃO] Passa o vetor local
+                    publisher_dijkstra_path(local_path_points); 
                 }
             }
 
@@ -946,31 +962,18 @@ private:
             
             while (rclcpp::ok()) 
             {
-
-                bool is_preempted = false;
-                bool is_canceled = false;
-
+               
                 {
                     std::lock_guard<std::mutex> lock(goal_mutex_);
                     if (active_goal_handle_ != goal_handle) 
                     {
-                        is_preempted = true;
+                        RCLCPP_WARN(this->get_logger(), "Preempção detectada. Encerrando thread.");
+                        return; 
                     }
-                    if (goal_handle->is_canceling()) 
-                    {
-                        is_canceled = true;
-                    }
-                } 
-
-                if (is_preempted)
-                {
-                    RCLCPP_WARN(this->get_logger(), "Preempção detectada. Encerrando thread antiga.");
-                    result->success = false;
-                    goal_handle->abort(result); 
-                    return; 
                 }
 
-                if (is_canceled) 
+                
+                if (goal_handle->is_canceling()) 
                 {
                     RCLCPP_INFO(this->get_logger(), "Cancelamento solicitado.");
                     result->success = false;
@@ -983,23 +986,33 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(map_mutex_); 
 
-                    for(size_t i = 0; i < path_without_filter.size(); ++i)
+                    for(size_t i = 0; i < local_path_without_filter.size(); ++i)
                     {
-                        if(obstaclesVertices.find(path_without_filter[i]) != obstaclesVertices.end())
+                        if(obstaclesVertices.find(local_path_without_filter[i]) != obstaclesVertices.end())
                         {
                             RCLCPP_WARN(this->get_logger(), "Obstáculo detectado! Parando robô e recalculando.");
+                            
                             path_needs_calculation = true;
+                            
                             break; 
                         }
                     }
                 }
 
+                
                 if (path_needs_calculation)
                 {
                     feedback->recalculating_path = true;
+
+                    feedback->path.poses.clear();
+                    
+                    feedback->path.header.stamp = this->now();
+                    feedback->path.header.frame_id = "world";
+
                     goal_handle->publish_feedback(feedback);
                     
-                    rclcpp::sleep_for(std::chrono::milliseconds(100)); 
+                    rclcpp::sleep_for(std::chrono::milliseconds(100));
+
                     std::pair<float, float> current_robot_pose;
 
                     {
@@ -1011,6 +1024,7 @@ private:
                     std::vector<std::pair<float, float>> shortestPath;
                     bool straight_line;
 
+                    
                     {
                         std::lock_guard<std::mutex> lock(map_mutex_);
                         
@@ -1020,7 +1034,7 @@ private:
 
                         if (!shortestPath.empty())
                         {
-                            store_edges_in_path(shortestPath, straight_line, current_goal_pose);
+                            store_edges_in_path(shortestPath, straight_line, current_goal_pose, local_path_points, local_path_without_filter);
                         }
                     } 
 
@@ -1030,7 +1044,7 @@ private:
                         feedback->path.header.stamp = this->now();
                         feedback->path.header.frame_id = "world";
 
-                        for (const auto& vertex : path_points) 
+                        for (const auto& vertex : local_path_points) 
                         {
                             geometry_msgs::msg::PoseStamped pose_stamped;
                             pose_stamped.header.stamp = this->now();
@@ -1048,17 +1062,17 @@ private:
                         path_needs_calculation = false; 
                         feedback->recalculating_path = false;
 
+                      
                         goal_handle->publish_feedback(feedback);
                         RCLCPP_INFO(this->get_logger(), "Caminho recalculado e enviado via Feedback.");
-                        publisher_dijkstra_path(); 
+                        
+                        publisher_dijkstra_path(local_path_points); 
                     }
                     else 
                     {
-                            RCLCPP_WARN(this->get_logger(), "A* falhou no recálculo.");
+                         RCLCPP_WARN(this->get_logger(), "A* falhou no recálculo.");
                     }
                 }
-
-
 
                 loop_rate.sleep();
             }

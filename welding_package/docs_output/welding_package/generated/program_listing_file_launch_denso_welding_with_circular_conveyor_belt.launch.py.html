@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Program Listing for File denso_welding_with_circular_conveyor_belt.launch.py &mdash; welding_package 0.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=86f27845" />
+      <link rel="stylesheet" type="text/css" href="../_static/collapsible-lists/css/tree_view.css?v=a885cde7" />
+
+  
+  
+        <script src="../_static/jquery.js?v=8dae8fb0"></script>
+        <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../_static/documentation_options.js?v=7026087e"></script>
+        <script src="../_static/doctools.js?v=888ff710"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/collapsible-lists/js/CollapsibleLists.compressed.js?v=73120307"></script>
+        <script src="../_static/collapsible-lists/js/apply-collapsible-lists.js?v=660e4f45"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="File denso_welding_with_trajectory.launch.py" href="file_launch_denso_welding_with_trajectory.launch.py.html" />
+    <link rel="prev" title="File denso_welding_with_circular_conveyor_belt.launch.py" href="file_launch_denso_welding_with_circular_conveyor_belt.launch.py.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            welding_package
+          </a>
+              <div class="version">
+                0.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">C++ API</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#class-hierarchy">Class Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#file-hierarchy">File Hierarchy</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#full-c-api">Full C++ API</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="index.html#namespaces">Namespaces</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_denso_robot_moveit.html">Namespace denso_robot_moveit</a></li>
+<li class="toctree-l4"><a class="reference internal" href="namespace_denso_welding_multiple_objects.html">Namespace denso_welding_multiple_objects</a></li>
+<li class="toctree-l4"><a class="reference internal" href="namespace_denso_welding_with_circular_conveyor_belt.html">Namespace denso_welding_with_circular_conveyor_belt</a></li>
+<li class="toctree-l4"><a class="reference internal" href="namespace_denso_welding_with_trajectory.html">Namespace denso_welding_with_trajectory</a></li>
+<li class="toctree-l4"><a class="reference internal" href="namespace_rclcpp.html">Namespace rclcpp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="namespace_std.html">Namespace std</a></li>
+<li class="toctree-l4"><a class="reference internal" href="namespace_std__chrono_literals.html">Namespace std::chrono_literals</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="index.html#classes-and-structs">Classes and Structs</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="structLabelRule.html">Struct LabelRule</a></li>
+<li class="toctree-l4"><a class="reference internal" href="structpair__hash.html">Template Struct pair_hash</a></li>
+<li class="toctree-l4"><a class="reference internal" href="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4.html">Template Struct hash&lt; std::tuple&lt; float, float, float &gt; &gt;</a></li>
+<li class="toctree-l4"><a class="reference internal" href="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4.html">Template Struct hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</a></li>
+<li class="toctree-l4"><a class="reference internal" href="structTupleEqual.html">Struct TupleEqual</a></li>
+<li class="toctree-l4"><a class="reference internal" href="structTupleHash.html">Struct TupleHash</a></li>
+<li class="toctree-l4"><a class="reference internal" href="structWeldingWithTrajectory_1_1WeldingPoseData.html">Struct WeldingWithTrajectory::WeldingPoseData</a></li>
+<li class="toctree-l4"><a class="reference internal" href="classAddCollision.html">Class AddCollision</a></li>
+<li class="toctree-l4"><a class="reference internal" href="classBasicWelding.html">Class BasicWelding</a></li>
+<li class="toctree-l4"><a class="reference internal" href="classWelding.html">Class Welding</a></li>
+<li class="toctree-l4"><a class="reference internal" href="classWeldingWithCircularConveyorBelt.html">Class WeldingWithCircularConveyorBelt</a></li>
+<li class="toctree-l4"><a class="reference internal" href="classWeldingWithTrajectory.html">Class WeldingWithTrajectory</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="index.html#functions">Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__robot__moveit_1a9531a9a323d5773dd3bab9f998571a2c.html">Function denso_robot_moveit::generate_launch_description</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__robot__moveit_1a605026a5aaa2aaf7fa0b4fcb853cd01a.html">Function denso_robot_moveit::load_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__robot__moveit_1aec585a8b750d61e040ccff9bf6139afa.html">Function denso_robot_moveit::parse_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__multiple__objects_1a5d0d029f681626f078dfd91927cae33f.html">Function denso_welding_multiple_objects::generate_launch_description</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__multiple__objects_1a9a826b9d5e791bced5b31598c76241b1.html">Function denso_welding_multiple_objects::load_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__multiple__objects_1ad495f6f2137bc3d17c7a91276bf36a81.html">Function denso_welding_multiple_objects::parse_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__with__circular__conveyor__belt_1a408239afa8856ed74c9c7674854b9a57.html">Function denso_welding_with_circular_conveyor_belt::generate_launch_description</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__with__circular__conveyor__belt_1a8efe1f8b82f14488e9842fc7da60359d.html">Function denso_welding_with_circular_conveyor_belt::load_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__with__circular__conveyor__belt_1a1ce4c51747fb0479eb32ec8bd80c8d19.html">Function denso_welding_with_circular_conveyor_belt::parse_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__with__trajectory_1a0b4315089dce977f370ab93b4e938027.html">Function denso_welding_with_trajectory::generate_launch_description</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__with__trajectory_1a5dbed334443e351a1786ec2f21fbba85.html">Function denso_welding_with_trajectory::load_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_namespacedenso__welding__with__trajectory_1af401216bc1b2445ff9802a8546b04ecb.html">Function denso_welding_with_trajectory::parse_yaml</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_add__collision__objects_8cpp_1a3c04138a5bfe5d72780bb7e82a18e627.html">Function main(int, char **)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding_8cpp_1a0ddf1224851353fc92bfbff6f499fa97.html">Function main(int, char *)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding__multiple__objects_8cpp_1a0ddf1224851353fc92bfbff6f499fa97.html">Function main(int, char *)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding__with__circular__conveyor__belt_8cpp_1a0ddf1224851353fc92bfbff6f499fa97.html">Function main(int, char *)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding__with__trajectory_8cpp_1a0ddf1224851353fc92bfbff6f499fa97.html">Function main(int, char *)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_add__collision__objects_8cpp_1acd1c775ffe27f83c098ab92b3a64965f.html">Template Function operator&lt;&lt;(std::ostream&amp;, const std::tuple&lt;T1, T2, T3&gt;&amp;)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding_8cpp_1acd1c775ffe27f83c098ab92b3a64965f.html">Template Function operator&lt;&lt;(std::ostream&amp;, const std::tuple&lt;T1, T2, T3&gt;&amp;)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding__multiple__objects_8cpp_1acd1c775ffe27f83c098ab92b3a64965f.html">Template Function operator&lt;&lt;(std::ostream&amp;, const std::tuple&lt;T1, T2, T3&gt;&amp;)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding__with__circular__conveyor__belt_8cpp_1acd1c775ffe27f83c098ab92b3a64965f.html">Template Function operator&lt;&lt;(std::ostream&amp;, const std::tuple&lt;T1, T2, T3&gt;&amp;)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="function_welding__with__trajectory_8cpp_1acd1c775ffe27f83c098ab92b3a64965f.html">Template Function operator&lt;&lt;(std::ostream&amp;, const std::tuple&lt;T1, T2, T3&gt;&amp;)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="index.html#directories">Directories</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="dir_launch.html">Directory launch</a></li>
+<li class="toctree-l4"><a class="reference internal" href="dir_src.html">Directory src</a></li>
+</ul>
+</li>
+<li class="toctree-l3 current"><a class="reference internal" href="index.html#files">Files</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="file_src_add_collision_objects.cpp.html">File add_collision_objects.cpp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="file_launch_denso_robot_moveit.launch.py.html">File denso_robot_moveit.launch.py</a></li>
+<li class="toctree-l4"><a class="reference internal" href="file_launch_denso_welding_multiple_objects.launch.py.html">File denso_welding_multiple_objects.launch.py</a></li>
+<li class="toctree-l4 current"><a class="reference internal" href="file_launch_denso_welding_with_circular_conveyor_belt.launch.py.html">File denso_welding_with_circular_conveyor_belt.launch.py</a></li>
+<li class="toctree-l4"><a class="reference internal" href="file_launch_denso_welding_with_trajectory.launch.py.html">File denso_welding_with_trajectory.launch.py</a></li>
+<li class="toctree-l4"><a class="reference internal" href="file_src_welding.cpp.html">File welding.cpp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="file_src_welding_multiple_objects.cpp.html">File welding_multiple_objects.cpp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="file_src_welding_with_circular_conveyor_belt.cpp.html">File welding_with_circular_conveyor_belt.cpp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="file_src_welding_with_trajectory.cpp.html">File welding_with_trajectory.cpp</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../standards.html">Standard Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../standard_docs/PACKAGE.html">PACKAGE</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../genindex.html">Index</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">welding_package</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">C++ API</a></li>
+          <li class="breadcrumb-item"><a href="file_launch_denso_welding_with_circular_conveyor_belt.launch.py.html">File denso_welding_with_circular_conveyor_belt.launch.py</a></li>
+      <li class="breadcrumb-item active">Program Listing for File denso_welding_with_circular_conveyor_belt.launch.py</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/generated/program_listing_file_launch_denso_welding_with_circular_conveyor_belt.launch.py.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="program-listing-for-file-denso-welding-with-circular-conveyor-belt-launch-py">
+<span id="program-listing-file-launch-denso-welding-with-circular-conveyor-belt-launch-py"></span><h1>Program Listing for File denso_welding_with_circular_conveyor_belt.launch.py<a class="headerlink" href="#program-listing-for-file-denso-welding-with-circular-conveyor-belt-launch-py" title="Link to this heading"></a></h1>
+<p>↰ <a class="reference internal" href="file_launch_denso_welding_with_circular_conveyor_belt.launch.py.html#file-launch-denso-welding-with-circular-conveyor-belt-launch-py"><span class="std std-ref">Return to documentation for file</span></a> (<code class="docutils literal notranslate"><span class="pre">launch/denso_welding_with_circular_conveyor_belt.launch.py</span></code>)</p>
+<div class="highlight-py notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">launch</span> <span class="kn">import</span> <span class="n">LaunchDescription</span>
+<span class="kn">from</span> <span class="nn">launch.actions</span> <span class="kn">import</span> <span class="n">DeclareLaunchArgument</span>
+<span class="kn">from</span> <span class="nn">launch.substitutions</span> <span class="kn">import</span> <span class="n">LaunchConfiguration</span>
+<span class="kn">from</span> <span class="nn">launch_ros.actions</span> <span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span> <span class="nn">ament_index_python.packages</span> <span class="kn">import</span> <span class="n">get_package_share_directory</span>
+<span class="kn">from</span> <span class="nn">moveit_configs_utils</span> <span class="kn">import</span> <span class="n">MoveItConfigsBuilder</span>
+<span class="kn">from</span> <span class="nn">launch.actions</span> <span class="kn">import</span> <span class="n">IncludeLaunchDescription</span>
+<span class="kn">from</span> <span class="nn">launch.launch_description_sources</span> <span class="kn">import</span> <span class="n">PythonLaunchDescriptionSource</span>
+<span class="kn">from</span> <span class="nn">os</span> <span class="kn">import</span> <span class="n">path</span>
+<span class="kn">import</span> <span class="nn">yaml</span>
+
+<span class="k">def</span> <span class="nf">generate_launch_description</span><span class="p">():</span>
+
+    <span class="n">denso_robot_description_pkg</span> <span class="o">=</span> <span class="s2">&quot;denso_robot_description&quot;</span>
+    <span class="n">denso_robot_moveit_config_pkg</span> <span class="o">=</span> <span class="s2">&quot;denso_robot_moveit_config&quot;</span>
+
+    <span class="n">mode_arg</span> <span class="o">=</span> <span class="n">DeclareLaunchArgument</span><span class="p">(</span>
+        <span class="s2">&quot;mode&quot;</span><span class="p">,</span>
+        <span class="n">default_value</span><span class="o">=</span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Modo de operação do robô (0 = padrão, 1 = inclui solda)&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">isaac_sim_arg</span> <span class="o">=</span> <span class="n">DeclareLaunchArgument</span><span class="p">(</span>
+        <span class="s2">&quot;isaac&quot;</span><span class="p">,</span>
+        <span class="n">default_value</span><span class="o">=</span><span class="s2">&quot;true&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Ativa a interface de hardware para o Isaac Sim&quot;</span>
+    <span class="p">)</span>
+
+    <span class="n">gazebo_sim_arg</span> <span class="o">=</span> <span class="n">DeclareLaunchArgument</span><span class="p">(</span>
+        <span class="s2">&quot;sim_gazebo&quot;</span><span class="p">,</span>
+        <span class="n">default_value</span><span class="o">=</span><span class="s2">&quot;false&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Ativa a interface de hardware para o Gazebo&quot;</span>
+    <span class="p">)</span>
+
+    <span class="n">ros2_control_hardware_type</span> <span class="o">=</span> <span class="n">DeclareLaunchArgument</span><span class="p">(</span>
+        <span class="s2">&quot;ros2_control_hardware_type&quot;</span><span class="p">,</span>
+        <span class="n">default_value</span><span class="o">=</span><span class="s2">&quot;isaac&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;ROS2 control hardware interface type to use for the launch file -- possible values: [mock_components, isaac]&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">use_sim_time</span> <span class="o">=</span> <span class="n">DeclareLaunchArgument</span><span class="p">(</span>
+        <span class="s2">&quot;use_sim_time&quot;</span><span class="p">,</span>
+        <span class="n">default_value</span><span class="o">=</span><span class="s2">&quot;true&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Use simulation clock if true&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">planning_pipeline</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;planning_pipelines&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;ompl&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;default_planning_pipeline&quot;</span><span class="p">:</span> <span class="s2">&quot;ompl&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;ompl&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;planning_plugin&quot;</span><span class="p">:</span> <span class="s2">&quot;ompl_interface/OMPLPlanner&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;request_adapters&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s2">&quot;default_planning_request_adapters/ResolveConstraintFrames&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;default_planning_request_adapters/ValidateWorkspaceBounds&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;default_planning_request_adapters/CheckStartStateBounds&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;default_planning_request_adapters/CheckStartStateCollision&quot;</span><span class="p">,</span>
+            <span class="p">],</span>
+            <span class="s2">&quot;response_adapters&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s2">&quot;default_planning_response_adapters/AddTimeOptimalParameterization&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;default_planning_response_adapters/ValidateSolution&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;default_planning_response_adapters/DisplayMotionPath&quot;</span><span class="p">,</span>
+            <span class="p">],</span>
+            <span class="s2">&quot;start_state_max_bounds_error&quot;</span><span class="p">:</span> <span class="mf">0.31416</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+    <span class="n">_ompl_yaml</span> <span class="o">=</span> <span class="n">load_yaml</span><span class="p">(</span>
+        <span class="n">denso_robot_moveit_config_pkg</span><span class="p">,</span> <span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;config&quot;</span><span class="p">,</span> <span class="s2">&quot;ompl_planning.yaml&quot;</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">planning_pipeline</span><span class="p">[</span><span class="s2">&quot;ompl&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_ompl_yaml</span><span class="p">)</span>
+
+    <span class="n">planning_scene_monitor_parameters</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;publish_planning_scene&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="s2">&quot;publish_geometry_updates&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="s2">&quot;publish_state_updates&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="s2">&quot;publish_transforms_updates&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="n">moveit_configs_builder</span> <span class="o">=</span> <span class="n">MoveItConfigsBuilder</span><span class="p">(</span><span class="s2">&quot;denso_robot&quot;</span><span class="p">)</span>
+
+    <span class="n">robot_description_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="n">denso_robot_description_pkg</span><span class="p">),</span>
+        <span class="s2">&quot;urdf&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;denso_robot.urdf.xacro&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">robot_description_semantic_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="n">denso_robot_moveit_config_pkg</span><span class="p">),</span>
+        <span class="s2">&quot;srdf&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;denso_robot.srdf.xacro&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">controllers_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="n">denso_robot_moveit_config_pkg</span><span class="p">),</span>
+        <span class="s2">&quot;config&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;controllers.yaml&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">moveit_configs_builder</span><span class="o">.</span><span class="n">robot_description</span><span class="p">(</span>
+        <span class="n">file_path</span><span class="o">=</span><span class="n">robot_description_path</span><span class="p">,</span>
+        <span class="n">mappings</span><span class="o">=</span><span class="p">{</span>
+            <span class="s2">&quot;ros2_control_hardware_type&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;ros2_control_hardware_type&quot;</span><span class="p">),</span>
+            <span class="s2">&quot;isaac&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;isaac&quot;</span><span class="p">),</span>
+            <span class="s2">&quot;sim_gazebo&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;sim_gazebo&quot;</span><span class="p">),</span>
+            <span class="s2">&quot;mode&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;mode&quot;</span><span class="p">),</span>
+        <span class="p">},</span>
+    <span class="p">)</span>
+
+    <span class="n">moveit_configs_builder</span><span class="o">.</span><span class="n">robot_description_semantic</span><span class="p">(</span>
+        <span class="n">file_path</span><span class="o">=</span><span class="n">robot_description_semantic_path</span><span class="p">,</span>
+        <span class="n">mappings</span><span class="o">=</span><span class="p">{</span>
+            <span class="s2">&quot;mode&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;mode&quot;</span><span class="p">),</span>
+        <span class="p">},</span>
+    <span class="p">)</span>
+    <span class="n">moveit_configs_builder</span><span class="o">.</span><span class="n">trajectory_execution</span><span class="p">(</span><span class="n">file_path</span><span class="o">=</span><span class="n">controllers_path</span><span class="p">)</span>
+
+    <span class="n">moveit_configs_builder</span><span class="o">.</span><span class="n">planning_pipelines</span><span class="p">(</span>
+        <span class="n">pipelines</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ompl&quot;</span><span class="p">],</span> <span class="n">default_planning_pipeline</span><span class="o">=</span><span class="s2">&quot;ompl&quot;</span>
+    <span class="p">)</span>
+
+    <span class="n">moveit_configs</span> <span class="o">=</span> <span class="n">moveit_configs_builder</span><span class="o">.</span><span class="n">to_moveit_configs</span><span class="p">()</span>
+
+    <span class="n">moveit_configs</span><span class="o">.</span><span class="n">planning_pipelines</span> <span class="o">=</span> <span class="n">planning_pipeline</span>
+    <span class="n">moveit_configs</span><span class="o">.</span><span class="n">planning_scene_monitor</span> <span class="o">=</span> <span class="n">planning_scene_monitor_parameters</span>
+
+    <span class="n">robot_description_joint_limits</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;robot_description_planning&quot;</span><span class="p">:</span> <span class="n">load_yaml</span><span class="p">(</span>
+            <span class="n">denso_robot_moveit_config_pkg</span><span class="p">,</span> <span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;config&quot;</span><span class="p">,</span> <span class="s2">&quot;joint_limits.yaml&quot;</span><span class="p">)</span>
+        <span class="p">)</span>
+    <span class="p">}</span>
+
+
+    <span class="n">move_group_node</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;moveit_ros_move_group&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;move_group&quot;</span><span class="p">,</span>
+        <span class="n">output</span><span class="o">=</span><span class="s2">&quot;screen&quot;</span><span class="p">,</span>
+        <span class="n">parameters</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">to_dict</span><span class="p">(),</span>
+            <span class="n">robot_description_joint_limits</span><span class="p">,</span>
+            <span class="p">{</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">)},</span>
+        <span class="p">],</span>
+        <span class="n">arguments</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;--ros-args&quot;</span><span class="p">,</span> <span class="s2">&quot;--log-level&quot;</span><span class="p">,</span> <span class="s2">&quot;info&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+
+    <span class="n">rviz_config_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="s2">&quot;isaacsim_moveit&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;rviz&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;moveit.rviz&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">_robot_description_kinematics_yaml</span> <span class="o">=</span> <span class="n">load_yaml</span><span class="p">(</span>
+        <span class="n">denso_robot_moveit_config_pkg</span><span class="p">,</span> <span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;config&quot;</span><span class="p">,</span> <span class="s2">&quot;kinematics.yaml&quot;</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">robot_description_kinematics</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;robot_description_kinematics&quot;</span><span class="p">:</span> <span class="n">_robot_description_kinematics_yaml</span>
+    <span class="p">}</span>
+
+    <span class="n">rviz_node</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;rviz2&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;rviz2&quot;</span><span class="p">,</span>
+        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;rviz2&quot;</span><span class="p">,</span>
+        <span class="n">output</span><span class="o">=</span><span class="s2">&quot;log&quot;</span><span class="p">,</span>
+        <span class="n">arguments</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;-d&quot;</span><span class="p">,</span> <span class="n">rviz_config_file</span><span class="p">],</span>
+        <span class="n">parameters</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description_semantic</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description_kinematics</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">planning_pipelines</span><span class="p">,</span>
+            <span class="n">robot_description_joint_limits</span><span class="p">,</span>
+            <span class="n">robot_description_kinematics</span><span class="p">,</span>
+            <span class="p">{</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">)},</span>
+        <span class="p">],</span>
+    <span class="p">)</span>
+
+    <span class="n">world2robot_tf_node</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;tf2_ros&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;static_transform_publisher&quot;</span><span class="p">,</span>
+        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;static_transform_publisher_world_to_robot&quot;</span><span class="p">,</span>
+        <span class="n">output</span><span class="o">=</span><span class="s2">&quot;log&quot;</span><span class="p">,</span>
+        <span class="n">arguments</span><span class="o">=</span><span class="p">[</span>
+            <span class="s2">&quot;0.0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;0.0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;0.0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;0.0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;0.0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;0.0&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;world&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;panda_link0&quot;</span><span class="p">],</span>
+        <span class="n">parameters</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">)}],</span>
+    <span class="p">)</span>
+
+    <span class="n">robot_state_publisher</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;robot_state_publisher&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;robot_state_publisher&quot;</span><span class="p">,</span>
+        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;robot_state_publisher&quot;</span><span class="p">,</span>
+        <span class="n">output</span><span class="o">=</span><span class="s2">&quot;both&quot;</span><span class="p">,</span>
+        <span class="n">parameters</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description</span><span class="p">,</span>
+            <span class="p">{</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">)},</span>
+        <span class="p">],</span>
+    <span class="p">)</span>
+
+    <span class="n">ros2_controllers_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="s2">&quot;denso_robot_bringup&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;config&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;denso_robot_controllers.yaml&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">ros2_control_node</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;controller_manager&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;ros2_control_node&quot;</span><span class="p">,</span>
+        <span class="n">parameters</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">ros2_controllers_path</span><span class="p">,</span>
+            <span class="p">{</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">)},</span>
+        <span class="p">],</span>
+        <span class="n">remappings</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s2">&quot;/controller_manager/robot_description&quot;</span><span class="p">,</span> <span class="s2">&quot;/robot_description&quot;</span><span class="p">),</span>
+        <span class="p">],</span>
+        <span class="n">output</span><span class="o">=</span><span class="s2">&quot;screen&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">joint_state_broadcaster_spawner</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;controller_manager&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;spawner&quot;</span><span class="p">,</span>
+        <span class="n">arguments</span><span class="o">=</span><span class="p">[</span>
+            <span class="s2">&quot;joint_state_broadcaster&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;--controller-manager&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/controller_manager&quot;</span><span class="p">,</span>
+        <span class="p">],</span>
+    <span class="p">)</span>
+
+    <span class="n">pkg_name</span> <span class="o">=</span> <span class="s1">&#39;welding_package&#39;</span>
+
+    <span class="n">yaml_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="n">pkg_name</span><span class="p">),</span>
+        <span class="s1">&#39;config&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;Poses.yaml&#39;</span>
+    <span class="p">)</span>
+
+    <span class="n">welding_with_circular_conveyor_belt</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;welding_package&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;welding_with_circular_conveyor_belt&quot;</span><span class="p">,</span>
+        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;welding_with_circular_conveyor_belt&quot;</span><span class="p">,</span>
+        <span class="n">output</span><span class="o">=</span><span class="s2">&quot;screen&quot;</span><span class="p">,</span>
+        <span class="n">parameters</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description_semantic</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description_kinematics</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">planning_pipelines</span><span class="p">,</span>
+            <span class="n">robot_description_joint_limits</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">trajectory_execution</span><span class="p">,</span>
+            <span class="n">robot_description_kinematics</span><span class="p">,</span>
+            <span class="n">planning_pipeline</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">planning_scene_monitor</span><span class="p">,</span>
+            <span class="p">{</span><span class="s1">&#39;yaml_file&#39;</span><span class="p">:</span> <span class="n">yaml_file</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">)},</span>
+        <span class="p">],</span>
+        <span class="n">arguments</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;--ros-args&quot;</span><span class="p">,</span> <span class="s2">&quot;--log-level&quot;</span><span class="p">,</span> <span class="s2">&quot;info&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+
+
+    <span class="n">labels_yaml_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="n">pkg_name</span><span class="p">),</span>
+        <span class="s1">&#39;config&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;labels.yaml&#39;</span>
+    <span class="p">)</span>
+
+    <span class="n">add_collision_objects</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;welding_package&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;add_collision_objects&quot;</span><span class="p">,</span>
+        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;add_collision_objects&quot;</span><span class="p">,</span>
+        <span class="n">output</span><span class="o">=</span><span class="s2">&quot;screen&quot;</span><span class="p">,</span>
+        <span class="n">parameters</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description_semantic</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">robot_description_kinematics</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">planning_pipelines</span><span class="p">,</span>
+            <span class="n">robot_description_joint_limits</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">trajectory_execution</span><span class="p">,</span>
+            <span class="n">robot_description_kinematics</span><span class="p">,</span>
+            <span class="n">planning_pipeline</span><span class="p">,</span>
+            <span class="n">moveit_configs</span><span class="o">.</span><span class="n">planning_scene_monitor</span><span class="p">,</span>
+            <span class="p">{</span><span class="s1">&#39;yaml_file&#39;</span><span class="p">:</span> <span class="n">labels_yaml_file</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">:</span> <span class="n">LaunchConfiguration</span><span class="p">(</span><span class="s2">&quot;use_sim_time&quot;</span><span class="p">)},</span>
+            <span class="p">{</span><span class="s1">&#39;move_group&#39;</span><span class="p">:</span> <span class="s2">&quot;denso_arm&quot;</span><span class="p">},</span>
+        <span class="p">],</span>
+        <span class="n">remappings</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">(</span><span class="s1">&#39;/boxes_detection_array&#39;</span><span class="p">,</span> <span class="s1">&#39;/bbox_3d_with_labels&#39;</span><span class="p">)</span>
+
+        <span class="p">],</span>
+        <span class="n">arguments</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;--ros-args&quot;</span><span class="p">,</span> <span class="s2">&quot;--log-level&quot;</span><span class="p">,</span> <span class="s2">&quot;info&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+
+    <span class="n">denso_arm_controller</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span>
+        <span class="n">package</span><span class="o">=</span><span class="s2">&quot;controller_manager&quot;</span><span class="p">,</span>
+        <span class="n">executable</span><span class="o">=</span><span class="s2">&quot;spawner&quot;</span><span class="p">,</span>
+        <span class="n">arguments</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;trajectory_controller&quot;</span><span class="p">,</span> <span class="s2">&quot;-c&quot;</span><span class="p">,</span> <span class="s2">&quot;/controller_manager&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+
+
+    <span class="k">return</span> <span class="n">LaunchDescription</span><span class="p">(</span>
+        <span class="p">[</span>
+            <span class="n">mode_arg</span><span class="p">,</span>
+            <span class="n">isaac_sim_arg</span><span class="p">,</span>
+            <span class="n">gazebo_sim_arg</span><span class="p">,</span>
+            <span class="n">ros2_control_hardware_type</span><span class="p">,</span>
+            <span class="n">use_sim_time</span><span class="p">,</span>
+            <span class="n">rviz_node</span><span class="p">,</span>
+            <span class="n">world2robot_tf_node</span><span class="p">,</span>
+            <span class="n">robot_state_publisher</span><span class="p">,</span>
+            <span class="n">move_group_node</span><span class="p">,</span>
+            <span class="n">ros2_control_node</span><span class="p">,</span>
+            <span class="n">joint_state_broadcaster_spawner</span><span class="p">,</span>
+            <span class="n">denso_arm_controller</span><span class="p">,</span>
+            <span class="n">welding_with_circular_conveyor_belt</span><span class="p">,</span>
+            <span class="n">add_collision_objects</span><span class="p">,</span>
+
+            <span class="n">Node</span><span class="p">(</span>
+                <span class="n">package</span><span class="o">=</span><span class="s1">&#39;isaacsim_moveit&#39;</span><span class="p">,</span>
+                <span class="n">executable</span><span class="o">=</span><span class="s1">&#39;synchronize_isaac_sim_labels&#39;</span><span class="p">,</span>
+                <span class="n">name</span><span class="o">=</span><span class="s1">&#39;synchronize_isaac_sim_labels&#39;</span><span class="p">,</span>
+                <span class="n">output</span><span class="o">=</span><span class="s1">&#39;screen&#39;</span><span class="p">,</span>
+            <span class="p">),</span>
+
+
+        <span class="p">]</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">load_yaml</span><span class="p">(</span><span class="n">package_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">file_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="n">package_path</span> <span class="o">=</span> <span class="n">get_package_share_directory</span><span class="p">(</span><span class="n">package_name</span><span class="p">)</span>
+    <span class="n">absolute_file_path</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">package_path</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">parse_yaml</span><span class="p">(</span><span class="n">absolute_file_path</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">parse_yaml</span><span class="p">(</span><span class="n">absolute_file_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">absolute_file_path</span><span class="p">,</span> <span class="s2">&quot;r&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">EnvironmentError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+</pre></div>
+</div>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="file_launch_denso_welding_with_circular_conveyor_belt.launch.py.html" class="btn btn-neutral float-left" title="File denso_welding_with_circular_conveyor_belt.launch.py" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="file_launch_denso_welding_with_trajectory.launch.py.html" class="btn btn-neutral float-right" title="File denso_welding_with_trajectory.launch.py" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright The &lt;welding_package&gt; Contributors. License: TODO: License declaration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

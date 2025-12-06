@@ -1,0 +1,112 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4" kind="struct" language="C++" prot="public">
+    <compoundname>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</compoundname>
+    <templateparamlist>
+    </templateparamlist>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="67" column="16" bodyfile="src/add_collision_objects.cpp" bodystart="67" bodyend="77"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding.cpp" line="73" column="16" bodyfile="src/welding.cpp" bodystart="73" bodyend="83"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="66" column="16" bodyfile="src/welding_multiple_objects.cpp" bodystart="66" bodyend="76"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="68" column="16" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="68" bodyend="78"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="105" column="16" bodyfile="src/welding_with_trajectory.cpp" bodystart="105" bodyend="115"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="src/add_collision_objects.cpp" line="66" column="5" bodyfile="src/add_collision_objects.cpp" bodystart="66" bodyend="78"/>
+    <listofallmembers>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01std_1_1pair_3_01int_00_01int_01_4_00_01bool_01_4_01_4_1a4a563f3098d5d223ae78d21cbef87d61" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; std::pair&lt; int, int &gt;, bool &gt; &gt;</scope><name>operator()</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

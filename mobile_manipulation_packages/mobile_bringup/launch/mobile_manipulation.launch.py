@@ -100,7 +100,7 @@ def generate_launch_description():
     bt_file = os.path.join(
         get_package_share_directory(pkg_name_task),
         'bt',
-        'storage_boxes.xml'
+        'store_boxes.xml'
     )
 
 
@@ -353,8 +353,31 @@ def generate_launch_description():
         output='screen',
     )
     
+    # rviz_config_file = os.path.join(
+    #     get_package_share_directory("isaacsim_moveit"),
+    #     "rviz",
+    #     "moveit.rviz",
+    # )
+
+    # rviz_node = Node(
+    #     package="rviz2",
+    #     executable="rviz2",
+    #     name="rviz2",
+    #     output="log",
+    #     arguments=["-d", rviz_config_file],
+    #     parameters=[
+    #         moveit_config.robot_description,
+    #         moveit_config.robot_description_semantic,
+    #         moveit_config.robot_description_kinematics,
+    #         moveit_config.planning_pipelines,
+    #         moveit_config.joint_limits,
+   
+    #     ],
+    # )
+    
     final_launch_list = [
         ros2_control_hardware_type,
+        # rviz_node,
         use_sim_time,
         robot_state_publisher,
         move_group_node,

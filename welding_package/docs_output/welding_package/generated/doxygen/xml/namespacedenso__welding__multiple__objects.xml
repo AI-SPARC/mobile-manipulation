@@ -1,0 +1,71 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacedenso__welding__multiple__objects" kind="namespace" language="Python">
+    <compoundname>denso_welding_multiple_objects</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacedenso__welding__multiple__objects_1a5d0d029f681626f078dfd91927cae33f" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>denso_welding_multiple_objects.generate_launch_description</definition>
+        <argsstring>()</argsstring>
+        <name>generate_launch_description</name>
+        <qualifiedname>denso_welding_multiple_objects.generate_launch_description</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="launch/denso_welding_multiple_objects.launch.py" line="13" column="1" bodyfile="launch/denso_welding_multiple_objects.launch.py" bodystart="13" bodyend="326"/>
+        <references refid="namespacedenso__welding__multiple__objects_1a9a826b9d5e791bced5b31598c76241b1" compoundref="denso__welding__multiple__objects_8launch_8py" startline="327" endline="332">load_yaml</references>
+      </memberdef>
+      <memberdef kind="function" id="namespacedenso__welding__multiple__objects_1a9a826b9d5e791bced5b31598c76241b1" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>denso_welding_multiple_objects.load_yaml</definition>
+        <argsstring>(str package_name, str file_path)</argsstring>
+        <name>load_yaml</name>
+        <qualifiedname>denso_welding_multiple_objects.load_yaml</qualifiedname>
+        <param>
+          <type>str</type>
+          <declname>package_name</declname>
+        </param>
+        <param>
+          <type>str</type>
+          <declname>file_path</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="launch/denso_welding_multiple_objects.launch.py" line="327" column="1" bodyfile="launch/denso_welding_multiple_objects.launch.py" bodystart="327" bodyend="332"/>
+        <references refid="namespacedenso__welding__multiple__objects_1ad495f6f2137bc3d17c7a91276bf36a81" compoundref="denso__welding__multiple__objects_8launch_8py" startline="333" endline="339">parse_yaml</references>
+        <referencedby refid="namespacedenso__welding__multiple__objects_1a5d0d029f681626f078dfd91927cae33f" compoundref="denso__welding__multiple__objects_8launch_8py" startline="13" endline="326">generate_launch_description</referencedby>
+      </memberdef>
+      <memberdef kind="function" id="namespacedenso__welding__multiple__objects_1ad495f6f2137bc3d17c7a91276bf36a81" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>denso_welding_multiple_objects.parse_yaml</definition>
+        <argsstring>(str absolute_file_path)</argsstring>
+        <name>parse_yaml</name>
+        <qualifiedname>denso_welding_multiple_objects.parse_yaml</qualifiedname>
+        <param>
+          <type>str</type>
+          <declname>absolute_file_path</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="launch/denso_welding_multiple_objects.launch.py" line="333" column="1" bodyfile="launch/denso_welding_multiple_objects.launch.py" bodystart="333" bodyend="339"/>
+        <referencedby refid="namespacedenso__welding__multiple__objects_1a9a826b9d5e791bced5b31598c76241b1" compoundref="denso__welding__multiple__objects_8launch_8py" startline="327" endline="332">load_yaml</referencedby>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="launch/denso_welding_multiple_objects.launch.py" line="1" column="1"/>
+  </compounddef>
+</doxygen>

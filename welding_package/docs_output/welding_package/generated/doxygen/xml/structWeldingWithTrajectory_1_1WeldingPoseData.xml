@@ -1,0 +1,64 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structWeldingWithTrajectory_1_1WeldingPoseData" kind="struct" language="C++" prot="private">
+    <compoundname>WeldingWithTrajectory::WeldingPoseData</compoundname>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structWeldingWithTrajectory_1_1WeldingPoseData_1ab7f8248b53e44f7bd30e771f06164a7c" prot="public" static="no" mutable="no">
+        <type>geometry_msgs::msg::Pose</type>
+        <definition>geometry_msgs::msg::Pose WeldingWithTrajectory::WeldingPoseData::pose</definition>
+        <argsstring></argsstring>
+        <name>pose</name>
+        <qualifiedname>WeldingWithTrajectory::WeldingPoseData::pose</qualifiedname>
+        <briefdescription>
+<para>A pose de referência local (relativa ao objeto). </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="170" column="34" bodyfile="src/welding_with_trajectory.cpp" bodystart="170" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structWeldingWithTrajectory_1_1WeldingPoseData_1a38d3b70536a871cdd955ffb0df4dda85" prot="public" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string WeldingWithTrajectory::WeldingPoseData::trajectory_type</definition>
+        <argsstring></argsstring>
+        <name>trajectory_type</name>
+        <qualifiedname>WeldingWithTrajectory::WeldingPoseData::trajectory_type</qualifiedname>
+        <briefdescription>
+<para>O tipo de trajetória (&quot;normal&quot;, &quot;line&quot;, &quot;circle&quot;). </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="171" column="21" bodyfile="src/welding_with_trajectory.cpp" bodystart="171" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structWeldingWithTrajectory_1_1WeldingPoseData_1a2b691ad42956c3182850ea002f8613d9" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; double &gt;</type>
+        <definition>std::vector&lt;double&gt; WeldingWithTrajectory::WeldingPoseData::trajectory_data</definition>
+        <argsstring></argsstring>
+        <name>trajectory_data</name>
+        <qualifiedname>WeldingWithTrajectory::WeldingPoseData::trajectory_data</qualifiedname>
+        <briefdescription>
+<para>Parâmetros para a trajetória (ex: raio, ângulos). </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="172" column="21" bodyfile="src/welding_with_trajectory.cpp" bodystart="172" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Estrutura para armazenar os dados de uma pose de soldagem, incluindo tipo e parâmetros de trajetória. </para>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="src/welding_with_trajectory.cpp" line="168" column="5" bodyfile="src/welding_with_trajectory.cpp" bodystart="169" bodyend="173"/>
+    <listofallmembers>
+      <member refid="structWeldingWithTrajectory_1_1WeldingPoseData_1ab7f8248b53e44f7bd30e771f06164a7c" prot="public" virt="non-virtual"><scope>WeldingWithTrajectory::WeldingPoseData</scope><name>pose</name></member>
+      <member refid="structWeldingWithTrajectory_1_1WeldingPoseData_1a2b691ad42956c3182850ea002f8613d9" prot="public" virt="non-virtual"><scope>WeldingWithTrajectory::WeldingPoseData</scope><name>trajectory_data</name></member>
+      <member refid="structWeldingWithTrajectory_1_1WeldingPoseData_1a38d3b70536a871cdd955ffb0df4dda85" prot="public" virt="non-virtual"><scope>WeldingWithTrajectory::WeldingPoseData</scope><name>trajectory_type</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

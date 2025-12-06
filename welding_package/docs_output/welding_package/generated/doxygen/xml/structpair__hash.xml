@@ -1,0 +1,118 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structpair__hash" kind="struct" language="C++" prot="public">
+    <compoundname>pair_hash</compoundname>
+    <templateparamlist>
+      <param>
+        <type>typename T1</type>
+      </param>
+      <param>
+        <type>typename T2</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t pair_hash&lt; T1, T2 &gt;::operator()</definition>
+        <argsstring>(const std::pair&lt; T1, T2 &gt; &amp;p) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>pair_hash::operator()</qualifiedname>
+        <param>
+          <type>const std::pair&lt; T1, T2 &gt; &amp;</type>
+          <declname>p</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="83" column="17" bodyfile="src/add_collision_objects.cpp" bodystart="83" bodyend="87"/>
+      </memberdef>
+      <memberdef kind="function" id="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t pair_hash&lt; T1, T2 &gt;::operator()</definition>
+        <argsstring>(const std::pair&lt; T1, T2 &gt; &amp;p) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>pair_hash::operator()</qualifiedname>
+        <param>
+          <type>const std::pair&lt; T1, T2 &gt; &amp;</type>
+          <declname>p</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding.cpp" line="89" column="17" bodyfile="src/welding.cpp" bodystart="89" bodyend="93"/>
+      </memberdef>
+      <memberdef kind="function" id="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t pair_hash&lt; T1, T2 &gt;::operator()</definition>
+        <argsstring>(const std::pair&lt; T1, T2 &gt; &amp;p) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>pair_hash::operator()</qualifiedname>
+        <param>
+          <type>const std::pair&lt; T1, T2 &gt; &amp;</type>
+          <declname>p</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="82" column="17" bodyfile="src/welding_multiple_objects.cpp" bodystart="82" bodyend="86"/>
+      </memberdef>
+      <memberdef kind="function" id="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t pair_hash&lt; T1, T2 &gt;::operator()</definition>
+        <argsstring>(const std::pair&lt; T1, T2 &gt; &amp;p) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>pair_hash::operator()</qualifiedname>
+        <param>
+          <type>const std::pair&lt; T1, T2 &gt; &amp;</type>
+          <declname>p</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="84" column="17" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="84" bodyend="88"/>
+      </memberdef>
+      <memberdef kind="function" id="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::size_t</type>
+        <definition>std::size_t pair_hash&lt; T1, T2 &gt;::operator()</definition>
+        <argsstring>(const std::pair&lt; T1, T2 &gt; &amp;p) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>pair_hash::operator()</qualifiedname>
+        <param>
+          <type>const std::pair&lt; T1, T2 &gt; &amp;</type>
+          <declname>p</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="121" column="17" bodyfile="src/welding_with_trajectory.cpp" bodystart="121" bodyend="125"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="src/add_collision_objects.cpp" line="82" column="1" bodyfile="src/add_collision_objects.cpp" bodystart="82" bodyend="88"/>
+    <listofallmembers>
+      <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" virt="non-virtual"><scope>pair_hash</scope><name>operator()</name></member>
+      <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" virt="non-virtual"><scope>pair_hash</scope><name>operator()</name></member>
+      <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" virt="non-virtual"><scope>pair_hash</scope><name>operator()</name></member>
+      <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" virt="non-virtual"><scope>pair_hash</scope><name>operator()</name></member>
+      <member refid="structpair__hash_1ad82b8c538de0c9ac523dc04276bb84e3" prot="public" virt="non-virtual"><scope>pair_hash</scope><name>operator()</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

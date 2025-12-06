@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_81025302fd592f43a2d7c4fbb7eea7b8" kind="dir">
+    <compoundname>launch</compoundname>
+    <innerfile refid="denso__robot__moveit_8launch_8py">denso_robot_moveit.launch.py</innerfile>
+    <innerfile refid="denso__welding__multiple__objects_8launch_8py">denso_welding_multiple_objects.launch.py</innerfile>
+    <innerfile refid="denso__welding__with__circular__conveyor__belt_8launch_8py">denso_welding_with_circular_conveyor_belt.launch.py</innerfile>
+    <innerfile refid="denso__welding__with__trajectory_8launch_8py">denso_welding_with_trajectory.launch.py</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="launch/"/>
+  </compounddef>
+</doxygen>

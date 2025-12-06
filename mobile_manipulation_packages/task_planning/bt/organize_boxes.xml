@@ -49,7 +49,7 @@
                                     storage_size="{storage_size}"
                                     object_size="{object_size}"
                                     indexes="{indexes}"
-                                    object_padding="0.025"
+                                    object_padding="0.035"
                                     z_lift_offset="0.025"
                                     new_indexes="{indexes}"
                                     output_final_pose="{final_placement_pose}"/> 

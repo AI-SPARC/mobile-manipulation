@@ -1,0 +1,112 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4" kind="struct" language="C++" prot="public">
+    <compoundname>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;</compoundname>
+    <templateparamlist>
+    </templateparamlist>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="53" column="16" bodyfile="src/add_collision_objects.cpp" bodystart="53" bodyend="60"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding.cpp" line="59" column="16" bodyfile="src/welding.cpp" bodystart="59" bodyend="66"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_multiple_objects.cpp" line="52" column="16" bodyfile="src/welding_multiple_objects.cpp" bodystart="52" bodyend="59"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_circular_conveyor_belt.cpp" line="54" column="16" bodyfile="src/welding_with_circular_conveyor_belt.cpp" bodystart="54" bodyend="61"/>
+      </memberdef>
+      <memberdef kind="function" id="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>size_t</type>
+        <definition>size_t std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</definition>
+        <argsstring>(const std::tuple&lt; float, float, float &gt; &amp;t) const</argsstring>
+        <name>operator()</name>
+        <qualifiedname>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;::operator()</qualifiedname>
+        <param>
+          <type>const std::tuple&lt; float, float, float &gt; &amp;</type>
+          <declname>t</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/welding_with_trajectory.cpp" line="91" column="16" bodyfile="src/welding_with_trajectory.cpp" bodystart="91" bodyend="98"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="src/add_collision_objects.cpp" line="51" column="5" bodyfile="src/add_collision_objects.cpp" bodystart="52" bodyend="61"/>
+    <listofallmembers>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;</scope><name>operator()</name></member>
+      <member refid="structstd_1_1hash_3_01std_1_1tuple_3_01float_00_01float_00_01float_01_4_01_4_1aa620129b32b1286318591d0c6b6063de" prot="public" virt="non-virtual"><scope>std::hash&lt; std::tuple&lt; float, float, float &gt; &gt;</scope><name>operator()</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

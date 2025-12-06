@@ -1,0 +1,71 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacedenso__robot__moveit" kind="namespace" language="Python">
+    <compoundname>denso_robot_moveit</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacedenso__robot__moveit_1a9531a9a323d5773dd3bab9f998571a2c" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>denso_robot_moveit.generate_launch_description</definition>
+        <argsstring>()</argsstring>
+        <name>generate_launch_description</name>
+        <qualifiedname>denso_robot_moveit.generate_launch_description</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="launch/denso_robot_moveit.launch.py" line="13" column="1" bodyfile="launch/denso_robot_moveit.launch.py" bodystart="13" bodyend="326"/>
+        <references refid="namespacedenso__robot__moveit_1a605026a5aaa2aaf7fa0b4fcb853cd01a" compoundref="denso__robot__moveit_8launch_8py" startline="327" endline="332">load_yaml</references>
+      </memberdef>
+      <memberdef kind="function" id="namespacedenso__robot__moveit_1a605026a5aaa2aaf7fa0b4fcb853cd01a" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>denso_robot_moveit.load_yaml</definition>
+        <argsstring>(str package_name, str file_path)</argsstring>
+        <name>load_yaml</name>
+        <qualifiedname>denso_robot_moveit.load_yaml</qualifiedname>
+        <param>
+          <type>str</type>
+          <declname>package_name</declname>
+        </param>
+        <param>
+          <type>str</type>
+          <declname>file_path</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="launch/denso_robot_moveit.launch.py" line="327" column="1" bodyfile="launch/denso_robot_moveit.launch.py" bodystart="327" bodyend="332"/>
+        <references refid="namespacedenso__robot__moveit_1aec585a8b750d61e040ccff9bf6139afa" compoundref="denso__robot__moveit_8launch_8py" startline="333" endline="339">parse_yaml</references>
+        <referencedby refid="namespacedenso__robot__moveit_1a9531a9a323d5773dd3bab9f998571a2c" compoundref="denso__robot__moveit_8launch_8py" startline="13" endline="326">generate_launch_description</referencedby>
+      </memberdef>
+      <memberdef kind="function" id="namespacedenso__robot__moveit_1aec585a8b750d61e040ccff9bf6139afa" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>denso_robot_moveit.parse_yaml</definition>
+        <argsstring>(str absolute_file_path)</argsstring>
+        <name>parse_yaml</name>
+        <qualifiedname>denso_robot_moveit.parse_yaml</qualifiedname>
+        <param>
+          <type>str</type>
+          <declname>absolute_file_path</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="launch/denso_robot_moveit.launch.py" line="333" column="1" bodyfile="launch/denso_robot_moveit.launch.py" bodystart="333" bodyend="339"/>
+        <referencedby refid="namespacedenso__robot__moveit_1a605026a5aaa2aaf7fa0b4fcb853cd01a" compoundref="denso__robot__moveit_8launch_8py" startline="327" endline="332">load_yaml</referencedby>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="launch/denso_robot_moveit.launch.py" line="1" column="1"/>
+  </compounddef>
+</doxygen>

@@ -1,6 +1,5 @@
 #include <storage_manager/Organize.hpp> 
 #include "rclcpp_components/register_node_macro.hpp"
-
 #include "geometry_msgs/msg/vector3.hpp"
 #include <tf2/utils.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -63,15 +62,7 @@ std::pair<geometry_msgs::msg::Pose, std::vector<int>> OrganizeNode::placeObjectI
     double start_x = - (storage_size.x / 2.0) + (cell_x / 2.0);
     double start_y = - (storage_size.y / 2.0) + (cell_y / 2.0);
     
-    double start_z;
-    if (storage_size.z <= 0.001) 
-    {
-        start_z = (object_size.z / 2.0) + z_lift_offset;
-    } 
-    else 
-    {
-        start_z = - (storage_size.z / 2.0) + (object_size.z / 2.0) + z_lift_offset;
-    }
+    double start_z = (object_size.z / 2.0) + z_lift_offset;
 
     double pos_x_rel = start_x + (idx_x * cell_x);
     double pos_y_rel = start_y + (idx_y * cell_y);
@@ -99,6 +90,7 @@ std::pair<geometry_msgs::msg::Pose, std::vector<int>> OrganizeNode::placeObjectI
     m_storage.getRPY(r_temp, p_temp, yaw_storage);
 
     tf2::Quaternion q_final;
+
     q_final.setRPY(0.0, 0.0, yaw_storage); 
     
     q_final.normalize();
@@ -118,7 +110,6 @@ std::pair<geometry_msgs::msg::Pose, std::vector<int>> OrganizeNode::placeObjectI
         {
             next_y = 0;
             next_z++;
-        
         }
     }
 

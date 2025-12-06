@@ -1,0 +1,47 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structLabelRule" kind="struct" language="C++" prot="public">
+    <compoundname>LabelRule</compoundname>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structLabelRule_1a14393fbb705873544744c4181b4ef7f9" prot="public" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string LabelRule::label</definition>
+        <argsstring></argsstring>
+        <name>label</name>
+        <qualifiedname>LabelRule::label</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="124" column="17" bodyfile="src/add_collision_objects.cpp" bodystart="124" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structLabelRule_1a9f6d1ce45c0113b3d575c082e124c8ea" prot="public" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool LabelRule::is_prefix</definition>
+        <argsstring></argsstring>
+        <name>is_prefix</name>
+        <qualifiedname>LabelRule::is_prefix</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="src/add_collision_objects.cpp" line="125" column="10" bodyfile="src/add_collision_objects.cpp" bodystart="125" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Estrutura para armazenar regras de labels (autorizadas ou não). </para>
+    </briefdescription>
+    <detaileddescription>
+<para>Cada regra contém um rótulo (<computeroutput>label</computeroutput>) e um indicador se esse rótulo é um prefixo (<computeroutput>is_prefix</computeroutput>). Se <computeroutput>is_prefix</computeroutput> for verdadeiro, qualquer label que começar com esse prefixo será considerada correspondente. </para>
+    </detaileddescription>
+    <location file="src/add_collision_objects.cpp" line="123" column="1" bodyfile="src/add_collision_objects.cpp" bodystart="123" bodyend="126"/>
+    <listofallmembers>
+      <member refid="structLabelRule_1a9f6d1ce45c0113b3d575c082e124c8ea" prot="public" virt="non-virtual"><scope>LabelRule</scope><name>is_prefix</name></member>
+      <member refid="structLabelRule_1a14393fbb705873544744c4181b4ef7f9" prot="public" virt="non-virtual"><scope>LabelRule</scope><name>label</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>
