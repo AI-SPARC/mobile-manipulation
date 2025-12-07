@@ -11,7 +11,7 @@
  * A lógica de decisão é governada pela biblioteca BehaviorTree.CPP v4.
  * O nó gerencia a conversão de callbacks assíncronos do ROS 2 (Actions/Topics)
  * para o fluxo síncrono da Behavior Tree (Ticks).
- */
+*/
 
 #include <memory>
 #include <vector>
@@ -27,6 +27,7 @@
 #include <atomic>
 #include <mutex>
 #include <map>
+#include <chrono>
 
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/xml_parsing.h>
@@ -200,6 +201,10 @@ private:
     std::function<BT::NodeStatus(BT::TreeNode&)> tick_fun_;
 };
 
+// ============================================================================
+// CLASSE PRINCIPAL DO SERVER NODE
+// ============================================================================
+
 /**
  * @class ServerNode
  * @brief Nó principal (Main Node) do sistema de robótica.
@@ -213,6 +218,12 @@ private:
 class ServerNode : public rclcpp::Node
 {
 public:
+    /**
+     * @name Ciclo de Vida e Inicialização
+     * Construtores, destrutores e carregamento de parâmetros.
+     * @{
+    */
+
     /**
      * @brief Construtor do ServerNode.
      *
@@ -241,14 +252,14 @@ public:
 
         // Inicialização dos Subscribers
         // Detection3DArray: Recebe caixas delimitadoras (bounding boxes) dos objetos detectados.
-        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-            "/bbox_3d_with_labels", 10,
+        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>("/bbox_3d_with_labels", 10,
             std::bind(&ServerNode::detection_callback, this, std::placeholders::_1));
 
         // Odometria: Recebe a posição atual do robô.
-        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
+        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
 
+        publisher_ = this->create_publisher<geometry_msgs::msg::Pose>("object_pose", 10);
+        
         // Inicialização dos Action Clients
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(this, "pick_object");
         path_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Path>(this, "path");
@@ -265,7 +276,9 @@ public:
         // Inicia a thread dedicada para o tick da Behavior Tree para não bloquear o executor do ROS
         bt_thread_ = std::thread(&ServerNode::bt_loop, this);
 
-        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado (Modo High-Performance).");
+        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado.");
+
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&ServerNode::publish_pose, this));
 
         if(!yaml_file.empty())
         {
@@ -300,6 +313,9 @@ private:
     std::shared_ptr<storage_manager::OrganizeNode> organize_node_;         /**< Referência à lógica de cálculo de posição dentro da caixa. */
     std::unique_ptr<BT::Groot2Publisher> groot_publisher_;                 /**< Publicador para visualização em tempo real no Groot2. */
 
+    // Publishers.
+    rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr publisher_;
+
     // --- Subscribers ROS ---
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_; /**< Assinante de detecções visuais. */
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;       /**< Assinante de odometria. */
@@ -326,6 +342,8 @@ private:
     std::string current_target_id_ = ""; /**< ID do objeto que está sendo ativamente processado pela Behavior Tree. Vazio se IDLE. */
     geometry_msgs::msg::Pose current_target_pose_; /**< Pose do objeto alvo atual. */
 
+    rclcpp::TimerBase::SharedPtr timer_;
+
     // --- Infraestrutura da Behavior Tree ---
     std::thread bt_thread_; /**< Thread separada para o loop `tick` da árvore. */
     std::mutex bt_mutex_;   /**< Mutex para proteger leitura/escrita de variáveis compartilhadas entre thread ROS e thread BT (ex: current_target_id_). */
@@ -344,6 +362,12 @@ private:
     // --- Odometria e Flags ---
     float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0; /**< Posição atual do robô atualizada pelo odom_callback. */
     bool has_new_object_ = false; /**< Flag atômica (logicamente) indicando que o detection_callback encontrou um candidato válido. */
+
+    /**
+     * @name Utilitários Internos
+     * Funções auxiliares para verificação de estado e carregamento de arquivos.
+     * @{
+     */
 
     /**
      * @brief Converte o enum TaskState interno para BT::NodeStatus.
@@ -369,6 +393,14 @@ private:
         return BT::NodeStatus::RUNNING;
     }
 
+    /** @} */
+
+    /**
+     * @name Núcleo da Behavior Tree
+     * Configuração, registro de nós e loop principal de execução (Tick).
+     * @{
+     */
+
     /**
      * @brief Configura e registra todos os nós da Behavior Tree.
      * @details Esta função é responsável por mapear as strings do XML para a lógica C++.
@@ -378,10 +410,10 @@ private:
      * - **IsRobotNear**: Verifica distância euclidiana entre robô e alvo. Falha se longe e retorna pose de ajuste.
      * - **DetectObject**: Retorna SUCESSO se houver um alvo travado ou um novo objeto válido detectado. Preenche as portas de saída com dados do objeto.
      * - **ClearTarget**: Limpa o alvo atual (current_target_id_), permitindo buscar novos objetos.
-     * - **GetStorageInfo**: Consulta StorageNode para encontrar a melhor caixa/prateleira para o objeto atual.
+     * - **GetStorageInfo**: Consulta o nó de Storage para encontrar a melhor caixa/prateleira para o objeto atual.
      * - **ComputePoseToOrganize**: Chama o algoritmo de bin-packing para calcular onde exatamente colocar o objeto dentro da caixa.
      * - **ComputePoseToStore**: Calcula pose simples de armazenamento.
-     * - **IncrementOrganizedStorageIndexes**: Atualiza os novos índices de armazenamento ocupados no banco de dados de armazenamento.
+     * - **IncrementOrganizedStorageIndexes**: Persiste os novos índices ocupados no banco de dados de armazenamento.
      * - **DecrementStorageCount**: Rollback em caso de falha, libera o espaço reservado.
      * - **IsGripperHoldingObject**: Verifica sensor de força/carga da garra.
      * - **ComputePath**: Action Assíncrona. Envia goal para o planejador de caminho.
@@ -630,8 +662,17 @@ private:
         factory.registerSimpleCondition("IsGripperHoldingObject",
             [this](BT::TreeNode& self) -> BT::NodeStatus
             {
-                if (this->gripper_monitor_node_->checkIsHolding()) return BT::NodeStatus::SUCCESS;
-                else return BT::NodeStatus::FAILURE;
+                std::lock_guard<std::mutex> lock(bt_mutex_); 
+                
+                if (this->gripper_monitor_node_->checkIsHolding()) 
+                {
+                    return BT::NodeStatus::SUCCESS;
+                }    
+                else
+                {
+                    cancel_controller_goal();
+                    return BT::NodeStatus::FAILURE;
+                }
             }
         );
 
@@ -645,20 +686,24 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
 
-                    if (self.status() == BT::NodeStatus::IDLE && path_state_ != TaskState::IDLE) {
+                    if (self.status() == BT::NodeStatus::IDLE && path_state_ != TaskState::IDLE) 
+                    {
                         path_state_ = TaskState::IDLE; // Reset se reiniciado
                     }
 
-                    if (path_state_ == TaskState::SUCCESS) {
+                    if (path_state_ == TaskState::SUCCESS) 
+                    {
                         path_state_ = TaskState::IDLE;
                         return BT::NodeStatus::SUCCESS;
                     }
-                    if (path_state_ == TaskState::FAILURE) {
+                    if (path_state_ == TaskState::FAILURE) 
+                    {
                         path_state_ = TaskState::IDLE;
                         return BT::NodeStatus::FAILURE;
                     }
 
-                    if (path_state_ == TaskState::RUNNING) {
+                    if (path_state_ == TaskState::RUNNING) 
+                    {
                         return BT::NodeStatus::RUNNING;
                     }
                 } // <--- IMPORTANTE: LIBERA O MUTEX AQUI
@@ -780,7 +825,9 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Erro Fatal ao criar Tree: %s", e.what());
         }
     }
+    
 
+    // DOC-START: bt_loop
     /**
      * @brief Loop principal da Behavior Tree rodando em uma thread dedicada.
      *
@@ -837,6 +884,12 @@ private:
         }
     }
 
+    // DOC-END: bt_loop
+
+
+
+    /** @} */
+
     /**
      * @brief Carrega lista de labels autorizados de um arquivo YAML.
      * @param yaml_path Caminho do arquivo.
@@ -855,6 +908,14 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Failed to load YAML: %s", e.what());
         }
     }
+
+    /** @} */
+
+    /**
+     * @name Callbacks de Sensores
+     * Recepção de dados da Odometria e Visão Computacional.
+     * @{
+    */
 
     /**
      * @brief Callback de odometria.
@@ -935,6 +996,14 @@ private:
     }
 
     // --- Path Callbacks (Action Client) ---
+
+    /** @} */
+
+    /**
+     * @name Cliente de Ação: Path Planning
+     * Funções para requisitar o cálculo de rotas (A*, D*, etc.) e tratar feedback.
+     * @{
+     */
 
     /**
      * @brief Envia um goal para a Action de Path Planning (ex: A*).
@@ -1085,6 +1154,14 @@ private:
 
     // --- Controller Callbacks ---
 
+    /** @} */
+
+    /**
+     * @name Cliente de Ação: Controller
+     * Funções para execução de trajetórias e controle de movimento.
+     * @{
+     */
+
     /**
      * @brief Envia um goal para o Controlador (seguidor de caminho).
      * @param target_path O caminho (lista de poses) a ser seguido.
@@ -1159,6 +1236,14 @@ private:
 
     // --- Pick/Place Callbacks ---
 
+    /** @} */
+
+    /**
+     * @name Cliente de Ação: Manipulation
+     * Funções para controle do braço robótico (Pick & Place) via MoveIt.
+     * @{
+     */
+
     /**
      * @brief Envia goal de manipulação (Pick ou Place).
      * @param id ID do objeto (necessário para planejamento de colisão no MoveIt).
@@ -1215,6 +1300,21 @@ private:
             manipulation_state_ = TaskState::FAILURE;
             RCLCPP_ERROR(this->get_logger(), "PICK FAILED or ABORTED");
         }
+    }
+
+
+    // Publishers
+
+    void publish_pose()
+    {
+        auto message = geometry_msgs::msg::Pose();
+
+        {
+            std::lock_guard<std::mutex> lock(bt_mutex_);
+            message = cached_object_.pose;
+        }
+
+        publisher_->publish(message);
     }
 
 };

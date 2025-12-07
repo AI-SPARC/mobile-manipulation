@@ -48,6 +48,11 @@ SimpleManipulation::SimpleManipulation()
     subscription_ = this->create_subscription<std_msgs::msg::Float32>(
             "contact_sensor", 10, std::bind(&SimpleManipulation::topic_callback, this, std::placeholders::_1));
 
+    subscription_1 = this->create_subscription<geometry_msgs::msg::Pose>(
+      "object_pose", 
+      10, 
+      std::bind(&SimpleManipulation::object_pose_callback, this, std::placeholders::_1));
+
     this->action_server_ = rclcpp_action::create_server<mobile_manipulation_interfaces::action::PickObject>(
         this, 
         "pick_object",
@@ -522,12 +527,36 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 
                 if(picked == false)
                 {
+                    open_gripper();
                     move_group_arm->detachObject(received_id);
-                    ready();
-                    return false;
+
+                    rclcpp::sleep_for(std::chrono::milliseconds(150));
+
+                    geometry_msgs::msg::Pose updated_object_pose;
+
+                    {
+                        std::lock_guard<std::mutex> lock(object_pose_mutex);
+
+                        updated_object_pose = object_pose;
+                    }
+                    
+                    target_pose_world.position.z += 0.125;
+                    attempt_cartesian_move(target_pose_world, 1.0, false);
+
+                    return calculate_global_pose(received_id, updated_object_pose, pick);
+                    
                 }
 
-                target_pose_world.position.z += 0.1;
+
+                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
+                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
+                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
+                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
+                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
+                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
+
+
+                target_pose_world.position.z += 0.125;
                 attempt_cartesian_move(target_pose_world, 1.0, false);
 
                 // set_collision_allowance(received_id, "ground_plane", true);
@@ -535,6 +564,8 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 // rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 ready();
+
+                return true;
             }
             else
             {
@@ -556,6 +587,8 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
 
                 send_request(received_id, true);
                 ready();
+
+                return true;
             }
             else
             {
@@ -669,6 +702,19 @@ bool SimpleManipulation::send_request(std::string received_obstacle_id, bool rec
         RCLCPP_ERROR(this->get_logger(), "Timeout: O serviço demorou demais para responder.");
         return false;
     }
+}
+
+// Subscribers
+
+void SimpleManipulation::object_pose_callback(const geometry_msgs::msg::Pose & msg)
+{
+    {
+        std::lock_guard<std::mutex> lock(object_pose_mutex);
+
+        object_pose = msg;
+    }
+
+  
 }
 
 // Action server (pick_object).

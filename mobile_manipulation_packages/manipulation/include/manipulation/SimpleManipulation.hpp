@@ -60,8 +60,10 @@ private:
     };
 
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr subscription_;
+    rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr subscription_1;
 
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr publisher_2;
+    rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr publisher_;
     rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_publisher_;
     
     rclcpp::Client<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr client_;
@@ -70,7 +72,8 @@ private:
     rclcpp_action::Server<mobile_manipulation_interfaces::action::PickObject>::SharedPtr action_server_;
 
     rclcpp::TimerBase::SharedPtr init_timer_;
-
+    rclcpp::TimerBase::SharedPtr timer_;
+  
    
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
@@ -82,7 +85,9 @@ private:
     std::string yaml_file, storages_yaml_file;
     std::unordered_map<std::string, std::vector<geometry_msgs::msg::Pose>> pick_and_place_poses;
     std::pair<std::string, geometry_msgs::msg::Pose> object;
+    geometry_msgs::msg::Pose object_pose;
 
+    std::mutex object_pose_mutex;
     std::mutex contact_sensor_mutex;
     std::deque<float> contact_sensor_data;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -90,7 +95,7 @@ private:
 
     std::atomic<bool> moveit_ready_{false};
     
-
+    void object_pose_callback(const geometry_msgs::msg::Pose & msg);
     void loadLocationsFromYaml(const std::string &yaml_path);
     void initMoveGroup();
     void ready();
