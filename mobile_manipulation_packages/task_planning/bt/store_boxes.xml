@@ -3,6 +3,7 @@
   <BehaviorTree ID="AcquireObject">
     <RetryUntilSuccessful num_attempts="-1">
       <Sequence name="AcquireSequence">
+      
         <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
         
         <Fallback name="EnsureProximity">

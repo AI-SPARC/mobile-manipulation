@@ -1192,7 +1192,7 @@ private:
             return 0.0; 
         }
 
-        // Cateto horizontal. MAX_REACH_3D é a hipotenusa é 0.9.
+        // Cateto horizontal. MAX_REACH_3D é a hipotenusa que é 0.9.
         // r_2d = sqrt(R^2 - dz^2)
         double radius_2d = std::sqrt(std::pow(MAX_REACH_3D, 2) - std::pow(vertical_dist, 2));
 

@@ -1,17 +1,7 @@
 /**
  * @file server_node.cpp
- * @brief Nó central de controle para manipulação móvel utilizando Behavior Trees e ROS 2.
- * @author Lucas Momesso Alves
- * @date 06/12/2025
- *
- * @details Este arquivo implementa o `ServerNode`, que atua como o cérebro do robô.
- * Ele recebe a parte de visão do ambiente e comanda a execução da navegação (Path Planning e Controle),
- * manipulação (Pick and Place) e gerenciamento de estoque (Storage Manager).
- *
- * A lógica de decisão é governada pela biblioteca BehaviorTree.CPP v4.
- * O nó gerencia a conversão de callbacks assíncronos do ROS 2 (Actions/Topics)
- * para o fluxo síncrono da Behavior Tree (Ticks).
-*/
+ * @brief Nó central de controle (Task Planner)
+ */
 
 #include <memory>
 #include <vector>
@@ -45,7 +35,8 @@
 #include <nav_msgs/msg/path.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-
+#include "visualization_msgs/msg/marker.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 #include <yaml-cpp/yaml.h>
 
 // Interfaces Customizadas
@@ -60,179 +51,114 @@
 
 namespace BT
 {
-    /**
-     * @brief Especialização de template necessária para o BT.CPP converter strings para geometry_msgs::msg::Pose.
-     *
-     * @details O BehaviorTree.CPP precisa saber como converter tipos de portas XML para tipos C++.
-     * Como geometry_msgs::msg::Pose é um tipo complexo, fornecemos uma implementação padrão.
-     *
-     * @param str String de entrada (não utilizada nesta implementação básica).
-     * @return geometry_msgs::msg::Pose Uma pose vazia/zerada por padrão.
-     */
+    // DOC-START: convertFromString
+    // Especialização de template para converter strings do XML (ex: "1.0;2.0;3.0")
+    // para o tipo complexo geometry_msgs::msg::Pose.
+    // O BehaviorTree.CPP exige isso para tipos não primitivos nas Portas de Entrada.
     template <>
     inline geometry_msgs::msg::Pose convertFromString(StringView)
     {
+        // Retorna uma pose zerada por padrão.
+        // Em uma implementação real, aqui faríamos o parse da string "x;y;z;..."
         return geometry_msgs::msg::Pose();
     }
+    // DOC-END: convertFromString
 }
 
-/**
- * @enum TaskState
- * @brief Enumeração para rastrear o estado de execução de ações assíncronas do ROS.
- *
- * @details Usado para fazer a ponte entre o loop de feedback do ROS (Callbacks) e o tick da Behavior Tree.
- */
+// Estados possíveis para uma tarefa assíncrona (Action Client)
+// Usado para sincronizar o tick da BT com o callback do ROS
 enum class TaskState
 {
-    IDLE,    /**< @brief Nenhuma tarefa está sendo executada ou a tarefa anterior foi resetada. */
-    RUNNING, /**< @brief A Action do ROS foi enviada e o servidor está processando. */
-    SUCCESS, /**< @brief A Action do ROS retornou sucesso no result callback. */
-    FAILURE  /**< @brief A Action falhou, foi abortada ou rejeitada. */
+    IDLE,    // Nenhuma ação rodando
+    RUNNING, // Action enviada, aguardando resultado
+    SUCCESS, // Action terminou com sucesso
+    FAILURE  // Action abortada ou falhou
 };
 
-/**
- * @class ParallelAny
- * @brief Nó de Controle customizado para a Behavior Tree.
- *
- * @details Diferente dos nós `Parallel` padrão (que esperam N sucessos ou N falhas),
- * este nó implementa uma lógica "short-circuit". Ele retorna SUCESSO imediatamente se
- * *qualquer* filho retornar sucesso, ou FALHA se *qualquer* filho retornar falha.
- * Caso contrário, retorna RUNNING.
- */
+// DOC-START: ParallelAny
+// Nó de Controle Personalizado: "Parallel Any" (Paralelo "Ou")
+// Executa todos os filhos simultaneamente (no mesmo tick).
+// Retorna SUCESSO se *pelo menos um* filho retornar sucesso.
+// Retorna FALHA se *pelo menos um* filho retornar falha.
+// Caso contrário, retorna RUNNING.
 class ParallelAny : public BT::ControlNode
 {
 public:
-    /**
-     * @brief Construtor do nó ParallelAny.
-     * @param name Nome do nó na árvore.
-     * @param config Configuração do nó.
-     */
     ParallelAny(const std::string& name, const BT::NodeConfig& config)
         : BT::ControlNode(name, config) {}
 
-    /**
-     * @brief Define as portas fornecidas pelo nó.
-     * @return BT::PortsList Lista vazia, pois este nó não possui portas de entrada/saída.
-     */
     static BT::PortsList providedPorts() { return {}; }
 
-    /**
-     * @brief Executa o tick do nó.
-     *
-     * @details Itera sobre todos os filhos.
-     * 1. Se um filho retorna SUCCESS -> Interrompe os outros e retorna SUCCESS.
-     * 2. Se um filho retorna FAILURE -> Interrompe os outros e retorna FAILURE.
-     * 3. Se nenhum retornar status terminal, retorna RUNNING.
-     *
-     * @return BT::NodeStatus O estado agregado dos filhos.
-     */
     BT::NodeStatus tick() override
     {
+        // Itera sobre todos os nós filhos registrados neste controle
         for (size_t i = 0; i < children_nodes_.size(); i++)
         {
             BT::TreeNode* child = children_nodes_[i];
+            // Executa o tick do filho
             BT::NodeStatus status = child->executeTick();
 
+            // Lógica Short-Circuit: Se um acabou bem, todos acabam bem.
             if (status == BT::NodeStatus::SUCCESS)
             {
-                haltChildren();
+                haltChildren(); // Para os outros que ainda estão rodando
                 return BT::NodeStatus::SUCCESS;
             }
 
+            // Lógica Short-Circuit de Falha: Se um falhou, o grupo todo falha.
             if (status == BT::NodeStatus::FAILURE)
             {
                 haltChildren();
                 return BT::NodeStatus::FAILURE;
             }
         }
+        // Se ninguém terminou ainda, continuamos rodando.
         return BT::NodeStatus::RUNNING;
     }
 
-    /**
-     * @brief Interrompe a execução do nó e de todos os seus filhos.
-     */
     void halt() override
     {
         haltChildren();
         BT::ControlNode::halt();
     }
 };
+// DOC-END: ParallelAny
 
-/**
- * @class AsyncAction
- * @brief Wrapper genérico para criar Actions assíncronas na Behavior Tree.
- *
- * @details Permite passar uma função lambda (`tick_fun`) que define o comportamento do nó
- * tanto na inicialização (`onStart`) quanto durante a execução (`onRunning`).
- * Isso simplifica a criação de nós Stateful sem precisar herdar classes complexas repetidamente.
- */
+// DOC-START: AsyncAction
+// Wrapper para criar Actions Stateful (Assíncronas) de forma rápida usando Lambdas.
+// Evita ter que criar uma classe .h/.cpp separada para cada nó simples da árvore.
 class AsyncAction : public BT::StatefulActionNode
 {
 public:
-    /**
-     * @brief Construtor do AsyncAction.
-     * @param name Nome da Action.
-     * @param config Configuração da BT.
-     * @param tick_fun Função lambda que contém a lógica do Tick. Recebe uma referência ao próprio TreeNode.
-     */
     AsyncAction(const std::string& name, const BT::NodeConfig& config,
                 std::function<BT::NodeStatus(BT::TreeNode&)> tick_fun)
         : BT::StatefulActionNode(name, config), tick_fun_(tick_fun) {}
 
-    /**
-     * @brief Chamado quando o nó sai do estado IDLE.
-     * @return BT::NodeStatus Resultado da execução da lambda.
-     */
+    // Chamado uma vez quando o nó sai de IDLE para RUNNING
     BT::NodeStatus onStart() override { return tick_fun_(*this); }
 
-    /**
-     * @brief Chamado a cada tick enquanto o nó está no estado RUNNING.
-     * @return BT::NodeStatus Resultado da execução da lambda.
-     */
+    // Chamado a cada tick enquanto o nó estiver em RUNNING
     BT::NodeStatus onRunning() override { return tick_fun_(*this); }
 
-    /**
-     * @brief Chamado quando o nó é interrompido (halt).
-     */
     void onHalted() override {}
 
 private:
-    /** @brief Armazena a função lógica injetada via construtor. */
+    // Armazena a função lógica injetada (lambda)
     std::function<BT::NodeStatus(BT::TreeNode&)> tick_fun_;
 };
+// DOC-END: AsyncAction
 
 // ============================================================================
 // CLASSE PRINCIPAL DO SERVER NODE
 // ============================================================================
 
-/**
- * @class ServerNode
- * @brief Nó principal (Main Node) do sistema de robótica.
- *
- * @details Este nó herda de `rclcpp::Node` e é responsável por:
- * 1. Assinar tópicos de odometria e visão computacional.
- * 2. Gerenciar clientes de Action para Path Planning, Controle e Manipulação.
- * 3. Carregar e executar a Behavior Tree.
- * 4. Manter o estado global do sistema (posição do robô, objeto detectado, estado das tarefas).
- */
 class ServerNode : public rclcpp::Node
 {
 public:
-    /**
-     * @name Ciclo de Vida e Inicialização
-     * Construtores, destrutores e carregamento de parâmetros.
-     * @{
-    */
-
-    /**
-     * @brief Construtor do ServerNode.
-     *
-     * @details Inicializa parâmetros, subscribers, clients e a thread da Behavior Tree.
-     *
-     * @param gripper_node Ponteiro compartilhado para o nó de monitoramento da garra.
-     * @param storage_node Ponteiro compartilhado para o nó de gerenciamento de armazenamento.
-     * @param organize_node Ponteiro compartilhado para o nó de lógica de organização (Bin Packing).
-     */
+    // DOC-START: ServerNode
+    // Construtor: Configura toda a infraestrutura do nó.
+    // Recebe referências compartilhadas para os nós auxiliares (Gripper, Storage, Organize)
+    // para permitir comunicação direta em memória, sem latência de tópicos.
     ServerNode(
         std::shared_ptr<manipulation::IsGripperHolding> gripper_node,
         std::shared_ptr<storage_manager::StorageNode> storage_node,
@@ -243,205 +169,216 @@ public:
        storage_node_(storage_node),
        organize_node_(organize_node)
     {
-        // Declaração e obtenção de parâmetros do ROS
+        // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<std::string>("bt_xml_path", "");
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         std::string bt_xml_path = this->get_parameter("bt_xml_path").as_string();
 
-        // Inicialização dos Subscribers
-        // Detection3DArray: Recebe caixas delimitadoras (bounding boxes) dos objetos detectados.
-        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>("/bbox_3d_with_labels", 10,
+        // 1. Subscribers:
+        // Ouve as detecções do YOLO ("vision_msgs")
+        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
+            "/bbox_3d_with_labels", 10,
             std::bind(&ServerNode::detection_callback, this, std::placeholders::_1));
 
-        // Odometria: Recebe a posição atual do robô.
-        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
+        // Ouve a posição do robô ("nav_msgs")
+        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
 
         publisher_ = this->create_publisher<geometry_msgs::msg::Pose>("object_pose", 10);
         
-        // Inicialização dos Action Clients
+        // 2. Action Clients (Clientes de Ação):
+        // Conecta com os servidores de Manipulação, Planejamento de Caminho e Controle.
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(this, "pick_object");
         path_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Path>(this, "path");
         controller_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Controller>(this, "controller");
 
-        // Inicialização dos estados internos
+        // Inicializa máquina de estados interna das ações
         path_state_ = TaskState::IDLE;
         nav_state_ = TaskState::IDLE;
         manipulation_state_ = TaskState::IDLE;
 
-        // Configuração da Árvore de Comportamento
+        // 3. Behavior Tree:
+        // Registra os nós e carrega o arquivo XML
         setup_behavior_tree(bt_xml_path);
 
-        // Inicia a thread dedicada para o tick da Behavior Tree para não bloquear o executor do ROS
+        // 4. Thread Dedicada:
+        // O BT loop roda em uma thread separada para não bloquear o executor do ROS (spin).
         bt_thread_ = std::thread(&ServerNode::bt_loop, this);
 
-        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado.");
+        RCLCPP_INFO(this->get_logger(), "ServerNode iniciado (Modo High-Performance).");
 
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&ServerNode::publish_pose, this));
+        // Timer para debug (publica pose do alvo)
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&ServerNode::publish_pose, this));
 
+        // Carrega lista de objetos permitidos do YAML
         if(!yaml_file.empty())
         {
             loadLocationsFromYaml(yaml_file);
         }
-    }
 
-    /**
-     * @brief Destrutor do ServerNode.
-     * @details Garante que a thread da Behavior Tree seja finalizada corretamente (join).
-     */
+        // Publishers
+
+        // marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("reachability_visualization", 10);
+    }
+    // DOC-END: ServerNode
+
+    // DOC-START: ~ServerNode
     ~ServerNode()
     {
+        // Garante que a thread da BT seja encerrada corretamente ao fechar o nó
         if (bt_thread_.joinable()) bt_thread_.join();
     }
+    // DOC-END: ~ServerNode
 
 private:
-    /**
-     * @struct ObjectInfo
-     * @brief Estrutura auxiliar para armazenar dados de um objeto detectado.
-     */
+    // DOC-START: internal_structs
+    // Estrutura auxiliar para agrupar informações de um objeto detectado pela visão computacional.
     struct ObjectInfo
     {
-        std::string id;                 /**< @brief ID único ou classe do objeto (ex: "garrafa_1"). */
-        geometry_msgs::msg::Pose pose;  /**< @brief Pose 3D (posição e orientação) do objeto no mundo. */
-        geometry_msgs::msg::Vector3 size; /**< @brief Dimensões da Bounding Box (x, y, z). */
+        std::string id;                 // ID único ou classe do objeto (ex: "garrafa_1")
+        geometry_msgs::msg::Pose pose;  // Posição e orientação espacial do objeto
+        geometry_msgs::msg::Vector3 size; // Tamanho da bounding box (x, y, z)
     };
+    // DOC-END: internal_structs
 
-    // --- Membros de Ponteiros para Nós Auxiliares ---
-    std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_; /**< Referência ao nó que verifica sensor de carga/garra. */
-    std::shared_ptr<storage_manager::StorageNode> storage_node_;           /**< Referência ao banco de dados de posições de armazenamento. */
-    std::shared_ptr<storage_manager::OrganizeNode> organize_node_;         /**< Referência à lógica de cálculo de posição dentro da caixa. */
-    std::unique_ptr<BT::Groot2Publisher> groot_publisher_;                 /**< Publicador para visualização em tempo real no Groot2. */
+    // DOC-START: member_variables
+    // --- Injeção de Dependências ---
+    // Ponteiro para o nó que monitora o sensor da garra
+    std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_;
+    // Ponteiro para o gerenciador de banco de dados de posições (Storage)
+    std::shared_ptr<storage_manager::StorageNode> storage_node_;
+    // Ponteiro para o algoritmo de organização (Bin Packing)
+    std::shared_ptr<storage_manager::OrganizeNode> organize_node_;
+    // Ponteiro para o publicador de logs do Groot2 (Visualizador da Behavior Tree)
+    std::unique_ptr<BT::Groot2Publisher> groot_publisher_;
 
-    // Publishers.
+    // --- Comunicação ROS 2 ---
+
+    // rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_publisher_;
+    // Publicador para enviar a pose do objeto em tempo real para o nó de manipulação
     rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr publisher_;
+    // Subscriber para receber as detecções do YOLO (Bounding Boxes 3D)
+    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
+    // Subscriber para receber a odometria e atualizar a posição do robô
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
 
-    // --- Subscribers ROS ---
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_; /**< Assinante de detecções visuais. */
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;       /**< Assinante de odometria. */
+    // --- Clientes de Ação (Action Clients) ---
+    // Cliente para a ação de Pegar/Largar objetos (Manipulação)
+    rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
+    // Cliente para o planejador de caminho global (A* / D*)
+    rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SharedPtr path_client;
+    // Cliente para o controlador de trajetória local (Pure Pursuit)
+    rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SharedPtr controller_client;
 
-    // --- Action Clients ROS ---
-    rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_; /**< Cliente para ação de Pegar/Largar. */
-    rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SharedPtr path_client;       /**< Cliente para planejador de caminho (A* / Nav2). */
-    rclcpp_action::Client<mobile_manipulation_interfaces::action::Controller>::SharedPtr controller_client; /**< Cliente para controlador de trajetória (Pure Pursuit/MPC). */
-
-    // --- Handles de Action Ativos ---
-    // Usados para poder cancelar a ação em execução se necessário.
+    // --- Handles de Ação ---
+    // Handle para controlar a ação de controle ativa (permite cancelar a navegação)
     rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::SharedPtr active_controller_goal_handle_;
+    // Handle para controlar a ação de planejamento ativa
     rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::SharedPtr active_path_goal_handle_;
 
-    // --- Variáveis de Configuração e Estado de Objetos ---
-    std::string yaml_file; /**< Caminho para o arquivo YAML de objetos autorizados. */
-    std::unordered_set<std::string> authorized_labels; /**< Conjunto de labels de objetos que o robô tem permissão para pegar. */
-    std::unordered_set<std::string> picked; /**< Conjunto de IDs de objetos que já foram pegos/processados para evitar loops. */
+    // --- Configuração e Estado Lógico ---
+    // Caminho do arquivo YAML com objetos permitidos
+    std::string yaml_file;
+    // Lista de nomes de objetos que o robô tem permissão para pegar
+    std::unordered_set<std::string> authorized_labels;
+    // Lista de IDs únicos de objetos que já foram pegos para evitar repetição
+    std::unordered_set<std::string> picked;
+
+    // Variáveis temporárias para armazenar dados de objetos
+    std::pair<std::string, geometry_msgs::msg::Pose> pick_pose;
+    // Cache do último objeto válido detectado pela câmera
+    ObjectInfo cached_object_;
 
     // --- Estado do Alvo Atual ---
-    std::pair<std::string, geometry_msgs::msg::Pose> pick_pose; /**< (Não usado ativamente no código atual, possivelmente legado). */
-    ObjectInfo cached_object_; /**< Armazena temporariamente o objeto detectado mais recente e válido. */
+    // ID do objeto que está sendo processado pela Behavior Tree (vazio se ocioso)
+    std::string current_target_id_ = "";
+    // Posição do alvo atual
+    geometry_msgs::msg::Pose current_target_pose_;
 
-    std::string current_target_id_ = ""; /**< ID do objeto que está sendo ativamente processado pela Behavior Tree. Vazio se IDLE. */
-    geometry_msgs::msg::Pose current_target_pose_; /**< Pose do objeto alvo atual. */
-
+    // Timer para publicar dados de debug periodicamente
     rclcpp::TimerBase::SharedPtr timer_;
 
     // --- Infraestrutura da Behavior Tree ---
-    std::thread bt_thread_; /**< Thread separada para o loop `tick` da árvore. */
-    std::mutex bt_mutex_;   /**< Mutex para proteger leitura/escrita de variáveis compartilhadas entre thread ROS e thread BT (ex: current_target_id_). */
-    BT::Tree bt_tree_;      /**< O objeto da árvore de comportamento carregada. */
+    // Thread dedicada para rodar o tick da árvore sem bloquear o ROS
+    std::thread bt_thread_;
+    // Mutex para proteger variáveis compartilhadas entre a thread ROS e a thread BT
+    std::mutex bt_mutex_;
+    // Objeto principal da árvore de comportamento
+    BT::Tree bt_tree_;
 
-    // --- Máquina de Estados e Sincronização ---
-    TaskState path_state_;        /**< Estado atual da ação de planejamento de caminho. */
-    TaskState nav_state_;         /**< Estado atual da ação do controlador (movimento). */
-    TaskState manipulation_state_;/**< Estado atual da ação de manipulação (braço). */
+    // --- Estados das Tarefas Assíncronas ---
+    // Estado atual da tarefa de planejamento de caminho
+    TaskState path_state_;
+    // Estado atual da tarefa de navegação
+    TaskState nav_state_;
+    // Estado atual da tarefa de manipulação
+    TaskState manipulation_state_;
 
-    std::mutex state_mutex_; /**< Mutex CRÍTICO. Protege as transições de estado (path_state_, etc) para evitar condições de corrida entre callbacks e ticks. */
-    std::mutex path_mutex_;  /**< Mutex para proteger o acesso à variável `last_calculated_path_`. */
+    // --- Sincronização ---
+    // Mutex crítico para proteger transições de estado das Actions
+    std::mutex state_mutex_;
+    // Mutex para proteger a leitura e escrita do caminho calculado
+    std::mutex path_mutex_;
 
-    nav_msgs::msg::Path last_calculated_path_; /**< Armazena o último caminho recebido do planner antes de enviá-lo ao controlador. */
+    // Armazena o último caminho recebido do planejador
+    nav_msgs::msg::Path last_calculated_path_;
 
     // --- Odometria e Flags ---
-    float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0; /**< Posição atual do robô atualizada pelo odom_callback. */
-    bool has_new_object_ = false; /**< Flag atômica (logicamente) indicando que o detection_callback encontrou um candidato válido. */
+    // Posição atual do robô no mapa
+    float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
+    // Flag atômica para indicar à BT que um novo objeto foi visto
+    bool has_new_object_ = false;
+    // DOC-END: member_variables
 
-    /**
-     * @name Utilitários Internos
-     * Funções auxiliares para verificação de estado e carregamento de arquivos.
-     * @{
-     */
-
-    /**
-     * @brief Converte o enum TaskState interno para BT::NodeStatus.
-     *
-     * @details Também reseta o estado interno para IDLE se a tarefa tiver terminado (SUCCESS ou FAILURE),
-     * preparando-o para a próxima execução.
-     *
-     * @param state Referência para a variável de estado (ex: nav_state_).
-     * @return BT::NodeStatus O status correspondente para a Behavior Tree.
-     */
+    // DOC-START: check_task_status
+    // Helper para converter o enum interno 'TaskState' para 'BT::NodeStatus'.
+    // Também reseta o estado para IDLE automaticamente quando a tarefa termina.
     BT::NodeStatus check_task_status(TaskState &state)
     {
         if (state == TaskState::SUCCESS)
         {
-            state = TaskState::IDLE;
+            state = TaskState::IDLE; // Reset para próxima execução
             return BT::NodeStatus::SUCCESS;
         }
         else if (state == TaskState::FAILURE)
         {
-            state = TaskState::IDLE;
+            state = TaskState::IDLE; // Reset
             return BT::NodeStatus::FAILURE;
         }
-        return BT::NodeStatus::RUNNING;
+        return BT::NodeStatus::RUNNING; // Ainda processando
     }
+    // DOC-END: check_task_status
 
-    /** @} */
-
-    /**
-     * @name Núcleo da Behavior Tree
-     * Configuração, registro de nós e loop principal de execução (Tick).
-     * @{
-     */
-
-    /**
-     * @brief Configura e registra todos os nós da Behavior Tree.
-     * @details Esta função é responsável por mapear as strings do XML para a lógica C++.
-     * Registra nós customizados (ParallelAny) e Actions/Conditions simples via lambdas.
-     *
-     * Nós registrados:
-     * - **IsRobotNear**: Verifica distância euclidiana entre robô e alvo. Falha se longe e retorna pose de ajuste.
-     * - **DetectObject**: Retorna SUCESSO se houver um alvo travado ou um novo objeto válido detectado. Preenche as portas de saída com dados do objeto.
-     * - **ClearTarget**: Limpa o alvo atual (current_target_id_), permitindo buscar novos objetos.
-     * - **GetStorageInfo**: Consulta o nó de Storage para encontrar a melhor caixa/prateleira para o objeto atual.
-     * - **ComputePoseToOrganize**: Chama o algoritmo de bin-packing para calcular onde exatamente colocar o objeto dentro da caixa.
-     * - **ComputePoseToStore**: Calcula pose simples de armazenamento.
-     * - **IncrementOrganizedStorageIndexes**: Persiste os novos índices ocupados no banco de dados de armazenamento.
-     * - **DecrementStorageCount**: Rollback em caso de falha, libera o espaço reservado.
-     * - **IsGripperHoldingObject**: Verifica sensor de força/carga da garra.
-     * - **ComputePath**: Action Assíncrona. Envia goal para o planejador de caminho.
-     * - **NavigateTo**: Action Assíncrona. Envia o caminho calculado para o controlador.
-     * - **PickObject**: Action Assíncrona. Controla o braço para pegar.
-     * - **PlaceObject**: Action Assíncrona. Controla o braço para largar.
-     *
-     * @param xml_path Caminho absoluto para o arquivo XML da árvore.
-     */
+    // DOC-START: setup_behavior_tree
+    // Configura a fábrica da Behavior Tree, registra os nós e carrega o XML.
+    // Aqui está definida a lógica de cada nó (Action/Condition) usando Lambdas C++.
     void setup_behavior_tree(const std::string &xml_path)
     {
         BT::BehaviorTreeFactory factory;
 
+        // DOC-START: BT_ParallelAny
+        // Registra o nó customizado
         factory.registerNodeType<ParallelAny>("ParallelAny");
+        // DOC-END: BT_ParallelAny
 
+        // DOC-START: BT_IsRobotNear
         // --- Condition: IsRobotNear ---
+        // Verifica se a distância euclidiana entre o robô e o alvo está dentro de um limite.
         factory.registerSimpleCondition("IsRobotNear", [&](BT::TreeNode &self)
         {
             auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target");
             if (!target_pose_opt) return BT::NodeStatus::FAILURE;
             geometry_msgs::msg::Pose target = target_pose_opt.value();
 
+            // Parâmetros de tolerância (default: 0.35m a 0.5m)
             auto max_dist_opt = self.getInput<double>("max_dist");
             auto min_dist_opt = self.getInput<double>("min_dist");
-
             double max_dist = max_dist_opt ? max_dist_opt.value() : 0.5;
             double min_dist = min_dist_opt ? min_dist_opt.value() : 0.35;
 
+            // Cálculo da distância euclidiana (2D)
             double dx = this->pose_x - target.position.x;
             double dy = this->pose_y - target.position.y;
             double current_dist = std::sqrt(dx*dx + dy*dy);
@@ -451,8 +388,8 @@ private:
                 return BT::NodeStatus::SUCCESS;
             }
 
-            RCLCPP_WARN(this->get_logger(), "BT: Robô longe (%.2fm). Ajustando...", current_dist);
-            // Saída para que o robô possa se mover para esta pose
+            // Se estiver longe, retorna FAILURE e sugere ajuste
+            RCLCPP_WARN(this->get_logger(), "BT: Robô longe (%.2fm).", current_dist);
             self.setOutput("adjustment_pose", target);
             return BT::NodeStatus::FAILURE;
         },
@@ -462,13 +399,16 @@ private:
             BT::InputPort<double>("min_dist"),
             BT::OutputPort<geometry_msgs::msg::Pose>("adjustment_pose")
         });
+        // DOC-END: BT_IsRobotNear
 
+        // DOC-START: BT_DetectObject
         // --- Action: DetectObject ---
+        // Verifica se há um objeto novo detectado pelo callback de visão.
         factory.registerSimpleAction("DetectObject", [&](BT::TreeNode &self)
         {
-            std::lock_guard<std::mutex> lock(bt_mutex_); // Protege current_target_id_ e cached_object_
+            std::lock_guard<std::mutex> lock(bt_mutex_); 
 
-            // Se já temos um alvo travado, retornamos ele (persistencia)
+            // Se já temos um alvo travado, retornamos ele (persistencia de alvo)
             if (!current_target_id_.empty())
             {
                 self.setOutput("output_pose", current_target_pose_);
@@ -477,7 +417,7 @@ private:
                 return BT::NodeStatus::SUCCESS;
             }
 
-            // Se não temos alvo, verificamos se o callback de visão encontrou algo novo
+            // Se não, verifica a flag setada pelo detection_callback
             if (!has_new_object_)
             {
                 return BT::NodeStatus::RUNNING;
@@ -491,11 +431,11 @@ private:
             self.setOutput("output_id", current_target_id_);
             self.setOutput("object_size", cached_object_.size);
 
-            // Marca como 'pego' para não processar novamente o mesmo ID imediatamente
+            // Marca o ID como 'picked' para evitar pegar o mesmo objeto em loop
             picked.insert(current_target_id_);
             has_new_object_ = false;
 
-            RCLCPP_INFO(this->get_logger(), "BT: Alvo '%s' processado.", current_target_id_.c_str());
+            RCLCPP_INFO(this->get_logger(), "BT: Alvo '%s' travado.", current_target_id_.c_str());
             return BT::NodeStatus::SUCCESS;
         },
         {
@@ -503,24 +443,29 @@ private:
             BT::OutputPort<std::string>("output_id"),
             BT::OutputPort<geometry_msgs::msg::Vector3>("object_size")
         });
+        // DOC-END: BT_DetectObject
 
-
+        // DOC-START: BT_ClearTarget
         // --- Action: ClearTarget ---
+        // Limpa o alvo atual, permitindo que a detecção busque um novo objeto.
         factory.registerSimpleAction("ClearTarget", [&](BT::TreeNode &self)
         {
             std::lock_guard<std::mutex> lock(bt_mutex_);
-            RCLCPP_INFO(this->get_logger(), "BT: Alvo '%s' finalizado.", current_target_id_.c_str());
-            current_target_id_ = ""; // Libera o sistema para pegar o próximo objeto
+            RCLCPP_INFO(this->get_logger(), "BT: Alvo '%s' liberado.", current_target_id_.c_str());
+            current_target_id_ = ""; 
             return BT::NodeStatus::SUCCESS;
         });
+         // DOC-END: BT_ClearTarget
 
+         // DOC-START: BT_GetStorageInfo
         // --- Action: GetStorageInfo ---
+        // Consulta o banco de dados (StorageNode) para achar uma vaga livre.
         factory.registerSimpleAction("GetStorageInfo", [&](BT::TreeNode &self)
         {
             auto id_opt = self.getInput<std::string>("object_id");
             if (!id_opt) return BT::NodeStatus::FAILURE;
 
-            // Lógica para extrair label genérico do ID (ex: "cola_123" -> "cola")
+            // Limpa o ID (ex: "can_34" -> "can") para buscar categoria genérica
             std::string full_id = id_opt.value();
             std::string label = full_id;
             size_t pos = full_id.find('_');
@@ -532,20 +477,21 @@ private:
                 current_obj_pose = current_target_pose_;
             }
 
-            // Chama o Storage Node para achar onde guardar
+            // Chama o StorageNode
             auto result = storage_node_->getBestStorage(label, current_obj_pose);
 
             if (result.success)
             {
-                self.setOutput("storage_pose", result.pose); // Pose da caixa/estante
+                // Exporta os dados da caixa encontrada para a Blackboard
+                self.setOutput("storage_pose", result.pose);
                 self.setOutput("storage_limits", result.limits);
                 self.setOutput("storage_id", result.storage_name);
-                self.setOutput("indexes", result.indexes); // Índices de grade ocupados atualmente
+                self.setOutput("indexes", result.indexes);
                 self.setOutput("storage_size", result.size);
                 return BT::NodeStatus::SUCCESS;
             }
 
-            RCLCPP_WARN(this->get_logger(), "Falha ao encontrar storage para %s", label.c_str());
+            RCLCPP_WARN(this->get_logger(), "Storage cheio ou não encontrado para %s", label.c_str());
             return BT::NodeStatus::FAILURE;
         },
         {
@@ -556,11 +502,13 @@ private:
             BT::OutputPort<std::vector<int>>("indexes"),
             BT::OutputPort<geometry_msgs::msg::Vector3>("storage_size")
         });
+        // DOC-END: BT_GetStorageInfo
 
+        // DOC-START: BT_ComputePoseToOrganize
         // --- Action: ComputePoseToOrganize ---
+        // Calcula a posição exata dentro da caixa usando algoritmo de Bin Packing (OrganizeNode).
         factory.registerSimpleAction("ComputePoseToOrganize", [&](BT::TreeNode &self)
         {
-            // Obtém todos os parâmetros geométricos necessários para o bin packing
             auto storagePose = self.getInput<geometry_msgs::msg::Pose>("storage_pose");
             auto storageSize = self.getInput<geometry_msgs::msg::Vector3>("storage_size");
             auto objectSize = self.getInput<geometry_msgs::msg::Vector3>("object_size");
@@ -570,29 +518,24 @@ private:
 
             if (!storagePose || !storageSize || !objectSize || !indexes || !objectPadding || !zLiftOffset)
             {
-                RCLCPP_ERROR(this->get_logger(), "ERRO: Parâmetros faltando em ComputePoseToOrganize.");
+                RCLCPP_ERROR(this->get_logger(), "BT: Parâmetros de organização faltando.");
                 return BT::NodeStatus::FAILURE;
             }
 
             std::vector<int> idx_vec = indexes.value();
             if (idx_vec.size() != 3) return BT::NodeStatus::FAILURE;
 
-            // Calcula a posição exata (x,y,z) dentro da caixa usando a grade (i,j,k)
+            // Chama o algoritmo de cálculo geométrico
             std::pair<geometry_msgs::msg::Pose, std::vector<int>> result = organize_node_->placeObjectInBox(
-                storagePose.value(),
-                storageSize.value(),
-                objectSize.value(),
-                objectPadding.value(),
-                zLiftOffset.value(),
+                storagePose.value(), storageSize.value(), objectSize.value(),
+                objectPadding.value(), zLiftOffset.value(),
                 idx_vec[0], idx_vec[1], idx_vec[2]
             );
 
-            self.setOutput("output_final_pose", std::get<0>(result)); // Pose final de place
-            self.setOutput("new_indexes", std::get<1>(result)); // Próximos índices livres
+            self.setOutput("output_final_pose", std::get<0>(result));
+            self.setOutput("new_indexes", std::get<1>(result));
 
-            RCLCPP_INFO(this->get_logger(), "Indexes atualizados. Novo IDX: [%d, %d, %d]",
-                std::get<1>(result)[0], std::get<1>(result)[1], std::get<1>(result)[2]);
-
+            RCLCPP_INFO(this->get_logger(), "Nova posição de organização calculada.");
             return BT::NodeStatus::SUCCESS;
         },
         {
@@ -605,8 +548,11 @@ private:
             BT::OutputPort<std::vector<int>>("new_indexes"),
             BT::OutputPort<geometry_msgs::msg::Pose>("output_final_pose")
         });
+        // DOC-END: BT_ComputePoseToOrganize
 
-        // --- Action: ComputePoseToStore (Simplificada) ---
+        // DOC-START: BT_ComputePoseToStore
+        // --- Action: ComputePoseToStore ---
+        // Versão simples: Apenas calcula uma pose no topo da caixa (para empilhamento simples).
         factory.registerSimpleAction("ComputePoseToStore", [&](BT::TreeNode &self)
         {
             auto storagePose = self.getInput<geometry_msgs::msg::Pose>("storage_pose");
@@ -616,8 +562,7 @@ private:
             if (!storagePose || !storageSize || !zLiftOffset) return BT::NodeStatus::FAILURE;
 
             geometry_msgs::msg::Pose output_final_pose = storagePose.value();
-            // Simplesmente coloca no topo da caixa + offset
-            output_final_pose.position.z = output_final_pose.position.z + storageSize.value().z + zLiftOffset.value();
+            output_final_pose.position.z += storageSize.value().z + zLiftOffset.value();
 
             self.setOutput("output_final_pose", output_final_pose);
             return BT::NodeStatus::SUCCESS;
@@ -628,121 +573,112 @@ private:
             BT::InputPort<float>("z_lift_offset"),
             BT::OutputPort<geometry_msgs::msg::Pose>("output_final_pose")
         });
+        // DOC-END: BT_ComputePoseToStore
 
-
-        // --- Action: IncrementOrganizedStorageIndexes ---
+        // DOC-START: BT_IncrementOrganizedStorageIndexes
+        // --- Gerenciamento de Estoque ---
         factory.registerSimpleAction("IncrementOrganizedStorageIndexes", [&](BT::TreeNode &self)
         {
+            // Persiste a ocupação do espaço no banco de dados
             auto id_opt = self.getInput<std::string>("storage_id");
             auto newIndexes = self.getInput<std::vector<int>>("new_indexes");
             if (!id_opt || !newIndexes) return BT::NodeStatus::FAILURE;
 
-            // Atualiza o banco de dados do storage para marcar o espaço como ocupado
             storage_node_->addNewIndexes(id_opt.value(), newIndexes.value());
-            RCLCPP_WARN(this->get_logger(), "Adicionando novos índices ocupados no armazém '%s'.", id_opt.value().c_str());
+            RCLCPP_WARN(this->get_logger(), "Storage '%s' atualizado.", id_opt.value().c_str());
             return BT::NodeStatus::SUCCESS;
         },
         { BT::InputPort<std::string>("storage_id"), BT::InputPort<std::vector<int>>("new_indexes") });
+        // DOC-END: BT_IncrementOrganizedStorageIndexes
 
-        // --- Action: DecrementStorageCount ---
+        // DOC-START: BT_DecrementStorageCount
         factory.registerSimpleAction("DecrementStorageCount", [&](BT::TreeNode &self)
         {
+            // Rollback: Libera o espaço se algo der errado na manipulação
             auto id_opt = self.getInput<std::string>("storage_id");
             if (!id_opt) return BT::NodeStatus::FAILURE;
 
-            // Libera o espaço se a operação falhar (Rollback)
             storage_node_->incrementStorageCount(id_opt.value(), -1);
-            RCLCPP_WARN(this->get_logger(), "ROLLBACK: Liberando vaga no storage '%s' devido a falha.", id_opt.value().c_str());
+            RCLCPP_WARN(this->get_logger(), "ROLLBACK: Espaço liberado em '%s'.", id_opt.value().c_str());
             return BT::NodeStatus::SUCCESS;
         },
         { BT::InputPort<std::string>("storage_id") });
+        // DOC-END: BT_DecrementStorageCount
 
-
+        // DOC-START: BT_IsGripperHoldingObject
         // --- Condition: IsGripperHoldingObject ---
+        // Verifica sensor físico da garra (carga/contato).
         factory.registerSimpleCondition("IsGripperHoldingObject",
             [this](BT::TreeNode& self) -> BT::NodeStatus
             {
                 std::lock_guard<std::mutex> lock(bt_mutex_); 
-                
                 if (this->gripper_monitor_node_->checkIsHolding()) 
                 {
                     return BT::NodeStatus::SUCCESS;
                 }    
                 else
                 {
+                    // Se perdeu o objeto, para o robô imediatamente!
                     cancel_controller_goal();
                     return BT::NodeStatus::FAILURE;
                 }
             }
         );
+        // DOC-END: BT_IsGripperHoldingObject
 
-        // --- Action Builder: ComputePath (Async) ---
-        // Utiliza AsyncAction e mutexes cuidadosamente para evitar Deadlocks entre a thread BT e callbacks ROS.
+        // DOC-START: BT_ComputePath
+        // --- Action: ComputePath (Assíncrona) ---
+        // Envia requisição para o planejador de caminho global (A* / D*).
+        // Protegido por Mutex para evitar condições de corrida com callbacks.
         BT::NodeBuilder builder_compute = [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
             {
-                // 1. Verificação inicial rápida COM lock para checar estado anterior
+                // Bloco de controle de estado com Mutex
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
 
-                    if (self.status() == BT::NodeStatus::IDLE && path_state_ != TaskState::IDLE) 
-                    {
-                        path_state_ = TaskState::IDLE; // Reset se reiniciado
-                    }
+                    // Lógica de reset e verificação de conclusão
+                    if (self.status() == BT::NodeStatus::IDLE && path_state_ != TaskState::IDLE) path_state_ = TaskState::IDLE;
+                    if (path_state_ == TaskState::SUCCESS) { path_state_ = TaskState::IDLE; return BT::NodeStatus::SUCCESS; }
+                    if (path_state_ == TaskState::FAILURE) { path_state_ = TaskState::IDLE; return BT::NodeStatus::FAILURE; }
+                    if (path_state_ == TaskState::RUNNING) return BT::NodeStatus::RUNNING;
+                }
 
-                    if (path_state_ == TaskState::SUCCESS) 
-                    {
-                        path_state_ = TaskState::IDLE;
-                        return BT::NodeStatus::SUCCESS;
-                    }
-                    if (path_state_ == TaskState::FAILURE) 
-                    {
-                        path_state_ = TaskState::IDLE;
-                        return BT::NodeStatus::FAILURE;
-                    }
-
-                    if (path_state_ == TaskState::RUNNING) 
-                    {
-                        return BT::NodeStatus::RUNNING;
-                    }
-                } // <--- IMPORTANTE: LIBERA O MUTEX AQUI
-
-                // 2. Envio do Goal.
-                // Fazemos isso SEM segurar o mutex, para não travar o ROS Executor no wait_for_server dentro de send_path_goal
                 auto target = self.getInput<geometry_msgs::msg::Pose>("target");
                 if (!target) return BT::NodeStatus::FAILURE;
 
+                double max_radius = calculate_max_2d_radius(target.value());
+
+                // Envia goal sem bloquear o mutex principal
                 this->send_path_goal(target.value());
 
-                // 3. Atualiza estado para RUNNING (pegando o lock novamente para segurança)
+                // Atualiza estado para RUNNING
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
                     path_state_ = TaskState::RUNNING;
                 }
-
                 return BT::NodeStatus::RUNNING;
             });
         };
         factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "ComputePath", { BT::InputPort<geometry_msgs::msg::Pose>("target"), BT::InputPort<std::string>("planner") }, {} }, builder_compute);
+        // DOC-END: BT_ComputePath
 
-
-        // --- Action Builder: NavigateTo (Async) ---
+        // DOC-START: BT_NavigateTo
+        // --- Action: NavigateTo (Assíncrona) ---
+        // Envia o caminho calculado para o controlador local (Pure Pursuit).
         factory.registerBuilder<AsyncAction>("NavigateTo", [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
             {
-                if (self.status() == BT::NodeStatus::IDLE && nav_state_ != TaskState::IDLE)
-                {
-                    nav_state_ = TaskState::IDLE;
-                }
+                if (self.status() == BT::NodeStatus::IDLE && nav_state_ != TaskState::IDLE) nav_state_ = TaskState::IDLE;
 
                 if (nav_state_ == TaskState::IDLE )
                 {
                     nav_msgs::msg::Path path_to_send;
                     bool has_path = false;
                     {
-                        std::lock_guard<std::mutex> lock(path_mutex_); // Protege leitura do caminho
+                        std::lock_guard<std::mutex> lock(path_mutex_); // Protege leitura do path
                         if (!last_calculated_path_.poses.empty())
                         {
                             path_to_send = last_calculated_path_;
@@ -757,22 +693,18 @@ private:
                             nav_state_ = TaskState::RUNNING;
                             return BT::NodeStatus::RUNNING;
                         }
-                        else
-                        {
-                            return BT::NodeStatus::FAILURE;
-                        }
+                        else return BT::NodeStatus::FAILURE;
                     }
-                    else
-                    {
-                        // Espera o caminho chegar (pode haver um delay entre ComputePath e o feedback)
-                        return BT::NodeStatus::RUNNING;
-                    }
+                    else return BT::NodeStatus::RUNNING; // Aguarda path chegar
                 }
                 return check_task_status(nav_state_);
             });
         });
+        // DOC-END: BT_NavigateTo
 
-        // --- Action Builder: PickObject ---
+        // DOC-START: BT_PickObject
+        // --- Action: PickObject ---
+        // Envia comando para o braço pegar o objeto.
         BT::NodeBuilder builder_pick = [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
@@ -783,7 +715,7 @@ private:
                     auto id = self.getInput<std::string>("id");
                     if (!pose || !id) return BT::NodeStatus::FAILURE;
 
-                    this->send_goal(id.value(), pose.value(), true); // true = pick
+                    this->send_goal(id.value(), pose.value(), true); // true = Pick
                     manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
@@ -791,9 +723,11 @@ private:
             });
         };
         factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "PickObject", { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::string>("id") }, {} }, builder_pick);
+        // DOC-END: BT_PickObject
 
-
-        // --- Action Builder: PlaceObject ---
+        // DOC-START: BT_PlaceObject
+        // --- Action: PlaceObject ---
+        // Envia comando para o braço largar o objeto.
         BT::NodeBuilder builder_place = [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
@@ -804,7 +738,7 @@ private:
                     if (!pose) return BT::NodeStatus::FAILURE;
 
                     std::string id_dummy = cached_object_.id;
-                    this->send_goal(id_dummy, pose.value(), false); // false = place
+                    this->send_goal(id_dummy, pose.value(), false); // false = Place
                     manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
@@ -812,8 +746,9 @@ private:
             });
         };
         factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "PlaceObject", { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::vector<double>>("limits") }, {} }, builder_place);
-
-        // --- Carregamento Final do XML ---
+        // DOC-END: BT_PlaceObject
+        
+        // Inicialização do Groot2 para visualização remota
         try
         {
             bt_tree_ = factory.createTreeFromFile(xml_path);
@@ -825,17 +760,11 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Erro Fatal ao criar Tree: %s", e.what());
         }
     }
-    
+    // DOC-END: setup_behavior_tree
 
     // DOC-START: bt_loop
-    /**
-     * @brief Loop principal da Behavior Tree rodando em uma thread dedicada.
-     *
-     * @details Roda a 50Hz.
-     * 1. Verifica se há novos objetos detectados (`has_new_object_`).
-     * 2. Executa `bt_tree_.tickOnce()`.
-     * 3. Se a árvore terminar (SUCCESS ou FAILURE), reseta flags e estados para permitir nova execução.
-     */
+    // Loop principal da thread da Behavior Tree.
+    // Roda a 50Hz, verifica novos objetos e chama tick() da árvore.
     void bt_loop()
     {
         rclcpp::Rate rate(50);
@@ -849,29 +778,33 @@ private:
 
             BT::NodeStatus status = bt_tree_.rootNode()->status();
 
+            // Verifica se chegou um objeto novo protegido por mutex
             bool new_obj = false;
             {
                 std::lock_guard<std::mutex> lock(bt_mutex_);
                 new_obj = has_new_object_;
             }
 
-            // Só roda a árvore se ela já estiver rodando, se houver novo objeto ou se um alvo já estiver travado
+            // Condição de Gatilho:
+            // Roda se a árvore já está rodando, se tem objeto novo ou se já tem um alvo fixo.
             if (status == BT::NodeStatus::RUNNING || new_obj || !current_target_id_.empty())
             {
                 BT::NodeStatus result = bt_tree_.tickOnce();
 
+                // Se a árvore terminar (sucesso ou falha total):
                 if (result == BT::NodeStatus::SUCCESS || result == BT::NodeStatus::FAILURE)
                 {
                     std::lock_guard<std::mutex> lock(bt_mutex_);
                     has_new_object_ = false;
 
+                    // Se falhou, libera o ID para tentar de novo no futuro
                     if (result == BT::NodeStatus::FAILURE)
                     {
-                         picked.erase(cached_object_.id); // Permite tentar novamente o mesmo ID se falhar
+                         picked.erase(cached_object_.id); 
                          current_target_id_ = "";
                     }
 
-                    // Reseta estados para garantir limpeza
+                    // Reset geral de estados
                     {
                         std::lock_guard<std::mutex> slock(state_mutex_);
                         path_state_ = TaskState::IDLE;
@@ -883,17 +816,10 @@ private:
             rate.sleep();
         }
     }
-
     // DOC-END: bt_loop
 
-
-
-    /** @} */
-
-    /**
-     * @brief Carrega lista de labels autorizados de um arquivo YAML.
-     * @param yaml_path Caminho do arquivo.
-     */
+    // DOC-START: loadLocationsFromYaml
+    // Carrega do YAML a lista de classes de objetos (labels) que o robô está autorizado a pegar.
     void loadLocationsFromYaml(const std::string &yaml_path)
     {
         try
@@ -908,48 +834,28 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Failed to load YAML: %s", e.what());
         }
     }
+    // DOC-END: loadLocationsFromYaml
 
-    /** @} */
-
-    /**
-     * @name Callbacks de Sensores
-     * Recepção de dados da Odometria e Visão Computacional.
-     * @{
-    */
-
-    /**
-     * @brief Callback de odometria.
-     * @details Atualiza a posição X, Y do robô. Assume-se Z=0 para navegação 2D.
-     * @param msg Mensagem de odometria recebida.
-     */
+    // DOC-START: odom_callback
+    // Callback de Odometria: Atualiza a posição (x, y) do robô.
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
         pose_x = msg->pose.pose.position.x;
         pose_y = msg->pose.pose.position.y;
-        pose_z = 0.0;
+        pose_z = 0.0; // Assume robô em plano 2D
     }
+    // DOC-END: odom_callback
 
-    /**
-     * @brief Callback de Detecção 3D (YOLO + Depth).
-     *
-     * @details
-     * Lógica:
-     * 1. Caso o robô já esteja fixo em um alvo ('current_target_id_'), apenas atualiza a pose dele para que os nós da BT que precisem da posição do objeto recuperem a posição atual dele.
-     * É necessário mutex para não haver condição de corrida entre a thread do ROS2 e a thread da BT.
-     * 2. Caso o robô agora ocioso, então procura na lista de detecções um objeto que:
-     * - Esteja na lista `authorized_labels` (YAML).
-     * - Não esteja na lista `picked` (já coletados).
-     * 3. Se encontrar, salva em `cached_object_` e seta `has_new_object_` para acordar a Behavior Tree.
-     *
-     * @param msg Array de detecções 3D.
-    */
+    // DOC-START: detection_callback
+    // Callback de Visão (YOLO/Depth).
+    // Filtra detecções, verifica se o objeto é autorizado e se é novo.
     void detection_callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
     {
         std::lock_guard<std::mutex> lock(bt_mutex_);
 
+        // 1. Modo de Rastreamento: Se já temos um alvo, apenas atualiza a posição dele.
         if (!current_target_id_.empty() || has_new_object_)
         {
-            // Atualização de tracking
             for (const auto &det : msg->detections)
             {
                 if (det.results.empty()) continue;
@@ -967,20 +873,21 @@ private:
             return;
         }
 
-        // Busca de novo alvo
+        // 2. Modo de Busca: Procura um novo objeto válido.
         for (const auto &det : msg->detections)
         {
             if (det.results.empty()) continue;
 
             std::string raw_id = det.results[0].hypothesis.class_id;
-            // Extrai label base (ex: "box_1" -> "box")
             std::string label = raw_id;
             size_t pos = raw_id.find('_');
             if (pos != std::string::npos) label = raw_id.substr(0, pos);
 
+            // Verifica lista de autorização e lista de 'já pegos'
             if (authorized_labels.find(label) == authorized_labels.end()) continue;
             if (picked.find(raw_id) != picked.end()) continue;
 
+            // Novo objeto encontrado!
             geometry_msgs::msg::Pose pose;
             pose.position = det.bbox.center.position;
             pose.orientation = det.bbox.center.orientation;
@@ -988,38 +895,25 @@ private:
             cached_object_.id = raw_id;
             cached_object_.pose = pose;
             cached_object_.size = det.bbox.size;
-            has_new_object_ = true;
+            has_new_object_ = true; // Acorda a Behavior Tree
 
             RCLCPP_INFO(this->get_logger(), "Nova detecção salva: '%s'", raw_id.c_str());
             break;
         }
     }
+    // DOC-END: detection_callback
 
-    // --- Path Callbacks (Action Client) ---
-
-    /** @} */
-
-    /**
-     * @name Cliente de Ação: Path Planning
-     * Funções para requisitar o cálculo de rotas (A*, D*, etc.) e tratar feedback.
-     * @{
-     */
-
-    /**
-     * @brief Envia um goal para a Action de Path Planning (ex: A*).
-     * @details Limpa caminhos anteriores e configura callbacks.
-     * @note Usa mutex `state_mutex_` para limpar handle e setar falha se servidor offline.
-     * @param target_pose Pose alvo para onde o caminho deve ser planejado.
-     */
+    // DOC-START: send_path_goal
+    // Envia goal para o servidor de Path Planning (ex: A*).
     void send_path_goal(const geometry_msgs::msg::Pose & target_pose)
     {
-        // 1. Limpa o handle ativo (Protegido por mutex)
+        // Limpa handle anterior
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             this->active_path_goal_handle_.reset();
         }
 
-        // 2. Espera o servidor SEM segurar o mutex do estado
+        // Verifica servidor disponível
         if (!this->path_client->wait_for_action_server(std::chrono::seconds(2)))
         {
             RCLCPP_ERROR(this->get_logger(), "Action server 'path' not available");
@@ -1028,7 +922,7 @@ private:
             return;
         }
 
-        // 3. Limpa o path anterior
+        // Limpa caminho anterior
         {
             std::lock_guard<std::mutex> lock(path_mutex_);
             last_calculated_path_.poses.clear();
@@ -1037,7 +931,7 @@ private:
         auto goal_msg = mobile_manipulation_interfaces::action::Path::Goal();
         goal_msg.pose = target_pose;
 
-        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal (Pose) para A*...");
+        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal (Pose) para path planning*...");
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SendGoalOptions();
         send_goal_options.goal_response_callback = std::bind(&ServerNode::path_goal_response_callback, this, std::placeholders::_1);
@@ -1046,30 +940,27 @@ private:
 
         this->path_client->async_send_goal(goal_msg, send_goal_options);
     }
+    // DOC-END: send_path_goal
 
-    /**
-     * @brief Função auxiliar para cancelar o controlador de movimento.
-     * @details Chamada quando o planejador de caminho envia feedback de "recalculando",
-     * indicando que o caminho atual é inválido.
-     */
+    // DOC-START: cancel_controller_goal
+    // Cancela o movimento do robô se necessário (ex: recálculo de rota).
     void cancel_controller_goal()
     {
         if (this->active_controller_goal_handle_)
         {
-            RCLCPP_WARN(this->get_logger(), "Solicitando PARADA IMEDIATA (Cancelando Action Controller)...");
+            RCLCPP_WARN(this->get_logger(), "Solicitando PARADA IMEDIATA...");
             this->controller_client->async_cancel_goal(this->active_controller_goal_handle_);
         }
     }
+    // DOC-END: cancel_controller_goal
 
-    /**
-     * @brief Callback de feedback da Action de Path.
-     * @details Recebe trechos do caminho calculado ou sinalização de recalculo.
-     * Se `recalculating_path` for true, cancela o movimento atual do robô.
-     */
+    // DOC-START: path_feedback_callback
+    // Recebe o caminho calculado (Path) ou sinal de recalculo.
     void path_feedback_callback(
         rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::SharedPtr,
         const std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Feedback> feedback)
     {
+        // Se recebeu um caminho válido, salva.
         if (!feedback->path.poses.empty())
         {
             std::lock_guard<std::mutex> lock(path_mutex_);
@@ -1077,8 +968,7 @@ private:
             this->last_calculated_path_ = feedback->path;
         }
 
-        std::cout << "opa." << std::endl;
-
+        // Se o planner avisa que está recalculando, para o robô.
         if (feedback->recalculating_path)
         {
             {
@@ -1089,10 +979,10 @@ private:
             cancel_controller_goal();
         }
     }
+    // DOC-END: path_feedback_callback
 
-    /**
-     * @brief Callback de aceitação/rejeição do Goal de Path.
-     */
+    // DOC-START: path_goal_response_callback
+    // Callback de aceitação do Goal de Path.
     void path_goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>> & goal_handle)
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -1105,14 +995,13 @@ private:
         else 
         {
             this->active_path_goal_handle_ = goal_handle;
-            RCLCPP_INFO(this->get_logger(), "Goal PATH aceito (ID Interno: %s)", rclcpp_action::to_string(goal_handle->get_goal_id()).c_str());
+            RCLCPP_INFO(this->get_logger(), "Goal PATH aceito.");
         }
     }
+    // DOC-END: path_goal_response_callback
 
-    /**
-     * @brief Callback de resultado final da Action de Path.
-     * @details Atualiza `path_state_` para SUCCESS ou FAILURE.
-     */
+    // DOC-START: path_result_callback
+    // Callback de resultado do Path Planning (Sucesso/Falha).
     void path_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::WrappedResult & result)
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -1131,18 +1020,8 @@ private:
             else
             {
                 path_state_ = TaskState::FAILURE;
-                RCLCPP_WARN(this->get_logger(), "PATH RESULT LOGICAL FAILURE (Success = false)");
+                RCLCPP_WARN(this->get_logger(), "PATH FALHOU (Success = false)");
             }
-        }
-        else if (result.code == rclcpp_action::ResultCode::ABORTED)
-        {
-            path_state_ = TaskState::FAILURE;
-            RCLCPP_WARN(this->get_logger(), "PATH ACTION ABORTED");
-        }
-        else if (result.code == rclcpp_action::ResultCode::CANCELED)
-        {
-            path_state_ = TaskState::IDLE;
-            RCLCPP_WARN(this->get_logger(), "PATH ACTION CANCELED");
         }
         else
         {
@@ -1151,22 +1030,10 @@ private:
 
         this->active_path_goal_handle_.reset();
     }
+    // DOC-END: path_result_callback
 
-    // --- Controller Callbacks ---
-
-    /** @} */
-
-    /**
-     * @name Cliente de Ação: Controller
-     * Funções para execução de trajetórias e controle de movimento.
-     * @{
-     */
-
-    /**
-     * @brief Envia um goal para o Controlador (seguidor de caminho).
-     * @param target_path O caminho (lista de poses) a ser seguido.
-     * @return true Se o servidor aceitou enviar, false se servidor offline.
-     */
+    // DOC-START: send_controller_goal
+    // Envia o caminho (Path) para o controlador local seguir.
     bool send_controller_goal(const nav_msgs::msg::Path &target_path)
     {
         if (!this->controller_client->wait_for_action_server(std::chrono::seconds(2))) 
@@ -1186,8 +1053,9 @@ private:
         this->controller_client->async_send_goal(goal_msg, send_goal_options);
         return true;
     }
+    // DOC-END: send_controller_goal
 
-    /** @brief Callback de aceitação do Goal do Controller. */
+    // DOC-START: controller_goal_response_callback
     void controller_goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>> & goal_handle)
     {
         if (!goal_handle) 
@@ -1198,11 +1066,13 @@ private:
         else 
         {
             this->active_controller_goal_handle_ = goal_handle;
-            RCLCPP_INFO(this->get_logger(), "Goal CONTROLLER aceito, executando...");
+            RCLCPP_INFO(this->get_logger(), "Goal CONTROLLER aceito.");
         }
     }
+    // DOC-END: controller_goal_response_callback
 
-    /** @brief Callback de resultado do Controller. Limpa o path salvo se sucesso. */
+    // DOC-START: controller_result_callback
+    // Resultado da navegação (Chegou ou Falhou).
     void controller_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::WrappedResult & result)
     {
         if (this->active_controller_goal_handle_ && result.goal_id != this->active_controller_goal_handle_->get_goal_id()) 
@@ -1214,7 +1084,7 @@ private:
         {
             {
                 std::lock_guard<std::mutex> lock(path_mutex_);
-                last_calculated_path_.poses.clear(); // Limpa caminho já executado
+                last_calculated_path_.poses.clear(); // Limpa caminho executado
             }
             nav_state_ = TaskState::SUCCESS;
             RCLCPP_INFO(this->get_logger(), "Navegação concluída!");
@@ -1233,28 +1103,15 @@ private:
             this->active_controller_goal_handle_.reset();
         }
     }
+    // DOC-END: controller_result_callback
 
-    // --- Pick/Place Callbacks ---
-
-    /** @} */
-
-    /**
-     * @name Cliente de Ação: Manipulation
-     * Funções para controle do braço robótico (Pick & Place) via MoveIt.
-     * @{
-     */
-
-    /**
-     * @brief Envia goal de manipulação (Pick ou Place).
-     * @param id ID do objeto (necessário para planejamento de colisão no MoveIt).
-     * @param target_pose Pose alvo do End Effector.
-     * @param pick Booleano: true para Pegar, false para Largar.
-     */
+    // DOC-START: send_goal
+    // Envia Action de Manipulação (Pick ou Place).
     void send_goal(const std::string id, const geometry_msgs::msg::Pose & target_pose, bool pick)
     {
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5)))
         {
-            RCLCPP_ERROR(this->get_logger(), "Action server not available");
+            RCLCPP_ERROR(this->get_logger(), "Action server manipulação not available");
             manipulation_state_ = TaskState::FAILURE;
             return;
         }
@@ -1264,7 +1121,7 @@ private:
         goal_msg.pick = pick;
         goal_msg.pose = target_pose;
 
-        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal (Pose) para MANIPULATION...");
+        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal para MANIPULATION...");
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SendGoalOptions();
         send_goal_options.goal_response_callback = std::bind(&ServerNode::goal_response_callback, this, std::placeholders::_1);
@@ -1272,8 +1129,9 @@ private:
 
         this->client_ptr_->async_send_goal(goal_msg, send_goal_options);
     }
+    // DOC-END: send_goal
 
-    /** @brief Callback de aceitação da manipulação. */
+    // DOC-START: goal_response_callback
     void goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>> & goal_handle)
     {
         if (!goal_handle)
@@ -1283,11 +1141,12 @@ private:
         }
         else
         {
-            RCLCPP_INFO(this->get_logger(), "Goal PICK aceito, executando...");
+            RCLCPP_INFO(this->get_logger(), "Goal PICK aceito.");
         }
     }
+    // DOC-END: goal_response_callback
 
-    /** @brief Callback de resultado da manipulação. */
+    // DOC-START: result_callback
     void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>::WrappedResult & result)
     {
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result->success)
@@ -1298,65 +1157,171 @@ private:
         else
         {
             manipulation_state_ = TaskState::FAILURE;
-            RCLCPP_ERROR(this->get_logger(), "PICK FAILED or ABORTED");
+            RCLCPP_ERROR(this->get_logger(), "PICK FAILED");
         }
     }
+    // DOC-END: result_callback
 
 
-    // Publishers
-
+    // DOC-START: publish_pose
     void publish_pose()
     {
         auto message = geometry_msgs::msg::Pose();
-
         {
             std::lock_guard<std::mutex> lock(bt_mutex_);
             message = cached_object_.pose;
         }
-
         publisher_->publish(message);
     }
+    // DOC-END: publish_pose
 
+
+
+    // SUPPORT FUNCTIONS
+    
+    // DOC-START: calculate_max_2d_radius
+
+    const double ROBOT_BASE_Z = 0.11;
+    const double MAX_REACH_3D = 0.9;
+
+    double calculate_max_2d_radius(geometry_msgs::msg::Pose& pose)
+    {
+        // Cateto vertical.
+        double vertical_dist = std::abs(pose.position.z - ROBOT_BASE_Z);
+
+        if (vertical_dist > MAX_REACH_3D) 
+        {
+            RCLCPP_WARN(this->get_logger(), "Objeto inalcançável! Altura relativa (%.2f) > Alcance Max (%.3f)", vertical_dist, MAX_REACH_3D);
+            return 0.0; 
+        }
+
+        // Cateto horizontal. MAX_REACH_3D é a hipotenusa é 0.9.
+        // r_2d = sqrt(R^2 - dz^2)
+        double radius_2d = std::sqrt(std::pow(MAX_REACH_3D, 2) - std::pow(vertical_dist, 2));
+
+        RCLCPP_INFO(this->get_logger(), "Raio 2D no chão: %.4f m (Centro X: %.2f, Y: %.2f)", 
+                    radius_2d, pose.position.x, pose.position.y);
+
+
+        // // --- INÍCIO DA VISUALIZAÇÃO ---
+
+        // visualization_msgs::msg::MarkerArray marker_array;
+        // rclcpp::Time current_time = this->now();
+
+        // auto create_base_marker = [&](int id, int type, std::string ns) 
+        // {
+        //     visualization_msgs::msg::Marker m;
+        //     m.header.frame_id = "world"; 
+        //     m.header.stamp = current_time;
+        //     m.ns = ns;
+        //     m.id = id;
+        //     m.type = type;
+        //     m.action = visualization_msgs::msg::Marker::ADD;
+        //     m.pose.orientation.w = 1.0; // Orientação padrão neutra
+        //     m.color.a = 1.0; // Alfa padrão (sólido)
+        //     return m;
+        // };
+
+
+        // // === MARCADOR 1: O Disco Verde no Chão (Seu código original) ===
+        // visualization_msgs::msg::Marker disk_marker = create_base_marker(0, visualization_msgs::msg::Marker::CYLINDER, "reach_zone");
+        // disk_marker.pose.position.x = pose.position.x;
+        // disk_marker.pose.position.y = pose.position.y;
+        // disk_marker.pose.position.z = 0.0; // No chão
+        // disk_marker.scale.x = radius_2d * 2.0; // Diâmetro
+        // disk_marker.scale.y = radius_2d * 2.0; // Diâmetro
+        // disk_marker.scale.z = 0.015;            // Altura fina
+        // disk_marker.color.a = 0.3; // Translúcido
+        // disk_marker.color.b = 1.0; // Verde
+        // marker_array.markers.push_back(disk_marker);
+
+
+        // // === MARCADOR 2: Quadrado Vermelho no Objeto Alvo ===
+        // visualization_msgs::msg::Marker target_cube = create_base_marker(1, visualization_msgs::msg::Marker::CUBE, "target_obj");
+        // target_cube.pose = pose; // Usa a pose exata do objeto
+        // target_cube.scale.x = 0.05; // Cubo de 5cm
+        // target_cube.scale.y = 0.05;
+        // target_cube.scale.z = 0.05;
+        // target_cube.color.r = 1.0; // Vermelho
+        // marker_array.markers.push_back(target_cube);
+
+
+        // // --- Definindo os Pontos do Triângulo de Pitágoras ---
+        // // Para visualizar corretamente a matemática que fizemos (hipotenusa = 0.8),
+        // // o triângulo deve ser entre a altura do objeto e a altura da base do robô (0.11).
+        // geometry_msgs::msg::Point p_top = pose.position; // O objeto (x,y,z)
+        
+        // geometry_msgs::msg::Point p_bottom_ref; // Ponto (x,y) na altura da base do robô
+        // p_bottom_ref.x = pose.position.x;
+        // p_bottom_ref.y = pose.position.y;
+        // p_bottom_ref.z = ROBOT_BASE_Z; // 0.11
+
+        // geometry_msgs::msg::Point p_horiz_end; // Fim do cateto horizontal
+        // // Estendemos arbitrariamente ao longo do eixo X para desenhar o triângulo
+        // p_horiz_end.x = pose.position.x + radius_2d; 
+        // p_horiz_end.y = pose.position.y;
+        // p_horiz_end.z = ROBOT_BASE_Z; // 0.11
+
+
+        // // === MARCADOR 3: Linha do Cateto Vertical (Diferença de Altura) ===
+        // visualization_msgs::msg::Marker vert_line = create_base_marker(2, visualization_msgs::msg::Marker::LINE_STRIP, "triangle_lines");
+        // vert_line.scale.x = 0.01; // Espessura da linha
+        // vert_line.color.b = 1.0; // Azul (geralmente representa Z)
+        // vert_line.points.push_back(p_top);
+        // vert_line.points.push_back(p_bottom_ref);
+        // marker_array.markers.push_back(vert_line);
+
+        // // === MARCADOR 4: Linha do Cateto Horizontal (Raio 2D) ===
+        // visualization_msgs::msg::Marker horiz_line = create_base_marker(3, visualization_msgs::msg::Marker::LINE_STRIP, "triangle_lines");
+        // horiz_line.scale.x = 0.01;
+        // horiz_line.color.r = 1.0; // Vermelho (geralmente representa X)
+        // horiz_line.points.push_back(p_bottom_ref);
+        // horiz_line.points.push_back(p_horiz_end);
+        // marker_array.markers.push_back(horiz_line);
+
+        // // === MARCADOR 5: Linha da Hipotenusa (Alcance Max 3D) ===
+        // visualization_msgs::msg::Marker hypot_line = create_base_marker(4, visualization_msgs::msg::Marker::LINE_STRIP, "triangle_lines");
+        // hypot_line.scale.x = 0.01;
+        // hypot_line.color.g = 1.0; 
+        // hypot_line.color.r = 1.0; // Amarelo (Vermelho + Verde)
+        // hypot_line.points.push_back(p_top);
+        // hypot_line.points.push_back(p_horiz_end);
+        // marker_array.markers.push_back(hypot_line);
+
+
+   
+
+        // // PUBLICAR TUDO DE UMA VEZ
+        // marker_publisher_->publish(marker_array);
+
+        return radius_2d;
+    }
+
+    // DOC-END: calculate_max_2d_radius
 };
 
-/**
- * @brief Helper function para verificar se uma flag existe nos argumentos da linha de comando.
- * @param args Vetor de argumentos.
- * @param flag Flag a ser buscada (ex: "--no-organize").
- * @return true se encontrada, false caso contrário.
- */
+// DOC-START: has_flag
+// Utilitário para verificar flags de terminal (ex: --no-gripper)
 bool has_flag(const std::vector<std::string>& args, const std::string& flag) 
 {
     return std::find(args.begin(), args.end(), flag) != args.end();
 }
+// DOC-END: has_flag
 
-/**
- * @brief Função principal (Entry Point).
- *
- * @details
- * 1. Inicializa o ROS 2.
- * 2. Processa argumentos de linha de comando para ativar/desativar nós opcionais (organize, storage, gripper).
- * 3. Cria instâncias dos nós auxiliares.
- * 4. Adiciona todos os nós a um MultiThreadedExecutor para permitir execução paralela de callbacks.
- * 5. Inicia o spin.
- *
- * @param argc Número de argumentos.
- * @param argv Vetor de argumentos.
- * @return int Código de saída (0 sucesso).
- */
+// DOC-START: main
+// Função Principal: Inicializa ROS, nós auxiliares e o ServerNode.
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
 
   std::vector<std::string> args(argv, argv + argc);
 
-  // Flags para desenvolvimento/teste modular
+  // Flags para controle modular
   bool enable_organize = !has_flag(args, "--no-organize");
   bool enable_storage  = !has_flag(args, "--no-storage");
   bool enable_gripper  = !has_flag(args, "--no-gripper");
 
-
-  // Opções para renomear nós internos se necessário para evitar colisão de nomes
+  // Configuração dos nós auxiliares (remapeamento de nomes)
   rclcpp::NodeOptions organize_opts;
   organize_opts.arguments({"--ros-args", "-r", "__node:=organize_node"});
 
@@ -1366,12 +1331,11 @@ int main(int argc, char * argv[])
   rclcpp::NodeOptions gripper_opts;
   gripper_opts.arguments({"--ros-args", "-r", "__node:=gripper_monitor_node"});
 
-
   std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
   std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
   std::shared_ptr<manipulation::IsGripperHolding> gripper_node = nullptr;
 
-  // Executor MultiThreaded essencial para que callbacks de Actions não bloqueiem uns aos outros
+  // Executor MultiThreaded para permitir paralelismo real
   rclcpp::executors::MultiThreadedExecutor executor;
 
   if (enable_organize)
@@ -1392,7 +1356,7 @@ int main(int argc, char * argv[])
       executor.add_node(gripper_node);
   }
 
-  // Injeção de dependência dos nós auxiliares no ServerNode
+  // Instancia e adiciona o nó principal
   auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node);
   executor.add_node(server_node);
 
@@ -1401,3 +1365,4 @@ int main(int argc, char * argv[])
   rclcpp::shutdown();
   return 0;
 }
+// DOC-END: main

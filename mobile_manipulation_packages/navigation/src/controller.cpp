@@ -30,8 +30,8 @@ public:
             std::bind(&RobotController::handle_cancel, this, std::placeholders::_1),
             std::bind(&RobotController::handle_accepted, this, std::placeholders::_1));
 
-        linear_speed_ = 1.75;
-        angular_speed_ = 3.0;
+        linear_speed_ = 4.75;
+        angular_speed_ = 8.0;
         
         waypoint_tolerance_ = 0.075; 
         lookahead_distance_ = 0.15; 
