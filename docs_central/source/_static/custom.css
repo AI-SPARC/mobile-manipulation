@@ -1,0 +1,11 @@
+/* --- Estilização dos Grupos (@name) --- */
+p.rubric {
+    font-size: 26px !important;  /* Tamanho bem grande */
+    font-weight: bold !important;
+    color: #2980B9 !important;   /* Azul padrão do ROS */
+    margin-top: 40px !important; /* Espaço antes */
+    margin-bottom: 20px !important;
+    border-bottom: 3px solid #e1e4e5; /* Linha divisória embaixo */
+    padding-bottom: 10px;
+    display: block;
+}
