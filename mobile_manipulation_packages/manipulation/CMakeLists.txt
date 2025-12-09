@@ -38,7 +38,7 @@ find_package(pcl_conversions REQUIRED)
 
 find_package(yaml-cpp REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
-
+find_package(navigation REQUIRED)
 
 # 1. Adicionando a implementação na biblioteca (ISSO ESTÁ CERTO)
 # Como você adicionou aqui, qualquer nó que use 'manipulation_lib'
@@ -74,11 +74,11 @@ ament_target_dependencies(manipulation_lib
   tf2_sensor_msgs
   tf2_geometry_msgs
   tf2_eigen
-
   Eigen3
   PCL
   pcl_conversions
   behaviortree_cpp
+  navigation
 )
 
 target_link_libraries(manipulation_lib

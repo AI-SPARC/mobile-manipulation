@@ -48,6 +48,7 @@
 #include <manipulation/ProjectedReachabilityAnalysis.hpp>
 #include <storage_manager/GetStorageInfo.hpp>
 #include <storage_manager/Organize.hpp>
+#include <navigation/SharedObstacleGraph.hpp>
 
 namespace BT
 {
@@ -163,13 +164,15 @@ public:
         std::shared_ptr<manipulation::IsGripperHolding> gripper_node,
         std::shared_ptr<storage_manager::StorageNode> storage_node,
         std::shared_ptr<storage_manager::OrganizeNode> organize_node,
-        std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node 
+        std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node,
+        std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node 
     )
     : Node("server_node"),
     gripper_monitor_node_(gripper_node),
     storage_node_(storage_node),
     organize_node_(organize_node),
-    reachability_node_(reachability_node) 
+    reachability_node_(reachability_node),
+    obstacle_graph_node_(obstacle_graph_node) 
     {
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
@@ -246,6 +249,8 @@ private:
 
     // DOC-START: member_variables
     // --- Injeção de Dependências ---
+    // Ponteiro para o nó que modifica o grafo de obstáculos.
+    std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node_;
     // Ponteiro para o nó que verifica o ponto ideal para pegar o objeto.
     std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node_;
     // Ponteiro para o nó que monitora o sensor da garra
@@ -653,8 +658,10 @@ private:
                 {
                     return BT::NodeStatus::FAILURE;
                 }
- 
-                this->reachability_node_->calculate_max_2d_radius(target.value(), 0.11, 0.9);
+                
+                auto obstacle_graph_pointer = this->obstacle_graph_node_->get_current_map();
+
+                double radius = this->reachability_node_->calculate_max_2d_radius(target.value(), 0.11, 0.9, obstacle_graph_pointer);
 
                 // Envia goal sem bloquear o mutex principal
                 this->send_path_goal(target.value());
@@ -1217,10 +1224,16 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions reachability_opts;
     reachability_opts.arguments({"--ros-args", "-r", "__node:=reachability_node"});
 
+    rclcpp::NodeOptions obstacle_graph_opts;
+    obstacle_graph_opts.arguments({"--ros-args", "-r", "__node:=shared_obstacle_graph_node"});
+
     std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
     std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
+
     std::shared_ptr<manipulation::IsGripperHolding> gripper_node = nullptr;
     std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node = nullptr; 
+
+    std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node = nullptr; 
 
     rclcpp::executors::MultiThreadedExecutor executor;
 
@@ -1246,7 +1259,10 @@ int main(int argc, char * argv[])
     reachability_node = std::make_shared<manipulation::ProjectedReachabilityAnalysis>(reachability_opts);
     executor.add_node(reachability_node);
 
-    auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node);
+    obstacle_graph_node = std::make_shared<navigation::SharedObstacleGraph>(obstacle_graph_opts);
+    executor.add_node(obstacle_graph_node);
+
+    auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node, obstacle_graph_node);
     executor.add_node(server_node);
 
     executor.spin();

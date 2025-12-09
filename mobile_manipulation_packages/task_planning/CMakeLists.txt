@@ -40,6 +40,7 @@ find_package(yaml-cpp REQUIRED)
 
 find_package(manipulation REQUIRED)
 find_package(storage_manager REQUIRED) 
+find_package(navigation REQUIRED)
 
 message(STATUS "storage_manager_INCLUDE_DIRS = ${storage_manager_INCLUDE_DIRS}")
 message(STATUS "storage_manager_LIBRARIES    = ${storage_manager_LIBRARIES}")
@@ -51,6 +52,7 @@ target_include_directories(server_node
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     ${manipulation_INCLUDE_DIRS}
+    ${navigation_INCLUDE_DIRS}
     ${storage_manager_INCLUDE_DIRS}  
     ${PCL_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
@@ -92,6 +94,7 @@ target_link_libraries(server_node
   yaml-cpp
   ${manipulation_LIBRARIES}
   ${storage_manager_LIBRARIES} 
+  ${navigation_LIBRARIES} 
 )
 
 install(

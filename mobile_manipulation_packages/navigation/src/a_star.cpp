@@ -137,7 +137,7 @@ public:
             "/odom", 10, std::bind(&AStar::callback_odom, this, std::placeholders::_1));
 
         subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            "/obstacles_vertices",
+            "/obstacle_graph",
             10,
             std::bind(&AStar::topic_callback, this, std::placeholders::_1)
         );
