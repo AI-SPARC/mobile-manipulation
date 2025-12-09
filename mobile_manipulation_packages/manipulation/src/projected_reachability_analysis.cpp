@@ -1,8 +1,11 @@
 #include <manipulation/ProjectedReachabilityAnalysis.hpp>
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
+#include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include <queue> 
+#include <algorithm>
+#include <set> 
 
 using namespace std::chrono_literals;
 
@@ -11,85 +14,140 @@ namespace manipulation {
 ProjectedReachabilityAnalysis::ProjectedReachabilityAnalysis(const rclcpp::NodeOptions & options)
 : Node("projected_reachability_node", options) 
 {
-    RCLCPP_INFO(this->get_logger(), "Projected Reachability Analysis inicializado (Composable).");
+    RCLCPP_INFO(this->get_logger(), "Projected Reachability Analysis (All Points) inicializado.");
 
     this->declare_parameter<double>("path_resolution", 0.05);
     distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
     decimals = count_decimals(distanceToObstacle_);
 
     marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("reachability_visualization", 10);
+    
+    rclcpp::QoS qos(10);
+    qos.reliable(); 
+    qos.transient_local();
+    reachability_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("reachability_zone", qos);
 }   
 
-std::pair<bool, double> ProjectedReachabilityAnalysis::calculate_max_2d_radius(
-    const geometry_msgs::msg::Pose& pose, 
+// --- IMPLEMENTAÇÃO ATUALIZADA ---
+std::vector<std::pair<float, float>> ProjectedReachabilityAnalysis::get_reachable_points(
+    const geometry_msgs::msg::Pose& origin, 
     const double& ROBOT_BASE_Z, 
-    const double& MAX_REACH_3D, 
-    const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node)
+    const double& MAX_REACH_3D, std::vector<std::pair<float, float>>& valid_candidates)
 {
-    // 1. Pega o Snapshot Inicial (Thread-Safe, muito rápido)
-    auto initial_map_ptr = graph_provider_node->get_current_map();
 
-    if (!initial_map_ptr) {
-        RCLCPP_WARN(this->get_logger(), "Ponteiro do mapa é nulo. Abortando.");
-        return {false, 0.0};
-    }
+    // 1. Cálculo do Raio
+    double vertical_dist = std::abs(origin.position.z - ROBOT_BASE_Z);
 
-    // 2. Validação Geométrica
-    double vertical_dist = std::abs(pose.position.z - ROBOT_BASE_Z);
-    if (vertical_dist > MAX_REACH_3D) {
-        RCLCPP_WARN(this->get_logger(), "Objeto inalcançável verticalmente.");
-        return {false, 0.0}; 
+    if (vertical_dist > MAX_REACH_3D) 
+    {
+        RCLCPP_WARN(this->get_logger(), "Objeto inalcançável! Altura (%.2f) > Alcance Max (%.3f)", vertical_dist, MAX_REACH_3D);
+        return valid_candidates; 
     }
 
     double radius_2d = std::sqrt(std::pow(MAX_REACH_3D, 2) - std::pow(vertical_dist, 2));
-    RCLCPP_INFO(this->get_logger(), "Iniciando BFS com Raio 2D: %.4f m", radius_2d);
+    const float radius_sq = static_cast<float>(radius_2d * radius_2d);
 
-    // 3. Executa BFS com monitoramento de mudança de mapa
-    auto bfs_result = bfs_to_calculate_possible_pick_points(pose, radius_2d, initial_map_ptr, graph_provider_node);
+    RCLCPP_INFO(this->get_logger(), "Calculando pontos acessíveis. Raio 2D: %.4f m", radius_2d);
+
+    // 2. BFS
+    std::pair<float,float> origin_pair = {
+        round_to_multiple(origin.position.x, distanceToObstacle_, decimals), 
+        round_to_multiple(origin.position.y, distanceToObstacle_, decimals)
+    };
     
-    // Se bfs_result.second for false, pode ser colisão OU mapa mudou.
-    if(bfs_result.second) 
+    valid_candidates.push_back(origin_pair);
+
+    std::queue<std::pair<float, float>> q;
+    q.push(origin_pair);
+
+    std::set<std::pair<float, float>> visited;
+    visited.insert(origin_pair);
+
+    auto offsets = get_offsets(distanceToObstacle_);
+    int steps = 0;
+    int max_steps = 30000; // Aumentado para garantir cobertura total
+
+    while(!q.empty())
     {
-        RCLCPP_INFO(this->get_logger(), "Ponto válido encontrado: (%.2f, %.2f)", bfs_result.first.first, bfs_result.first.second);
-        
-        // --- Visualização (Apenas sucesso) ---
-        visualization_msgs::msg::MarkerArray marker_array;
-        rclcpp::Time current_time = this->now();
+        steps++;
+        if(steps > max_steps) break;
+   
+        std::pair<float, float> current_pos = q.front();
+        q.pop();
 
-        auto create_base_marker = [&](int id, int type) {
-            visualization_msgs::msg::Marker m;
-            m.header.frame_id = "world"; m.header.stamp = current_time;
-            m.ns = "reachability"; m.id = id; m.type = type;
-            m.action = 0; m.pose.orientation.w = 1.0; m.color.a = 1.0;
-            return m;
-        };
+        for(int i = 0; i < 8; i++)
+        {
+            float nx = round_to_multiple(current_pos.first + offsets[i][0], distanceToObstacle_, decimals);
+            float ny = round_to_multiple(current_pos.second + offsets[i][1], distanceToObstacle_, decimals);
+            std::pair<float, float> neighbor = {nx, ny};
 
-        // Disco
-        auto disk = create_base_marker(0, visualization_msgs::msg::Marker::CYLINDER);
-        disk.pose.position = pose.position; disk.pose.position.z = 0.0;
-        disk.scale.x = radius_2d * 2.0; disk.scale.y = radius_2d * 2.0; disk.scale.z = 0.01;
-        disk.color.b = 1.0; disk.color.a = 0.3;
-        marker_array.markers.push_back(disk);
+            if(visited.find(neighbor) != visited.end()) continue;
 
-        // Alvo
-        auto target = create_base_marker(1, visualization_msgs::msg::Marker::CUBE);
-        target.pose = pose;
-        target.scale.x = 0.05; target.scale.y = 0.05; target.scale.z = 0.05;
-        target.color.r = 1.0;
-        marker_array.markers.push_back(target);
+            float dx = neighbor.first - origin_pair.first;
+            float dy = neighbor.second - origin_pair.second;
+            float dist_sq = dx*dx + dy*dy;
 
-        marker_publisher_->publish(marker_array);
+            if (dist_sq > radius_sq) continue;
 
-        return {true, radius_2d};
-    } 
-    else 
-    {
-        RCLCPP_WARN(this->get_logger(), "BFS Falhou: Mapa mudou ou sem espaço livre.");
-        return {false, 0.0};
+            visited.insert(neighbor);
+            q.push(neighbor);
+            
+            // Adiciona ao resultado
+            valid_candidates.push_back(neighbor);
+        }
     }
+
+    // 3. Publicação (Opcional, mas útil para debug)
+    publish_reachability_cloud(valid_candidates);
+
+    // 4. Marcador do Raio
+    visualization_msgs::msg::MarkerArray marker_array;
+    rclcpp::Time current_time = this->now();
+
+    visualization_msgs::msg::Marker disk;
+    disk.header.frame_id = "world"; disk.header.stamp = current_time;
+    disk.ns = "reachability"; disk.id = 0; disk.type = visualization_msgs::msg::Marker::CYLINDER;
+    disk.action = 0; disk.pose.orientation.w = 1.0;
+    disk.pose.position = origin.position; disk.pose.position.z = 0.0;
+    disk.scale.x = radius_2d * 2.0; disk.scale.y = radius_2d * 2.0; disk.scale.z = 0.01;
+    disk.color.b = 1.0; disk.color.a = 0.2;
+    marker_array.markers.push_back(disk);
+    marker_publisher_->publish(marker_array);
+
+    // RETORNA TODOS OS PONTOS
+    return valid_candidates;
 }
 
-// ... (get_offsets, round_to_multiple, count_decimals permanecem iguais) ...
+void ProjectedReachabilityAnalysis::publish_reachability_cloud(const std::vector<std::pair<float, float>>& points)
+{
+    if (points.empty()) return;
+
+    sensor_msgs::msg::PointCloud2 cloud;
+    cloud.header.frame_id = "world";
+    cloud.header.stamp = this->now();
+    cloud.height = 1;
+    cloud.width = points.size();
+    cloud.is_dense = true;
+    
+    sensor_msgs::PointCloud2Modifier modifier(cloud);
+    modifier.setPointCloud2FieldsByString(1, "xyz");
+    modifier.resize(cloud.width);
+
+    sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
+    sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
+    sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
+
+    for (const auto& p : points)
+    {
+        *iter_x = p.first;
+        *iter_y = p.second;
+        *iter_z = 0.02; 
+        ++iter_x; ++iter_y; ++iter_z;
+    }
+
+    reachability_cloud_pub_->publish(cloud);
+}
+
 std::vector<std::array<float, 3>> ProjectedReachabilityAnalysis::get_offsets(float distanceToObstacle) 
 {
     return {
@@ -120,93 +178,6 @@ int ProjectedReachabilityAnalysis::count_decimals(float number)
         decimals++;
     }
     return decimals;
-}
-
-std::pair<std::pair<float, float>, bool> ProjectedReachabilityAnalysis::bfs_to_calculate_possible_pick_points(
-    geometry_msgs::msg::Pose origin, 
-    const double& radius, 
-    const std::shared_ptr<const std::unordered_set<std::pair<float, float>, navigation::PairHash>>& current_map_snapshot,
-    const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node)
-{
-    if (!current_map_snapshot) return {{0,0}, false};
-    
-    std::pair<float,float> nearest_rounded = {
-        round_to_multiple(origin.position.x, distanceToObstacle_, decimals), 
-        round_to_multiple(origin.position.y, distanceToObstacle_, decimals)
-    };
-    
-    // Check inicial no snapshot
-    if (current_map_snapshot->find(nearest_rounded) == current_map_snapshot->end()) {
-        return {nearest_rounded, true};
-    }
-
-    struct SearchNode {
-        float dist;
-        std::pair<float, float> pos;
-        bool operator>(const SearchNode& other) const { return dist > other.dist; }
-    };
-
-    std::priority_queue<SearchNode, std::vector<SearchNode>, std::greater<SearchNode>> pq;
-    pq.push({0.0f, nearest_rounded});
-
-    std::unordered_set<std::pair<float, float>, navigation::PairHash> visited;
-    visited.insert(nearest_rounded);
-
-    auto offsets = get_offsets(distanceToObstacle_);
-    int steps = 0;
-    int max_steps = 2000; // Aumentei um pouco para cobrir raio 0.9m com res 0.05
-    
-    std::pair<float, float> origin_pair = {origin.position.x, origin.position.y};
-
-    while(!pq.empty())
-    {
-        steps++;
-        if(steps > max_steps) break;
-
-        // --- CHECK DE PREEMPÇÃO EM TEMPO REAL ---
-        // A cada 10 passos, verifica se o nó tem um mapa novo
-        if (steps % 10 == 0) 
-        {
-            // Pega o ponteiro ATUAL do nó (nanossegundos)
-            auto live_map_ptr = graph_provider_node->get_current_map();
-            
-            // Se o endereço mudou, significa que load/inflate rodou de novo
-            if (live_map_ptr != current_map_snapshot) 
-            {
-                RCLCPP_WARN(this->get_logger(), "BFS PREEMPTADO: Mapa atualizado durante execução.");
-                return {origin_pair, false};
-            }
-        }
-        // ----------------------------------------
-
-        auto current_node = pq.top();
-        pq.pop();
-        
-        // Verifica colisão no SNAPSHOT (Seguro)
-        if (current_map_snapshot->find(current_node.pos) == current_map_snapshot->end())
-        {
-            return {current_node.pos, true};
-        }
-
-        for(int i = 0; i < 8; i++)
-        {
-            float nx = round_to_multiple(current_node.pos.first + offsets[i][0], distanceToObstacle_, decimals);
-            float ny = round_to_multiple(current_node.pos.second + offsets[i][1], distanceToObstacle_, decimals);
-            std::pair<float, float> neighbor = {nx, ny};
-
-            if(visited.find(neighbor) != visited.end()) continue;
-
-            visited.insert(neighbor);
-
-            float dist_from_origin = std::hypot(neighbor.first - origin_pair.first, neighbor.second - origin_pair.second);
-            
-            if (dist_from_origin <= radius) {
-                pq.push({dist_from_origin, neighbor});
-            }
-        }
-    }
-    
-    return {origin_pair, false}; 
 }
 
 } // namespace manipulation

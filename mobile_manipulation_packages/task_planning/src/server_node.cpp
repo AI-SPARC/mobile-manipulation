@@ -46,6 +46,7 @@
 // Classes Auxiliares
 #include <manipulation/IsGripperHolding.hpp>
 #include <manipulation/ProjectedReachabilityAnalysis.hpp>
+#include <manipulation/IKValidator.hpp>
 #include <storage_manager/GetStorageInfo.hpp>
 #include <storage_manager/Organize.hpp>
 #include <navigation/SharedObstacleGraph.hpp>
@@ -165,14 +166,16 @@ public:
         std::shared_ptr<storage_manager::StorageNode> storage_node,
         std::shared_ptr<storage_manager::OrganizeNode> organize_node,
         std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node,
-        std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node 
+        std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node,
+        std::shared_ptr<manipulation::IKValidator> ik_validator_node 
     )
     : Node("server_node"),
     gripper_monitor_node_(gripper_node),
     storage_node_(storage_node),
     organize_node_(organize_node),
     reachability_node_(reachability_node),
-    obstacle_graph_node_(obstacle_graph_node) 
+    obstacle_graph_node_(obstacle_graph_node),
+    ik_validator_node_(ik_validator_node) 
     {
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
@@ -249,6 +252,8 @@ private:
 
     // DOC-START: member_variables
     // --- Injeção de Dependências ---
+    // Ponteiro para o nó que verifica se o robô consegue achar uma IK para uma série de pontos passados.
+    std::shared_ptr<manipulation::IKValidator> ik_validator_node_;
     // Ponteiro para o nó que modifica o grafo de obstáculos.
     std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node_;
     // Ponteiro para o nó que verifica o ponto ideal para pegar o objeto.
@@ -389,21 +394,16 @@ private:
             double max_reach_3d = max_reach_3d_opt.value();
 
          
+            std::vector<std::pair<float, float>> viable_points;
         
-            std::pair<bool, double> reachability_result = this->reachability_node_->calculate_max_2d_radius(
-                target, 
-                robot_base_z, 
-                max_reach_3d, 
-                this->obstacle_graph_node_ 
-            );
+            this->reachability_node_->get_reachable_points(target, robot_base_z, max_reach_3d, viable_points);
 
-            if (!reachability_result.first) 
+
+            if (viable_points.empty()) 
             {
                 RCLCPP_WARN(this->get_logger(), "ComputePath falhou: Alvo inalcançável ou mapa mudou durante cálculo.");
                 return BT::NodeStatus::FAILURE;
             }
-
-            double calculated_radius = reachability_result.second;
             
 
             return BT::NodeStatus::FAILURE;
@@ -1228,11 +1228,15 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions obstacle_graph_opts;
     obstacle_graph_opts.arguments({"--ros-args", "-r", "__node:=shared_obstacle_graph_node"});
 
+    rclcpp::NodeOptions ik_validator_opts;
+    ik_validator_opts.arguments({"--ros-args", "-r", "__node:=ik_validator_node"});
+
     std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
     std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
 
     std::shared_ptr<manipulation::IsGripperHolding> gripper_node = nullptr;
     std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node = nullptr; 
+    std::shared_ptr<manipulation::IKValidator> ik_validator_node = nullptr; 
 
     std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node = nullptr; 
 
@@ -1263,7 +1267,10 @@ int main(int argc, char * argv[])
     obstacle_graph_node = std::make_shared<navigation::SharedObstacleGraph>(obstacle_graph_opts);
     executor.add_node(obstacle_graph_node);
 
-    auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node, obstacle_graph_node);
+    ik_validator_node = std::make_shared<manipulation::IKValidator>(ik_validator_opts);
+    executor.add_node(ik_validator_node);
+
+    auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node, obstacle_graph_node, ik_validator_node);
     executor.add_node(server_node);
 
     executor.spin();
