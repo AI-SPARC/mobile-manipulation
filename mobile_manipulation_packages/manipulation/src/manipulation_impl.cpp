@@ -547,15 +547,6 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                     
                 }
 
-
-                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
-                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
-                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
-                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
-                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
-                std::cout << target_pose_world.position.x << " " << target_pose_world.position.y << " " << target_pose_world.position.z << std::endl;
-
-
                 target_pose_world.position.z += 0.125;
                 attempt_cartesian_move(target_pose_world, 1.0, false);
 

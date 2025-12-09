@@ -2,7 +2,7 @@
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
-#include <queue> // Necessário para priority_queue
+#include <queue> 
 
 using namespace std::chrono_literals;
 
@@ -14,102 +14,89 @@ ProjectedReachabilityAnalysis::ProjectedReachabilityAnalysis(const rclcpp::NodeO
     RCLCPP_INFO(this->get_logger(), "Projected Reachability Analysis inicializado (Composable).");
 
     this->declare_parameter<double>("path_resolution", 0.05);
-
     distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
-
     decimals = count_decimals(distanceToObstacle_);
 
     marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("reachability_visualization", 10);
 }   
 
-double ProjectedReachabilityAnalysis::calculate_max_2d_radius(
+std::pair<bool, double> ProjectedReachabilityAnalysis::calculate_max_2d_radius(
     const geometry_msgs::msg::Pose& pose, 
     const double& ROBOT_BASE_Z, 
     const double& MAX_REACH_3D, 
-    const std::shared_ptr<const std::unordered_set<std::pair<float, float>, navigation::PairHash>>& obstaclesVertices)
+    const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node)
 {
-    // Cateto vertical.
-    double vertical_dist = std::abs(pose.position.z - ROBOT_BASE_Z);
+    // 1. Pega o Snapshot Inicial (Thread-Safe, muito rápido)
+    auto initial_map_ptr = graph_provider_node->get_current_map();
 
-    if (vertical_dist > MAX_REACH_3D) 
-    {
-        RCLCPP_WARN(this->get_logger(), "Objeto inalcançável! Altura relativa (%.2f) > Alcance Max (%.3f)", vertical_dist, MAX_REACH_3D);
-        return 0.0; 
+    if (!initial_map_ptr) {
+        RCLCPP_WARN(this->get_logger(), "Ponteiro do mapa é nulo. Abortando.");
+        return {false, 0.0};
     }
 
- 
+    // 2. Validação Geométrica
+    double vertical_dist = std::abs(pose.position.z - ROBOT_BASE_Z);
+    if (vertical_dist > MAX_REACH_3D) {
+        RCLCPP_WARN(this->get_logger(), "Objeto inalcançável verticalmente.");
+        return {false, 0.0}; 
+    }
+
     double radius_2d = std::sqrt(std::pow(MAX_REACH_3D, 2) - std::pow(vertical_dist, 2));
+    RCLCPP_INFO(this->get_logger(), "Iniciando BFS com Raio 2D: %.4f m", radius_2d);
 
-    RCLCPP_INFO(this->get_logger(), "Raio 2D no chão: %.4f m (Centro X: %.2f, Y: %.2f)", 
-                radius_2d, pose.position.x, pose.position.y);
-
-
-    auto bfs_result = bfs_to_calculate_possible_pick_points(pose, radius_2d, obstaclesVertices);
+    // 3. Executa BFS com monitoramento de mudança de mapa
+    auto bfs_result = bfs_to_calculate_possible_pick_points(pose, radius_2d, initial_map_ptr, graph_provider_node);
     
+    // Se bfs_result.second for false, pode ser colisão OU mapa mudou.
     if(bfs_result.second) 
     {
-        RCLCPP_INFO(this->get_logger(), "Ponto válido encontrado em: (%.2f, %.2f)", bfs_result.first.first, bfs_result.first.second);
+        RCLCPP_INFO(this->get_logger(), "Ponto válido encontrado: (%.2f, %.2f)", bfs_result.first.first, bfs_result.first.second);
+        
+        // --- Visualização (Apenas sucesso) ---
+        visualization_msgs::msg::MarkerArray marker_array;
+        rclcpp::Time current_time = this->now();
+
+        auto create_base_marker = [&](int id, int type) {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = "world"; m.header.stamp = current_time;
+            m.ns = "reachability"; m.id = id; m.type = type;
+            m.action = 0; m.pose.orientation.w = 1.0; m.color.a = 1.0;
+            return m;
+        };
+
+        // Disco
+        auto disk = create_base_marker(0, visualization_msgs::msg::Marker::CYLINDER);
+        disk.pose.position = pose.position; disk.pose.position.z = 0.0;
+        disk.scale.x = radius_2d * 2.0; disk.scale.y = radius_2d * 2.0; disk.scale.z = 0.01;
+        disk.color.b = 1.0; disk.color.a = 0.3;
+        marker_array.markers.push_back(disk);
+
+        // Alvo
+        auto target = create_base_marker(1, visualization_msgs::msg::Marker::CUBE);
+        target.pose = pose;
+        target.scale.x = 0.05; target.scale.y = 0.05; target.scale.z = 0.05;
+        target.color.r = 1.0;
+        marker_array.markers.push_back(target);
+
+        marker_publisher_->publish(marker_array);
+
+        return {true, radius_2d};
     } 
     else 
     {
-        RCLCPP_WARN(this->get_logger(), "Nenhum ponto válido encontrado livre de colisão!");
+        RCLCPP_WARN(this->get_logger(), "BFS Falhou: Mapa mudou ou sem espaço livre.");
+        return {false, 0.0};
     }
-
-    visualization_msgs::msg::MarkerArray marker_array;
-    rclcpp::Time current_time = this->now();
-
-    auto create_base_marker = [&](int id, int type, std::string ns) 
-    {
-        visualization_msgs::msg::Marker m;
-        m.header.frame_id = "world"; 
-        m.header.stamp = current_time;
-        m.ns = ns;
-        m.id = id;
-        m.type = type;
-        m.action = visualization_msgs::msg::Marker::ADD;
-        m.pose.orientation.w = 1.0; 
-        m.color.a = 1.0; 
-        return m;
-    };
-
-    // Marcador do Disco
-    visualization_msgs::msg::Marker disk_marker = create_base_marker(0, visualization_msgs::msg::Marker::CYLINDER, "reach_zone");
-    disk_marker.pose.position.x = pose.position.x;
-    disk_marker.pose.position.y = pose.position.y;
-    disk_marker.pose.position.z = 0.0; 
-    disk_marker.scale.x = radius_2d * 2.0; 
-    disk_marker.scale.y = radius_2d * 2.0; 
-    disk_marker.scale.z = 0.015;            
-    disk_marker.color.a = 0.3; 
-    disk_marker.color.b = 1.0; 
-    marker_array.markers.push_back(disk_marker);
-
-    // Marcador do Cubo Alvo
-    visualization_msgs::msg::Marker target_cube = create_base_marker(1, visualization_msgs::msg::Marker::CUBE, "target_obj");
-    target_cube.pose = pose; 
-    target_cube.scale.x = 0.05; 
-    target_cube.scale.y = 0.05;
-    target_cube.scale.z = 0.05;
-    target_cube.color.r = 1.0; 
-    marker_array.markers.push_back(target_cube);
-
-
-    marker_publisher_->publish(marker_array);
-
-    return radius_2d;
 }
 
+// ... (get_offsets, round_to_multiple, count_decimals permanecem iguais) ...
 std::vector<std::array<float, 3>> ProjectedReachabilityAnalysis::get_offsets(float distanceToObstacle) 
 {
     return {
-        {-distanceToObstacle, -distanceToObstacle, 0.0},
-        {distanceToObstacle, -distanceToObstacle, 0.0},
-        {distanceToObstacle, distanceToObstacle, 0.0},
-        {-distanceToObstacle, distanceToObstacle, 0.0}, 
-        {-distanceToObstacle, 0.0, 0.0},
-        {distanceToObstacle, 0.0, 0.0},
-        {0.0, distanceToObstacle, 0.0},
-        {0.0, -distanceToObstacle, 0.0},
+        {-distanceToObstacle, -distanceToObstacle, 0.0}, {distanceToObstacle, -distanceToObstacle, 0.0},
+        {distanceToObstacle, distanceToObstacle, 0.0}, {-distanceToObstacle, distanceToObstacle, 0.0}, 
+        {-distanceToObstacle, 0.0, 0.0}, {distanceToObstacle, 0.0, 0.0},
+        {0.0, distanceToObstacle, 0.0}, {0.0, -distanceToObstacle, 0.0},
     };
 }
 
@@ -138,37 +125,28 @@ int ProjectedReachabilityAnalysis::count_decimals(float number)
 std::pair<std::pair<float, float>, bool> ProjectedReachabilityAnalysis::bfs_to_calculate_possible_pick_points(
     geometry_msgs::msg::Pose origin, 
     const double& radius, 
-    const std::shared_ptr<const std::unordered_set<std::pair<float, float>, navigation::PairHash>>& obstaclesVertices)
+    const std::shared_ptr<const std::unordered_set<std::pair<float, float>, navigation::PairHash>>& current_map_snapshot,
+    const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node)
 {
-
-    if (!obstaclesVertices)
-    {
-        RCLCPP_ERROR(this->get_logger(), "O ponteiro do grafo de obstáculos é NULO!");
-        return {{origin.position.x, origin.position.y}, false};
-    }
+    if (!current_map_snapshot) return {{0,0}, false};
     
-    std::pair<float,float> nearest_rounded = std::make_pair(
+    std::pair<float,float> nearest_rounded = {
         round_to_multiple(origin.position.x, distanceToObstacle_, decimals), 
         round_to_multiple(origin.position.y, distanceToObstacle_, decimals)
-    );
+    };
     
-
-    if (obstaclesVertices->find(nearest_rounded) == obstaclesVertices->end()) 
-    {
+    // Check inicial no snapshot
+    if (current_map_snapshot->find(nearest_rounded) == current_map_snapshot->end()) {
         return {nearest_rounded, true};
     }
 
     struct SearchNode {
         float dist;
         std::pair<float, float> pos;
-        
-        bool operator>(const SearchNode& other) const {
-            return dist > other.dist;
-        }
+        bool operator>(const SearchNode& other) const { return dist > other.dist; }
     };
 
     std::priority_queue<SearchNode, std::vector<SearchNode>, std::greater<SearchNode>> pq;
-
     pq.push({0.0f, nearest_rounded});
 
     std::unordered_set<std::pair<float, float>, navigation::PairHash> visited;
@@ -176,28 +154,44 @@ std::pair<std::pair<float, float>, bool> ProjectedReachabilityAnalysis::bfs_to_c
 
     auto offsets = get_offsets(distanceToObstacle_);
     int steps = 0;
-    int max_steps = 500; 
-
+    int max_steps = 2000; // Aumentei um pouco para cobrir raio 0.9m com res 0.05
+    
     std::pair<float, float> origin_pair = {origin.position.x, origin.position.y};
 
     while(!pq.empty())
     {
-        if(steps++ > max_steps) break;
+        steps++;
+        if(steps > max_steps) break;
+
+        // --- CHECK DE PREEMPÇÃO EM TEMPO REAL ---
+        // A cada 10 passos, verifica se o nó tem um mapa novo
+        if (steps % 10 == 0) 
+        {
+            // Pega o ponteiro ATUAL do nó (nanossegundos)
+            auto live_map_ptr = graph_provider_node->get_current_map();
+            
+            // Se o endereço mudou, significa que load/inflate rodou de novo
+            if (live_map_ptr != current_map_snapshot) 
+            {
+                RCLCPP_WARN(this->get_logger(), "BFS PREEMPTADO: Mapa atualizado durante execução.");
+                return {origin_pair, false};
+            }
+        }
+        // ----------------------------------------
 
         auto current_node = pq.top();
         pq.pop();
         
-        std::pair<float, float> current_pos = current_node.pos;
-
-            if (obstaclesVertices->find(current_pos) == obstaclesVertices->end())
+        // Verifica colisão no SNAPSHOT (Seguro)
+        if (current_map_snapshot->find(current_node.pos) == current_map_snapshot->end())
         {
-            return {current_pos, true};
+            return {current_node.pos, true};
         }
 
         for(int i = 0; i < 8; i++)
         {
-            float nx = round_to_multiple(current_pos.first + offsets[i][0], distanceToObstacle_, decimals);
-            float ny = round_to_multiple(current_pos.second + offsets[i][1], distanceToObstacle_, decimals);
+            float nx = round_to_multiple(current_node.pos.first + offsets[i][0], distanceToObstacle_, decimals);
+            float ny = round_to_multiple(current_node.pos.second + offsets[i][1], distanceToObstacle_, decimals);
             std::pair<float, float> neighbor = {nx, ny};
 
             if(visited.find(neighbor) != visited.end()) continue;

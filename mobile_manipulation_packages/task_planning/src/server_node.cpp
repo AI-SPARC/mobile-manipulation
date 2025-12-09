@@ -636,37 +636,54 @@ private:
         // DOC-START: BT_ComputePath
         // --- Action: ComputePath (Assíncrona) ---
         // Envia requisição para o planejador de caminho global (A* / D*).
-        // Protegido por Mutex para evitar condições de corrida com callbacks.
         BT::NodeBuilder builder_compute = [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
             {
-                // Bloco de controle de estado com Mutex
+                // 1. Controle de Estado (Mantive sua lógica)
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
-
-                    // Lógica de reset e verificação de conclusão
                     if (self.status() == BT::NodeStatus::IDLE && path_state_ != TaskState::IDLE) path_state_ = TaskState::IDLE;
                     if (path_state_ == TaskState::SUCCESS) { path_state_ = TaskState::IDLE; return BT::NodeStatus::SUCCESS; }
                     if (path_state_ == TaskState::FAILURE) { path_state_ = TaskState::IDLE; return BT::NodeStatus::FAILURE; }
                     if (path_state_ == TaskState::RUNNING) return BT::NodeStatus::RUNNING;
                 }
 
+                // 2. Obter Target da Blackboard
                 auto target = self.getInput<geometry_msgs::msg::Pose>("target");
-
                 if (!target) 
                 {
+                    RCLCPP_ERROR(this->get_logger(), "Target não encontrado na Blackboard!");
                     return BT::NodeStatus::FAILURE;
                 }
+
+                rclcpp::Time start_time = this->now();
                 
-                auto obstacle_graph_pointer = this->obstacle_graph_node_->get_current_map();
+          
+                std::pair<bool, double> reachability_result = this->reachability_node_->calculate_max_2d_radius(
+                    target.value(), 
+                    0.11, 
+                    0.9, 
+                    this->obstacle_graph_node_ 
+                );
 
-                double radius = this->reachability_node_->calculate_max_2d_radius(target.value(), 0.11, 0.9, obstacle_graph_pointer);
+                rclcpp::Time end_time = this->now();
+                rclcpp::Duration duration = end_time - start_time;
+                RCLCPP_INFO(this->get_logger(), "Reachability Check: %.9f s", duration.seconds());
 
-                // Envia goal sem bloquear o mutex principal
+                if (!reachability_result.first) 
+                {
+                    RCLCPP_WARN(this->get_logger(), "ComputePath falhou: Alvo inalcançável ou mapa mudou durante cálculo.");
+                    return BT::NodeStatus::FAILURE;
+                }
+
+                double calculated_radius = reachability_result.second;
+                // Você pode usar o 'calculated_radius' aqui se precisar passar para o planejador,
+                // ou apenas saber que é seguro prosseguir.
+
+                // 4. Envia o objetivo para o Action Server de navegação
                 this->send_path_goal(target.value());
 
-                // Atualiza estado para RUNNING
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
                     path_state_ = TaskState::RUNNING;

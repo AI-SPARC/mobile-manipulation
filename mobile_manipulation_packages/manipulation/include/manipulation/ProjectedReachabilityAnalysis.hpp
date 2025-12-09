@@ -6,13 +6,15 @@
 #include <deque>
 #include <mutex>
 #include <cmath>
-#include <unordered_set> // Necessário
-#include <utility>       // Necessário para std::pair
+#include <unordered_set>
+#include <utility>
 #include "rclcpp/rclcpp.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "geometry_msgs/msg/pose.hpp"
-#include "navigation/SharedObstacleGraph.hpp"
+
+// Header do pacote navigation para acessar SharedObstacleGraph e PairHash
+#include "navigation/SharedObstacleGraph.hpp" 
 
 namespace manipulation {
 
@@ -20,24 +22,26 @@ class ProjectedReachabilityAnalysis : public rclcpp::Node
 {
 public:
     explicit ProjectedReachabilityAnalysis(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
-    
     ~ProjectedReachabilityAnalysis() override = default;
 
-    // Atualizei a assinatura para incluir obstaclesVertices
-    double calculate_max_2d_radius(const geometry_msgs::msg::Pose& pose, 
+    // Retorna {sucesso, raio}. Recebe o NÓ (Provider) e não o mapa direto.
+    std::pair<bool, double> calculate_max_2d_radius(
+        const geometry_msgs::msg::Pose& pose, 
         const double& ROBOT_BASE_Z, 
         const double& MAX_REACH_3D,
-        const std::shared_ptr<const std::unordered_set<std::pair<float, float>, navigation::PairHash>>& obstaclesVertices);
+        const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node
+    );
 
 private:
-
     float distanceToObstacle_ = 0.05;
     int decimals = 0;
 
+    // BFS recebe o snapshot (para calcular) E o nó (para verificar validade)
     std::pair<std::pair<float, float>, bool> bfs_to_calculate_possible_pick_points(
         geometry_msgs::msg::Pose origin, 
-        const double& radius, 
-        const std::shared_ptr<const std::unordered_set<std::pair<float, float>, navigation::PairHash>>& obstaclesVertices
+        const double& radius,
+        const std::shared_ptr<const std::unordered_set<std::pair<float, float>, navigation::PairHash>>& current_map_snapshot,
+        const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node
     );
 
     std::vector<std::array<float, 3>> get_offsets(float distanceToObstacle);
@@ -49,4 +53,4 @@ private:
 
 } // namespace manipulation
 
-#endif // MANIPULATION__PROJECTED_REACHABILITY_ANALYSIS_HPP_
+#endif

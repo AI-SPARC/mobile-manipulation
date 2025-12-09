@@ -394,11 +394,6 @@ def generate_launch_description():
         
         if planner_choice == 'a_star':
             final_launch_list.append(a_star)
-        elif planner_choice == 'd_star':
-            final_launch_list.append(d_star)
-        else:
-            final_launch_list.append(d_star)
-
         final_launch_list.append(obstacle_graph_with_occupancy_grid)
 
     if 'PickObject' in bt_actions or 'PlaceObject' in bt_actions or 'DetectObject' in bt_actions:
