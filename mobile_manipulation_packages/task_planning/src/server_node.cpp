@@ -370,43 +370,51 @@ private:
         factory.registerNodeType<ParallelAny>("ParallelAny");
         // DOC-END: BT_ParallelAny
 
-        // DOC-START: BT_IsRobotNear
-        // --- Condition: IsRobotNear ---
+        // DOC-START: BT_IsReachable
+        // --- Condition: IsReachable ---
         // Verifica se a distância euclidiana entre o robô e o alvo está dentro de um limite.
-        factory.registerSimpleCondition("IsRobotNear", [&](BT::TreeNode &self)
+        factory.registerSimpleCondition("IsReachable", [&](BT::TreeNode &self)
         {
             auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target");
+            auto robot_base_z_opt = self.getInput<double>("robot_base_z");
+            auto max_reach_3d_opt = self.getInput<double>("max_reach_3d");
+
             if (!target_pose_opt) return BT::NodeStatus::FAILURE;
+            if (!robot_base_z_opt) return BT::NodeStatus::FAILURE;
+            if (!max_reach_3d_opt) return BT::NodeStatus::FAILURE;
+
+
             geometry_msgs::msg::Pose target = target_pose_opt.value();
+            double robot_base_z = robot_base_z_opt.value();
+            double max_reach_3d = max_reach_3d_opt.value();
 
-            // Parâmetros de tolerância (default: 0.35m a 0.5m)
-            auto max_dist_opt = self.getInput<double>("max_dist");
-            auto min_dist_opt = self.getInput<double>("min_dist");
-            double max_dist = max_dist_opt ? max_dist_opt.value() : 0.5;
-            double min_dist = min_dist_opt ? min_dist_opt.value() : 0.35;
+         
+        
+            std::pair<bool, double> reachability_result = this->reachability_node_->calculate_max_2d_radius(
+                target, 
+                robot_base_z, 
+                max_reach_3d, 
+                this->obstacle_graph_node_ 
+            );
 
-            // Cálculo da distância euclidiana (2D)
-            double dx = this->pose_x - target.position.x;
-            double dy = this->pose_y - target.position.y;
-            double current_dist = std::sqrt(dx*dx + dy*dy);
-
-            if (current_dist >= min_dist && current_dist <= max_dist)
+            if (!reachability_result.first) 
             {
-                return BT::NodeStatus::SUCCESS;
+                RCLCPP_WARN(this->get_logger(), "ComputePath falhou: Alvo inalcançável ou mapa mudou durante cálculo.");
+                return BT::NodeStatus::FAILURE;
             }
 
-            // Se estiver longe, retorna FAILURE e sugere ajuste
-            RCLCPP_WARN(this->get_logger(), "BT: Robô longe (%.2fm).", current_dist);
-            self.setOutput("adjustment_pose", target);
+            double calculated_radius = reachability_result.second;
+            
+
             return BT::NodeStatus::FAILURE;
         },
         {
             BT::InputPort<geometry_msgs::msg::Pose>("target"),
-            BT::InputPort<double>("max_dist"),
-            BT::InputPort<double>("min_dist"),
+            BT::InputPort<double>("robot_base_z"),
+            BT::InputPort<double>("max_reach_3d"),
             BT::OutputPort<geometry_msgs::msg::Pose>("adjustment_pose")
         });
-        // DOC-END: BT_IsRobotNear
+        // DOC-END: BT_IsReachable
 
         // DOC-START: BT_DetectObject
         // --- Action: DetectObject ---
@@ -657,31 +665,7 @@ private:
                     return BT::NodeStatus::FAILURE;
                 }
 
-                rclcpp::Time start_time = this->now();
                 
-          
-                std::pair<bool, double> reachability_result = this->reachability_node_->calculate_max_2d_radius(
-                    target.value(), 
-                    0.11, 
-                    0.9, 
-                    this->obstacle_graph_node_ 
-                );
-
-                rclcpp::Time end_time = this->now();
-                rclcpp::Duration duration = end_time - start_time;
-                RCLCPP_INFO(this->get_logger(), "Reachability Check: %.9f s", duration.seconds());
-
-                if (!reachability_result.first) 
-                {
-                    RCLCPP_WARN(this->get_logger(), "ComputePath falhou: Alvo inalcançável ou mapa mudou durante cálculo.");
-                    return BT::NodeStatus::FAILURE;
-                }
-
-                double calculated_radius = reachability_result.second;
-                // Você pode usar o 'calculated_radius' aqui se precisar passar para o planejador,
-                // ou apenas saber que é seguro prosseguir.
-
-                // 4. Envia o objetivo para o Action Server de navegação
                 this->send_path_goal(target.value());
 
                 {

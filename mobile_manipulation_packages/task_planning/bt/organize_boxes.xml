@@ -7,9 +7,9 @@
         <DetectObject output_pose="{target_pose}" output_id="{target_id}" object_size="{object_size}"/>
         
         <Fallback name="EnsureProximity">
-             <IsRobotNear target="{target_pose}" 
-                      max_dist="0.6" 
-                      min_dist="0.01" 
+             <IsReachable target="{target_pose}" 
+                      robot_base_z="0.11" 
+                      max_reach_3d="0.9"  
                       adjustment_pose="{nav_target}"/>
              
              <ParallelAny> 
@@ -29,9 +29,9 @@
         <Sequence name="ApproachAndPlace">
             
             <Fallback name="EnsureProximityStorage">
-                <IsRobotNear target="{storage_pose}" 
-                          max_dist="0.6" 
-                          min_dist="0.01" 
+                <IsReachable target="{storage_pose}" 
+                          robot_base_z="0.11" 
+                          max_reach_3d="0.9"  
                           adjustment_pose="{storage_pose}"/>
                 
                 <ParallelAny name="Nav_Replan_Monitor">
