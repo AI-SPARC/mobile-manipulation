@@ -18,7 +18,7 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
-
+find_package(moveit_ros_planning REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
 find_package(mobile_manipulation_interfaces REQUIRED)
 find_package(trajectory_msgs REQUIRED)
@@ -48,6 +48,7 @@ add_library(manipulation_lib SHARED
   src/manipulation_impl.cpp
   src/is_gripper_holding_impl.cpp
   src/projected_reachability_analysis.cpp 
+  src/ik_validator.cpp
 )
 
 target_include_directories(manipulation_lib
@@ -95,7 +96,7 @@ add_executable(manipulation src/manipulation_main.cpp)
 add_executable(is_gripper_holding src/is_gripper_holding_main.cpp)
 
 # 3. Linkando executáveis com a biblioteca
-# REMOVIDO: projected_reachability_analysis (pois não é um executável)
+
 foreach(target add_collision manipulation is_gripper_holding)
   target_include_directories(${target}
     PUBLIC
@@ -110,8 +111,7 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
-# 4. Instalando os alvos
-# REMOVIDO: projected_reachability_analysis
+
 install(
   TARGETS
     manipulation_lib

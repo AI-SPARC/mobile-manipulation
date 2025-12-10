@@ -165,6 +165,7 @@ install(TARGETS
 install(TARGETS
   a_star
   controller
+  obstacle_graph_with_occupancy_grid
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

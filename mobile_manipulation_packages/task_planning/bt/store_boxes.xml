@@ -7,7 +7,8 @@
         <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
         
         <Fallback name="EnsureProximity">
-             <IsReachable target="{target_pose}" 
+             <IsReachable target="{target_pose}"
+                      object_id="{target_id}" 
                       robot_base_z="0.11" 
                       max_reach_3d="0.9" 
                       adjustment_pose="{nav_target}"/>
@@ -29,14 +30,15 @@
         <Sequence name="ApproachAndPlace">
             
             <Fallback name="EnsureProximityStorage">
-                <IsReachable target="{storage_pose}" 
+                <IsReachable target="{final_placement_pose}"
+                          object_id="{storage_id}" 
                           robot_base_z="0.11" 
                           max_reach_3d="0.9" 
-                          adjustment_pose="{storage_pose}"/>
+                          adjustment_pose="{nav_target}"/>
                 
                 <ParallelAny name="Nav_Replan_Monitor">
                     <NavigateTo/> 
-                    <ComputePath planner="a_star" target="{storage_pose}"/>
+                    <ComputePath planner="a_star" target="{nav_target}"/>
                     
                     <KeepRunningUntilFailure>
                         <IsGripperHoldingObject/>
@@ -45,11 +47,6 @@
             </Fallback>
 
             <Sequence name="OrganizeSequence">
-                <ComputePoseToStore storage_pose="{storage_pose}" 
-                                    storage_size="{storage_size}"
-                                    z_lift_offset="0.05"            
-                                    output_final_pose="{final_placement_pose}"/> 
-
                 <PlaceObject pose="{final_placement_pose}"/>
             </Sequence>
             <ClearTarget/> 
@@ -74,12 +71,17 @@
                         indexes="{indexes}" 
                         storage_pose="{storage_pose}" 
                         storage_size="{storage_size}"
-                        storage_id="{storage_id}"/> 
+                        storage_id="{storage_id}"/>
+        
+        <ComputePoseToStore storage_pose="{storage_pose}" 
+                            storage_size="{storage_size}"
+                            z_lift_offset="0.05"            
+                            output_final_pose="{final_placement_pose}"/> 
 
         <SubTree ID="PlaceRoutine" 
-                 storage_pose="{storage_pose}" 
                  storage_id="{storage_id}"
-                 storage_size="{storage_size}"/> </Sequence>
+                 final_placement_pose="{final_placement_pose}"/> 
+      </Sequence>
     </RetryUntilSuccessful>
   </BehaviorTree>
 

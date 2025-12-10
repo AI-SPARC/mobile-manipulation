@@ -226,6 +226,8 @@ public:
             loadLocationsFromYaml(yaml_file);
         }
 
+        
+
         // Publishers
 
     }
@@ -381,35 +383,110 @@ private:
         factory.registerSimpleCondition("IsReachable", [&](BT::TreeNode &self)
         {
             auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target");
+            auto authorized_id_opt = self.getInput<std::string>("object_id");
             auto robot_base_z_opt = self.getInput<double>("robot_base_z");
             auto max_reach_3d_opt = self.getInput<double>("max_reach_3d");
 
             if (!target_pose_opt) return BT::NodeStatus::FAILURE;
+            if (!authorized_id_opt) return BT::NodeStatus::FAILURE;
             if (!robot_base_z_opt) return BT::NodeStatus::FAILURE;
             if (!max_reach_3d_opt) return BT::NodeStatus::FAILURE;
 
 
             geometry_msgs::msg::Pose target = target_pose_opt.value();
+            std::string authorized_id = authorized_id_opt.value();
             double robot_base_z = robot_base_z_opt.value();
             double max_reach_3d = max_reach_3d_opt.value();
-
+            
          
             std::vector<std::pair<float, float>> viable_points;
-        
+          
             this->reachability_node_->get_reachable_points(target, robot_base_z, max_reach_3d, viable_points);
-
 
             if (viable_points.empty()) 
             {
-                RCLCPP_WARN(this->get_logger(), "ComputePath falhou: Alvo inalcançável ou mapa mudou durante cálculo.");
+                RCLCPP_WARN(this->get_logger(), "O alvo é inalcançável.");
                 return BT::NodeStatus::FAILURE;
             }
-            
 
-            return BT::NodeStatus::FAILURE;
+            std::optional<std::tuple<float, float, float>> best_base_opt;
+            
+            std::vector<std::tuple<float, float, float>> viable_points_3d;
+            viable_points_3d.reserve(viable_points.size());
+
+            for (const auto& p : viable_points) 
+            {
+                viable_points_3d.emplace_back(p.first, p.second, static_cast<float>(robot_base_z));
+            }
+
+            
+            best_base_opt = this->ik_validator_node_->find_best_base_position(
+                viable_points_3d, 
+                target, 
+                true, 
+                this->obstacle_graph_node_,
+                authorized_id
+            );
+
+
+
+            if (best_base_opt.has_value())
+            {
+                auto p = best_base_opt.value(); 
+                std::get<2>(p) = 0.0;
+
+                float px = std::get<0>(p); 
+                float py = std::get<1>(p); 
+                float pz = std::get<2>(p); 
+
+                float dx_curr = px - this->pose_x;
+                float dy_curr = py - this->pose_y;
+                float dist_sq = (dx_curr * dx_curr) + (dy_curr * dy_curr);
+
+                const float threshold_sq = 0.075f; 
+
+                if (dist_sq <= threshold_sq)
+                {
+                    RCLCPP_INFO(this->get_logger(), "O robô JÁ ESTÁ na posição ideal (Dist: %.4f).", std::sqrt(dist_sq));
+                    return BT::NodeStatus::SUCCESS;
+                }
+                else
+                {
+                    
+                    geometry_msgs::msg::Pose final_pose;
+                    final_pose.position.x = px;
+                    final_pose.position.y = py;
+                    final_pose.position.z = 0.0; 
+
+
+                    double target_dx = target.position.x - px;
+                    double target_dy = target.position.y - py;
+
+                    double yaw = std::atan2(target_dy, target_dx);
+
+                    tf2::Quaternion q;
+                    q.setRPY(0.0, 0.0, yaw); 
+
+                    final_pose.orientation.x = q.x();
+                    final_pose.orientation.y = q.y();
+                    final_pose.orientation.z = q.z();
+                    final_pose.orientation.w = q.w();
+                    
+                    self.setOutput("adjustment_pose", final_pose);
+
+                    RCLCPP_INFO(this->get_logger(), "Ajuste necessário. Indo para (%.2f, %.2f) virado para o objeto.", px, py);
+                    return BT::NodeStatus::FAILURE;
+                }
+            }
+            else
+            {
+                RCLCPP_WARN(this->get_logger(), "IsReachable: Sucesso, o robô consegue pegar o objeto.");
+                return BT::NodeStatus::SUCCESS;
+            }
         },
         {
             BT::InputPort<geometry_msgs::msg::Pose>("target"),
+            BT::InputPort<std::string>("object_id"),
             BT::InputPort<double>("robot_base_z"),
             BT::InputPort<double>("max_reach_3d"),
             BT::OutputPort<geometry_msgs::msg::Pose>("adjustment_pose")
@@ -659,6 +736,9 @@ private:
 
                 // 2. Obter Target da Blackboard
                 auto target = self.getInput<geometry_msgs::msg::Pose>("target");
+
+                std::cout << target.value().position.x << " " << target.value().position.y << " " << std::endl;
+
                 if (!target) 
                 {
                     RCLCPP_ERROR(this->get_logger(), "Target não encontrado na Blackboard!");

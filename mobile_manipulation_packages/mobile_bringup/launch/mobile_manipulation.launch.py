@@ -219,7 +219,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {'path_resolution': 0.05},
-            {'security_distance': 0.4},
+            {'security_distance': 0.0},
             {'iterations_before_verification': 20},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -290,6 +290,9 @@ def generate_launch_description():
             
             {'label_to_storage_yaml_file': label_to_storage_yaml},
             {'storage_poses_yaml_file': storage_poses_yaml},
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic, # SRDF (Crucial!)
+            moveit_config.robot_description_kinematics
         ],
         # AQUI USAMOS A LISTA GERADA DINAMICAMENTE
         arguments=server_arguments, 
@@ -353,27 +356,27 @@ def generate_launch_description():
         output='screen',
     )
     
-    # rviz_config_file = os.path.join(
-    #     get_package_share_directory("isaacsim_moveit"),
-    #     "rviz",
-    #     "moveit.rviz",
-    # )
+    rviz_config_file = os.path.join(
+        get_package_share_directory("isaacsim_moveit"),
+        "rviz",
+        "moveit.rviz",
+    )
 
-    # rviz_node = Node(
-    #     package="rviz2",
-    #     executable="rviz2",
-    #     name="rviz2",
-    #     output="log",
-    #     arguments=["-d", rviz_config_file],
-    #     parameters=[
-    #         moveit_config.robot_description,
-    #         moveit_config.robot_description_semantic,
-    #         moveit_config.robot_description_kinematics,
-    #         moveit_config.planning_pipelines,
-    #         moveit_config.joint_limits,
+    rviz_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="log",
+        arguments=["-d", rviz_config_file],
+        parameters=[
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            moveit_config.joint_limits,
    
-    #     ],
-    # )
+        ],
+    )
     
     final_launch_list = [
         ros2_control_hardware_type,
