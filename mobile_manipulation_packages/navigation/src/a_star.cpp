@@ -305,7 +305,7 @@ private:
         return {origin, false}; 
     }
    
-    std::pair<std::vector<std::pair<float, float>>, bool> run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
+    std::vector<std::pair<float, float>> run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
     {
         auto start_search = find_nearest_free_point(start_tuple, 500);
         if (!start_search.second) 
@@ -329,7 +329,7 @@ private:
         {
             std::vector<std::pair<float, float>> path;
             path.push_back(valid_goal);
-            return {path, true};
+            return path;
         }
 
         std::vector<std::pair<float, float>> initial_path = straight_line(valid_start, valid_goal);
@@ -337,7 +337,7 @@ private:
         {
             initial_path.push_back(valid_start);
             initial_path.push_back(valid_goal);
-            return std::make_pair(initial_path, true);
+            return initial_path;
         }
 
         
@@ -447,11 +447,14 @@ private:
                 std::vector<std::pair<float, float>> path;
                 auto current_vertex = current;
                 path.insert(path.begin(), current_vertex);
-                while (nodes.find(current_vertex) != nodes.end() && current_vertex != valid_start) {
+
+                while (nodes.find(current_vertex) != nodes.end() && current_vertex != valid_start) 
+                {
                     current_vertex = nodes[current_vertex].parent;
                     path.insert(path.begin(), current_vertex);
                 }
-                return std::make_pair(path, false);
+
+                return path;
             }
             
             if(iterations == iterations_before_verification) 
@@ -464,21 +467,28 @@ private:
                     std::vector<std::pair<float, float>> path;
                     std::vector<std::pair<float, float>> path_to_current;
                     auto current_vertex = current;
-                    while (nodes.find(current_vertex) != nodes.end() && current_vertex != valid_start) {
+
+                    while (nodes.find(current_vertex) != nodes.end() && current_vertex != valid_start) 
+                    {
                         path_to_current.insert(path_to_current.begin(), current_vertex);
                         current_vertex = nodes[current_vertex].parent;
                     }
+
                     path_to_current.insert(path_to_current.begin(), valid_start); 
                     path.insert(path.end(), path_to_current.begin(), path_to_current.end());
                     path.insert(path.end(), path1.begin(), path1.end());
-                    return std::make_pair(path, true);
+
+                    return path;
                 }
             }
            
             for (const auto& neighbor : adjacency_list_tuples[current])
             {
-                if (nodes.find(neighbor) != nodes.end() && nodes[neighbor].closed) continue;
-                
+                if (nodes.find(neighbor) != nodes.end() && nodes[neighbor].closed) 
+                {
+                    continue;
+                }
+
                 float tentative_g_score = nodes[current].g_score + heuristic(current, neighbor);
                 
                 if (nodes.find(neighbor) == nodes.end() || tentative_g_score < nodes[neighbor].g_score) 
@@ -489,6 +499,7 @@ private:
                     open_set.push({nodes[neighbor].f_score, neighbor});
                 }
             }
+
             iterations++;
             adjacency_list_tuples.erase(current);
         }
@@ -542,20 +553,36 @@ private:
     }
 
 
-    void store_edges_in_path(
-        std::vector<std::pair<float, float>>& path, 
-        bool straight_line, 
-        std::pair<float, float> original_goal,
-        std::vector<VertexDijkstra>& out_path_points,              
-        std::vector<std::pair<float, float>>& out_path_no_filter   
-    ) 
+    nav_msgs::msg::Path store_edges_in_path(std::vector<std::pair<float, float>>& path) 
     {
-     
-        out_path_points.clear();
-        out_path_no_filter.clear();
-        
-        if (path.empty()) return;
+        nav_msgs::msg::Path nav_path;
+        nav_path.header.frame_id = "world"; 
+        nav_path.header.stamp = this->now();
 
+        if (path.empty()) {
+            return nav_path;
+        }
+
+        Eigen::Quaternionf final_orientation(1.0f, 0.0f, 0.0f, 0.0f); 
+
+        if (path.size() >= 2) 
+        {
+            const auto& p_last = path.back();
+            const auto& p_before_last = path[path.size() - 2];
+
+            float dx = p_last.first - p_before_last.first;
+            float dy = p_last.second - p_before_last.second;
+            
+            Eigen::Vector3f direction(dx, dy, 0.0f);
+            
+            if (direction.norm() > 1e-4) {
+                direction.normalize();
+                Eigen::Vector3f reference(1.0f, 0.0f, 0.0f);
+                final_orientation = Eigen::Quaternionf::FromTwoVectors(reference, direction);
+            }
+        }
+
+        auto start_time1_ = std::chrono::high_resolution_clock::now();
         int k = 0;
 
         while (k < static_cast<int>(path.size()) - 1) 
@@ -563,16 +590,19 @@ private:
             bool shortcutFound = false;
             for (int i = static_cast<int>(path.size()) - 1; i > k; i--) 
             {
-                std::pair<float, float> A { std::get<0>(path[k]), std::get<1>(path[k]) };
-                std::pair<float, float> B { std::get<0>(path[i]), std::get<1>(path[i]) };
+                float ax = path[k].first;
+                float ay = path[k].second;
+                float bx = path[i].first;
+                float by = path[i].second;
         
-                float ax = std::get<0>(A), ay = std::get<1>(A);
-                float bx = std::get<0>(B), by = std::get<1>(B);
+                float dx = bx - ax;
+                float dy = by - ay;
+                float distance = std::hypot(dx, dy); 
         
-                float dx = bx - ax, dy = by - ay;
-                float distance = std::sqrt(dx * dx + dy * dy);
-        
-                if (distance == 0) continue;
+                if (distance < 1e-4) 
+                { 
+                    continue;
+                }
         
                 float ux = dx / distance;
                 float uy = dy / distance;
@@ -581,153 +611,95 @@ private:
                 float t = 0.0f;
                 bool obstacleFound = false;
         
-                while (t < distance && obstacleFound == false) 
+                while (t < distance && !obstacleFound) 
                 {
-                    std::pair<float, float> point;
-                    std::get<0>(point) = ax + t * ux;
-                    std::get<1>(point) = ay + t * uy;
+                    float check_x = ax + t * ux;
+                    float check_y = ay + t * uy;
         
-                    double new_x = round_to_multiple(std::get<0>(point), distanceToObstacle_, decimals);
-                    double new_y = round_to_multiple(std::get<1>(point), distanceToObstacle_, decimals);
+                    double new_x = round_to_multiple(check_x, distanceToObstacle_, decimals);
+                    double new_y = round_to_multiple(check_y, distanceToObstacle_, decimals);
         
-                    std::pair<float, float> neighbor_tuple = std::make_pair(static_cast<float>(new_x), static_cast<float>(new_y));
+                    std::pair<float, float> neighbor_tuple = {static_cast<float>(new_x), static_cast<float>(new_y)};
                     
                     if (obstaclesVertices.find(neighbor_tuple) != obstaclesVertices.end()) 
                     {
                         obstacleFound = true;
-                        break;
                     }
                     t += step;
                 }
         
-                if (obstacleFound == false) 
+                if (!obstacleFound) 
                 {
                     path.erase(path.begin() + k + 1, path.begin() + i);
                     shortcutFound = true;
-                    break;  
+                    break; 
                 }
             }
         
-            if (shortcutFound == true) k++;
-            else break;
-        }
-
-
-        for (size_t i = 0; i < path.size() - 1; i++) 
-        {
-            float start_x = path[i].first;
-            float start_y = path[i].second;
-            float end_x   = path[i+1].first;
-            float end_y   = path[i+1].second;
-
-            float dx = end_x - start_x;
-            float dy = end_y - start_y;
-            float dist = std::sqrt(dx * dx + dy * dy);
-            
-            float ux = (dist > 0) ? (dx / dist) : 0;
-            float uy = (dist > 0) ? (dy / dist) : 0;
-
-            float traveled = 0.0f;
-            
-            while (traveled < dist)
+            if (shortcutFound)
             {
-                float px = start_x + ux * traveled;
-                float py = start_y + uy * traveled;
-
-                std::pair<float, float> point = std::make_pair(round_to_multiple(px, distanceToObstacle_, decimals), round_to_multiple(py, distanceToObstacle_, decimals));
-                
-                if(obstaclesVertices.find(point) == obstaclesVertices.end())
-                {
-                   
-                    out_path_no_filter.push_back(point);
-                }
-                
-                traveled += distanceToObstacle_;
+                k++;
+            } 
+            else
+            {
+                // k++;
+                break; 
             }
         }
 
-        if (!path.empty()) 
-        {
-      
-            out_path_no_filter.push_back(path.back());
-        }
+        auto end_time1 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> duration1 = end_time1 - start_time1_; 
+        RCLCPP_INFO(this->get_logger(), "A* filter execution time: %.6f s", duration1.count());
 
         for (size_t i = 0; i < path.size(); i++) 
         {
-            VertexDijkstra vertex;
-            vertex.x = std::get<0>(path[i]);
-            vertex.y = std::get<1>(path[i]);
-
-            float dx = 0.0f;
-            float dy = 0.0f;
-            bool calculation_possible = false;
+            geometry_msgs::msg::PoseStamped pose_stamped;
+            pose_stamped.header = nav_path.header;
+            
+            pose_stamped.pose.position.x = path[i].first;
+            pose_stamped.pose.position.y = path[i].second;
+            pose_stamped.pose.position.z = 0.0;
 
             if (i < path.size() - 1) 
             {
-                const std::pair<float, float>& current_vertex = path[i];
-                const std::pair<float, float>& next_vertex = path[i + 1];
+                const auto& current_vertex = path[i];
+                const auto& next_vertex = path[i + 1];
 
-                dx = std::get<0>(next_vertex) - std::get<0>(current_vertex);
-                dy = std::get<1>(next_vertex) - std::get<1>(current_vertex);
-                calculation_possible = true;
+                float dx = next_vertex.first - current_vertex.first;
+                float dy = next_vertex.second - current_vertex.second;
+                
+                Eigen::Vector3f direction(dx, dy, 0.0f);
+                
+                if (direction.norm() > 1e-4) 
+                {
+                    direction.normalize(); 
+                    Eigen::Vector3f reference(1.0f, 0.0f, 0.0f); 
+
+                    Eigen::Quaternionf quaternion = Eigen::Quaternionf::FromTwoVectors(reference, direction);
+                    pose_stamped.pose.orientation.x = quaternion.x();
+                    pose_stamped.pose.orientation.y = quaternion.y();
+                    pose_stamped.pose.orientation.z = quaternion.z();
+                    pose_stamped.pose.orientation.w = quaternion.w();
+                } 
+                else 
+                {
+                    pose_stamped.pose.orientation.w = 1.0;
+                }
             } 
             else 
             {
-                
-                const std::pair<float, float>& current_vertex = path[i];
-                
-                dx = original_goal.first - std::get<0>(current_vertex);
-                dy = original_goal.second - std::get<1>(current_vertex);
-                
-              
-                if (std::sqrt(dx*dx + dy*dy) > 1e-3) {
-                    calculation_possible = true;
-                }
+                pose_stamped.pose.orientation.x = final_orientation.x();
+                pose_stamped.pose.orientation.y = final_orientation.y();
+                pose_stamped.pose.orientation.z = final_orientation.z();
+                pose_stamped.pose.orientation.w = final_orientation.w();
             }
 
-            if (calculation_possible) 
-            {
-                float distance = std::sqrt(dx * dx + dy * dy);
-
-                if (distance > 0.0f) {
-                    dx /= distance;
-                    dy /= distance;
-                }
-
-                Eigen::Vector3f direction(dx, dy, 0.0f);
-                Eigen::Vector3f reference(1.0f, 0.0f, 0.0f); 
-
-                Eigen::Quaternionf quaternion = Eigen::Quaternionf::FromTwoVectors(reference, direction);
-
-                vertex.orientation_x = quaternion.x();
-                vertex.orientation_y = quaternion.y();
-                vertex.orientation_z = quaternion.z();
-                vertex.orientation_w = quaternion.w();
-            }
-            else 
-            {
-                if (!out_path_points.empty()) { // Usa o vetor local
-                    vertex.orientation_x = out_path_points.back().orientation_x;
-                    vertex.orientation_y = out_path_points.back().orientation_y;
-                    vertex.orientation_z = out_path_points.back().orientation_z;
-                    vertex.orientation_w = out_path_points.back().orientation_w;
-                } else {
-                    vertex.orientation_x = 0.0;
-                    vertex.orientation_y = 0.0;
-                    vertex.orientation_z = 0.0;
-                    vertex.orientation_w = 1.0;
-                }
-            }
-            // Usa o vetor local
-            out_path_points.push_back(vertex);
+            nav_path.poses.push_back(pose_stamped);
         }
 
-        // Passa o vetor local para a função de publisher
-        publisher_dijkstra_path(out_path_points);
+        return nav_path;
     }
 
-
-    // [CORREÇÃO] Recebe o vetor como argumento
     void publisher_dijkstra_path(const std::vector<VertexDijkstra>& points_to_publish)
     {
         nav_msgs::msg::Path path_msg;
@@ -818,212 +790,58 @@ private:
     
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
     {
-        RCLCPP_INFO(this->get_logger(), "THREAD START: Iniciando Action de Path Planning...");
+        RCLCPP_INFO(this->get_logger(), "THREAD START: Calculando caminho (One-shot)...");
         
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::Path::Result>();
-        auto feedback = std::make_shared<mobile_manipulation_interfaces::action::Path::Feedback>();
-
-        std::vector<VertexDijkstra> local_path_points;
-        std::vector<std::pair<float, float>> local_path_without_filter;
 
         std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
         std::pair<float, float> start_pose;
-
 
         {
             std::lock_guard<std::mutex> lock(odom_mutex);
             start_pose = {pose_x_, pose_y_};
         }
-        
-        
-        rclcpp::Rate loop_rate(20.0);
-        bool path_needs_calculation = false;
 
-        try {
-            
+        try 
+        {
+            std::vector<std::pair<float, float>> a_star_result;
+
             {
-                RCLCPP_INFO(this->get_logger(), "Calculando caminho inicial...");
-                feedback->recalculating_path = false;
+                std::lock_guard<std::mutex> lock(map_mutex_);
                 
-                std::pair<std::vector<std::pair<float, float>>, bool> a_star_result;
-                std::vector<std::pair<float, float>> shortestPath;
-                bool straight_line = false;
-
-                {
-                    std::lock_guard<std::mutex> lock(map_mutex_);
-                    
-                    a_star_result = run_a_star(start_pose, current_goal_pose);
-                    shortestPath = a_star_result.first;
-                    straight_line = a_star_result.second;
-
-                    if (!shortestPath.empty())
-                    {
-                        store_edges_in_path(shortestPath, straight_line, current_goal_pose, local_path_points, local_path_without_filter);
-                    }
-                }
-
-                if (shortestPath.empty())
-                {
-                    RCLCPP_WARN(this->get_logger(), "A* Falhou no caminho inicial! Enviando feedback de erro.");
-                    path_needs_calculation = true;
-                    feedback->recalculating_path = true;
-                    
-                    feedback->path.poses.clear();
-                    feedback->path.header.stamp = this->now();
-                    feedback->path.header.frame_id = "world";
-                    
-                    goal_handle->publish_feedback(feedback);
-                }
-                else
-                {
-                    feedback->path.poses.clear();
-                    feedback->path.header.stamp = this->now();
-                    feedback->path.header.frame_id = "world";
-
-                    // [CORREÇÃO] Itera sobre o vetor local
-                    for (const auto& vertex : local_path_points) 
-                    {
-                        geometry_msgs::msg::PoseStamped pose_stamped;
-                        pose_stamped.header.stamp = this->now();
-                        pose_stamped.header.frame_id = "world";
-                        pose_stamped.pose.position.x = vertex.x;
-                        pose_stamped.pose.position.y = vertex.y;
-                        pose_stamped.pose.position.z = 0.0;
-                        pose_stamped.pose.orientation.x = vertex.orientation_x;
-                        pose_stamped.pose.orientation.y = vertex.orientation_y;
-                        pose_stamped.pose.orientation.z = vertex.orientation_z;
-                        pose_stamped.pose.orientation.w = vertex.orientation_w;
-                        
-                        feedback->path.poses.push_back(pose_stamped);
-                    }
-                    
-                    RCLCPP_INFO(this->get_logger(), "Sucesso inicial! Publicando feedback com %zu poses.", feedback->path.poses.size());
-                    
-                    goal_handle->publish_feedback(feedback); 
-                    
-                    // [CORREÇÃO] Passa o vetor local
-                    publisher_dijkstra_path(local_path_points); 
-                }
-            }
-
-            RCLCPP_INFO(this->get_logger(), "Entrando no loop de monitoramento...");
-            
-            while (rclcpp::ok()) 
-            {
                
-                {
-                    std::lock_guard<std::mutex> lock(goal_mutex_);
-                    if (active_goal_handle_ != goal_handle) 
-                    {
-                        RCLCPP_WARN(this->get_logger(), "Preempção detectada. Encerrando thread.");
-                        return; 
-                    }
-                }
-
-                
                 if (goal_handle->is_canceling()) 
                 {
-                    RCLCPP_INFO(this->get_logger(), "Cancelamento solicitado.");
                     result->success = false;
                     goal_handle->canceled(result);
+
                     return;
                 }
 
+                a_star_result = run_a_star(start_pose, current_goal_pose);   
+            }
+
+            nav_msgs::msg::Path path = store_edges_in_path(a_star_result);
+
+            if (path.poses.empty())
+            {
+                RCLCPP_WARN(this->get_logger(), "Falha: Não foi possível encontrar um caminho (Path vazio).");
                 
-                if (!path_needs_calculation)
-                {
-                    std::lock_guard<std::mutex> lock(map_mutex_); 
-
-                    for(size_t i = 0; i < local_path_without_filter.size(); ++i)
-                    {
-                        if(obstaclesVertices.find(local_path_without_filter[i]) != obstaclesVertices.end())
-                        {
-                            RCLCPP_WARN(this->get_logger(), "Obstáculo detectado! Parando robô e recalculando.");
-                            
-                            path_needs_calculation = true;
-                            
-                            break; 
-                        }
-                    }
-                }
-
+                result->success = false;
+                result->path.header.stamp = this->now();
+                result->path.header.frame_id = "world";
                 
-                if (path_needs_calculation)
-                {
-                    feedback->recalculating_path = true;
+                goal_handle->abort(result);
+            }
+            else
+            {
+                result->path = path;
+                result->success = true;
 
-                    feedback->path.poses.clear();
-                    
-                    feedback->path.header.stamp = this->now();
-                    feedback->path.header.frame_id = "world";
-
-                    goal_handle->publish_feedback(feedback);
-                    
-                    rclcpp::sleep_for(std::chrono::milliseconds(100));
-
-                    std::pair<float, float> current_robot_pose;
-
-                    {
-                        std::lock_guard<std::mutex> lock(odom_mutex);
-                        current_robot_pose = {pose_x_, pose_y_};
-                    }
-                    
-                    std::pair<std::vector<std::pair<float, float>>, bool> a_star_result;
-                    std::vector<std::pair<float, float>> shortestPath;
-                    bool straight_line;
-
-                    
-                    {
-                        std::lock_guard<std::mutex> lock(map_mutex_);
-                        
-                        a_star_result = run_a_star(current_robot_pose, current_goal_pose);
-                        shortestPath = a_star_result.first;
-                        straight_line = a_star_result.second;
-
-                        if (!shortestPath.empty())
-                        {
-                            store_edges_in_path(shortestPath, straight_line, current_goal_pose, local_path_points, local_path_without_filter);
-                        }
-                    } 
-
-                    if (!shortestPath.empty())
-                    {
-                        feedback->path.poses.clear();
-                        feedback->path.header.stamp = this->now();
-                        feedback->path.header.frame_id = "world";
-
-                        for (const auto& vertex : local_path_points) 
-                        {
-                            geometry_msgs::msg::PoseStamped pose_stamped;
-                            pose_stamped.header.stamp = this->now();
-                            pose_stamped.header.frame_id = "world";
-                            pose_stamped.pose.position.x = vertex.x;
-                            pose_stamped.pose.position.y = vertex.y;
-                            pose_stamped.pose.position.z = 0.0;
-                            pose_stamped.pose.orientation.x = vertex.orientation_x;
-                            pose_stamped.pose.orientation.y = vertex.orientation_y;
-                            pose_stamped.pose.orientation.z = vertex.orientation_z;
-                            pose_stamped.pose.orientation.w = vertex.orientation_w;
-                            feedback->path.poses.push_back(pose_stamped);
-                        }
-
-                        path_needs_calculation = false; 
-                        feedback->recalculating_path = false;
-
-                      
-                        goal_handle->publish_feedback(feedback);
-                        RCLCPP_INFO(this->get_logger(), "Caminho recalculado e enviado via Feedback.");
-                        
-                        publisher_dijkstra_path(local_path_points); 
-                    }
-                    else 
-                    {
-                         RCLCPP_WARN(this->get_logger(), "A* falhou no recálculo.");
-                    }
-                }
-
-                loop_rate.sleep();
+                RCLCPP_INFO(this->get_logger(), "Sucesso: Caminho encontrado e retornado (%zu poses).", path.poses.size());
+                
+                goal_handle->succeed(result);
             }
         }
         catch (const std::exception &e) {
@@ -1037,7 +855,7 @@ private:
             goal_handle->abort(result);
         }
     }
-    
+        
 
 };
 

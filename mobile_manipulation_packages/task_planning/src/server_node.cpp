@@ -737,7 +737,6 @@ private:
                 // 2. Obter Target da Blackboard
                 auto target = self.getInput<geometry_msgs::msg::Pose>("target");
 
-                std::cout << target.value().position.x << " " << target.value().position.y << " " << std::endl;
 
                 if (!target) 
                 {
@@ -997,44 +996,6 @@ private:
     }
     // DOC-END: detection_callback
 
-    // DOC-START: send_path_goal
-    // Envia goal para o servidor de Path Planning (ex: A*).
-    void send_path_goal(const geometry_msgs::msg::Pose & target_pose)
-    {
-        // Limpa handle anterior
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            this->active_path_goal_handle_.reset();
-        }
-
-        // Verifica servidor disponível
-        if (!this->path_client->wait_for_action_server(std::chrono::seconds(2)))
-        {
-            RCLCPP_ERROR(this->get_logger(), "Action server 'path' not available");
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            path_state_ = TaskState::FAILURE;
-            return;
-        }
-
-        // Limpa caminho anterior
-        {
-            std::lock_guard<std::mutex> lock(path_mutex_);
-            last_calculated_path_.poses.clear();
-        }
-
-        auto goal_msg = mobile_manipulation_interfaces::action::Path::Goal();
-        goal_msg.pose = target_pose;
-
-        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal (Pose) para path planning*...");
-
-        auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SendGoalOptions();
-        send_goal_options.goal_response_callback = std::bind(&ServerNode::path_goal_response_callback, this, std::placeholders::_1);
-        send_goal_options.feedback_callback = std::bind(&ServerNode::path_feedback_callback, this, std::placeholders::_1, std::placeholders::_2);
-        send_goal_options.result_callback = std::bind(&ServerNode::path_result_callback, this, std::placeholders::_1);
-
-        this->path_client->async_send_goal(goal_msg, send_goal_options);
-    }
-    // DOC-END: send_path_goal
 
     // DOC-START: cancel_controller_goal
     // Cancela o movimento do robô se necessário (ex: recálculo de rota).
@@ -1047,84 +1008,117 @@ private:
         }
     }
     // DOC-END: cancel_controller_goal
-
-    // DOC-START: path_feedback_callback
-    // Recebe o caminho calculado (Path) ou sinal de recalculo.
-    void path_feedback_callback(
-        rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::SharedPtr,
-        const std::shared_ptr<const mobile_manipulation_interfaces::action::Path::Feedback> feedback)
+    
+    // DOC-START: send_path_goal
+    void send_path_goal(const geometry_msgs::msg::Pose & target_pose)
     {
-        // Se recebeu um caminho válido, salva.
-        if (!feedback->path.poses.empty())
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            this->active_path_goal_handle_.reset();
+        }
+
+        if (!this->path_client->wait_for_action_server(std::chrono::seconds(2)))
+        {
+            RCLCPP_ERROR(this->get_logger(), "Action server 'path' indisponível! Abortando envio.");
+            return;
+        }
+
         {
             std::lock_guard<std::mutex> lock(path_mutex_);
-            std::cout << "caminho recebido." << std::endl;
-            this->last_calculated_path_ = feedback->path;
+            last_calculated_path_.poses.clear();
+
         }
 
-        // Se o planner avisa que está recalculando, para o robô.
-        if (feedback->recalculating_path)
-        {
-            {
-                std::lock_guard<std::mutex> lock(path_mutex_);
-                last_calculated_path_.poses.clear();
-            }
-            RCLCPP_INFO(this->get_logger(), "Planner recalculando: cancelando controller atual...");
-            cancel_controller_goal();
-        }
+        auto goal_msg = mobile_manipulation_interfaces::action::Path::Goal();
+        goal_msg.pose = target_pose;
+
+        RCLCPP_INFO(this->get_logger(), "Enviando solicitação de Path Planning...");
+
+        // 5. Configura as opções (Apenas Response e Result, SEM Feedback)
+        auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::Path>::SendGoalOptions();
+        
+        send_goal_options.goal_response_callback = 
+            std::bind(&ServerNode::path_goal_response_callback, this, std::placeholders::_1);
+        
+        send_goal_options.result_callback = 
+            std::bind(&ServerNode::path_result_callback, this, std::placeholders::_1);
+
+        // Envia de forma assíncrona
+        this->path_client->async_send_goal(goal_msg, send_goal_options);
     }
-    // DOC-END: path_feedback_callback
+    // DOC-END: send_path_goal
+
 
     // DOC-START: path_goal_response_callback
-    // Callback de aceitação do Goal de Path.
+    // Apenas confirma se o servidor aceitou processar o pedido
     void path_goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>> & goal_handle)
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
 
         if (!goal_handle) 
         {
-            RCLCPP_ERROR(this->get_logger(), "Goal PATH rejeitado");
-            path_state_ = TaskState::FAILURE;
+            RCLCPP_ERROR(this->get_logger(), "O servidor REJEITOU o pedido de Path Planning.");
         } 
         else 
         {
             this->active_path_goal_handle_ = goal_handle;
-            RCLCPP_INFO(this->get_logger(), "Goal PATH aceito.");
+            RCLCPP_INFO(this->get_logger(), "Pedido aceito pelo servidor. Calculando...");
         }
     }
     // DOC-END: path_goal_response_callback
 
+
     // DOC-START: path_result_callback
-    // Callback de resultado do Path Planning (Sucesso/Falha).
+    // Aqui é onde o Caminho (Path) chega quando o cálculo termina
     void path_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::WrappedResult & result)
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
-
-        if (!this->active_path_goal_handle_ || result.goal_id != this->active_path_goal_handle_->get_goal_id()) {
-            return;
+        // Verifica se o handle ainda é válido
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (!this->active_path_goal_handle_ || result.goal_id != this->active_path_goal_handle_->get_goal_id()) {
+                // Resultado de um goal antigo ou cancelado, ignorar.
+                return;
+            }
+            this->active_path_goal_handle_.reset(); // Goal concluído
         }
 
-        if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
+        // Verifica o código do resultado (ROS 2 Action logic)
+        switch (result.code) 
         {
-            if (result.result->success)
-            {
-                path_state_ = TaskState::SUCCESS;
-                RCLCPP_INFO(this->get_logger(), "PATH RESULT SUCCESS");
-            }
-            else
-            {
-                path_state_ = TaskState::FAILURE;
-                RCLCPP_WARN(this->get_logger(), "PATH FALHOU (Success = false)");
-            }
+            case rclcpp_action::ResultCode::SUCCEEDED:
+                break;
+            case rclcpp_action::ResultCode::ABORTED:
+                RCLCPP_ERROR(this->get_logger(), "O cálculo do caminho foi ABORTADO pelo servidor.");
+                return;
+            case rclcpp_action::ResultCode::CANCELED:
+                RCLCPP_WARN(this->get_logger(), "O cálculo do caminho foi CANCELADO.");
+                return;
+            default:
+                RCLCPP_ERROR(this->get_logger(), "Erro desconhecido no retorno da Action.");
+                return;
+        }
+
+        // Verifica o bool 'success' definido na sua mensagem .action
+        if (result.result->success)
+        {
+            std::lock_guard<std::mutex> lock(path_mutex_);
+            
+            // SALVA O CAMINHO RECEBIDO
+            this->last_calculated_path_ = result.result->path;
+            
+            // ATUALIZA O CAMINHO DO MONITOR (Se estiver usando a lógica de reactive monitor)
+            // convert_nav_msg_to_vector(result.result->path, current_active_path_);
+
+            RCLCPP_INFO(this->get_logger(), "Caminho recebido com sucesso! Total de poses: %zu", 
+                this->last_calculated_path_.poses.size());
         }
         else
         {
-            path_state_ = TaskState::FAILURE;
+            RCLCPP_WARN(this->get_logger(), "O servidor respondeu, mas não encontrou um caminho válido (success=false).");
         }
-
-        this->active_path_goal_handle_.reset();
     }
     // DOC-END: path_result_callback
+
 
     // DOC-START: send_controller_goal
     // Envia o caminho (Path) para o controlador local seguir.
