@@ -112,11 +112,9 @@ public:
      : Node("a_star")
     {
         this->declare_parameter<double>("path_resolution", 0.05);
-        this->declare_parameter<double>("security_distance", 0.50);
         this->declare_parameter<int>("iterations_before_verification", 10);
 
         distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
-        security_distance = static_cast<float>(this->get_parameter("security_distance").get_parameter_value().get<double>());
         iterations_before_verification = this->get_parameter("iterations_before_verification").get_parameter_value().get<int>();
 
         RCLCPP_INFO(this->get_logger(), "path_resolution is set to: %f", distanceToObstacle_);
@@ -201,7 +199,7 @@ private:
     std::string yaml_file;
 
     float pose_x_ = 0.0, pose_y_ = 0.0, pose_z_ = 0.0;
-    float distanceToObstacle_, security_distance = 0.5;
+    float distanceToObstacle_;
     int decimals = 0, iterations_before_verification = 10;
 
     inline float round_to_multiple(float value, float multiple, int decimals) 
@@ -543,44 +541,22 @@ private:
         else return path;
     }
 
-    // [CORREÇÃO] Recebe os vetores por referência (argumentos locais)
+
     void store_edges_in_path(
         std::vector<std::pair<float, float>>& path, 
         bool straight_line, 
         std::pair<float, float> original_goal,
-        std::vector<VertexDijkstra>& out_path_points,              // Argumento adicionado
-        std::vector<std::pair<float, float>>& out_path_no_filter   // Argumento adicionado
+        std::vector<VertexDijkstra>& out_path_points,              
+        std::vector<std::pair<float, float>>& out_path_no_filter   
     ) 
     {
-        // Limpa os vetores locais
+     
         out_path_points.clear();
         out_path_no_filter.clear();
         
         if (path.empty()) return;
 
         int k = 0;
-
-        if (straight_line == false && path.size() >= 2)
-        {
-            std::pair<float, float> goal = original_goal;
-
-            for (int i = static_cast<int>(path.size()) - 1; i >= 0; --i)
-            {
-                float dx = goal.first  - path[i].first;
-                float dy = goal.second - path[i].second;
-                float dist = std::hypot(dx, dy); 
-
-                if (dist >= security_distance)
-                {
-
-                    if (i + 1 < static_cast<int>(path.size())) {
-                        path.erase(path.begin() + i + 1, path.end());
-                    }
-                    break;
-                }
-                
-            }
-        }
 
         while (k < static_cast<int>(path.size()) - 1) 
         {
@@ -636,33 +612,6 @@ private:
             else break;
         }
 
-        if (straight_line == true && !path.empty()) 
-        {
-            auto& last = path.back();
-            float dx = original_goal.first - last.first; 
-            float dy = original_goal.second - last.second;
-            float dist_to_orig = std::hypot(dx, dy);
-
-            if (dist_to_orig < security_distance)  
-            {
-
-                if (path.size() >= 2) {
-                    auto& start = path[0];
-                    float total_dx = original_goal.first - start.first;
-                    float total_dy = original_goal.second - start.second;
-                    float total_dist = std::hypot(total_dx, total_dy);
-                    
-                    if (total_dist > security_distance) {
-                        float ux = total_dx / total_dist;
-                        float uy = total_dy / total_dist;
-                        
-                        
-                        last.first = original_goal.first - (ux * security_distance);
-                        last.second = original_goal.second - (uy * security_distance);
-                    }
-                }
-            }
-        }
 
         for (size_t i = 0; i < path.size() - 1; i++) 
         {
@@ -689,7 +638,7 @@ private:
                 
                 if(obstaclesVertices.find(point) == obstaclesVertices.end())
                 {
-                    // Usa o vetor local
+                   
                     out_path_no_filter.push_back(point);
                 }
                 
@@ -699,7 +648,7 @@ private:
 
         if (!path.empty()) 
         {
-            // Usa o vetor local
+      
             out_path_no_filter.push_back(path.back());
         }
 

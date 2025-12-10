@@ -17,7 +17,11 @@ ProjectedReachabilityAnalysis::ProjectedReachabilityAnalysis(const rclcpp::NodeO
     RCLCPP_INFO(this->get_logger(), "Projected Reachability Analysis (All Points) inicializado.");
 
     this->declare_parameter<double>("path_resolution", 0.05);
+    this->declare_parameter<double>("security_distance", 0.2);
+
     distanceToObstacle_ =  static_cast<float>(this->get_parameter("path_resolution").get_parameter_value().get<double>());
+    security_distance = static_cast<float>(this->get_parameter("security_distance").get_parameter_value().get<double>());
+    
     decimals = count_decimals(distanceToObstacle_);
 
     marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("reachability_visualization", 10);
@@ -46,6 +50,7 @@ std::vector<std::pair<float, float>> ProjectedReachabilityAnalysis::get_reachabl
 
     double radius_2d = std::sqrt(std::pow(MAX_REACH_3D, 2) - std::pow(vertical_dist, 2));
     const float radius_sq = static_cast<float>(radius_2d * radius_2d);
+    const float security_distance_squared = security_distance * security_distance;
 
     RCLCPP_INFO(this->get_logger(), "Calculando pontos acessíveis. Raio 2D: %.4f m", radius_2d);
 
@@ -65,7 +70,7 @@ std::vector<std::pair<float, float>> ProjectedReachabilityAnalysis::get_reachabl
 
     auto offsets = get_offsets(distanceToObstacle_);
     int steps = 0;
-    int max_steps = 30000; // Aumentado para garantir cobertura total
+    int max_steps = 30000; 
 
     while(!q.empty())
     {
@@ -81,26 +86,36 @@ std::vector<std::pair<float, float>> ProjectedReachabilityAnalysis::get_reachabl
             float ny = round_to_multiple(current_pos.second + offsets[i][1], distanceToObstacle_, decimals);
             std::pair<float, float> neighbor = {nx, ny};
 
-            if(visited.find(neighbor) != visited.end()) continue;
+            if(visited.find(neighbor) != visited.end())
+            {
+                continue;
+            }
 
             float dx = neighbor.first - origin_pair.first;
             float dy = neighbor.second - origin_pair.second;
             float dist_sq = dx*dx + dy*dy;
 
-            if (dist_sq > radius_sq) continue;
+            if (dist_sq > radius_sq)
+            {
+                continue;
+            } 
 
             visited.insert(neighbor);
             q.push(neighbor);
             
-            // Adiciona ao resultado
-            valid_candidates.push_back(neighbor);
+  
+            if(dist_sq >= security_distance_squared)
+            {
+                valid_candidates.push_back(neighbor);
+            }
+            
         }
     }
 
-    // 3. Publicação (Opcional, mas útil para debug)
+   
     publish_reachability_cloud(valid_candidates);
 
-    // 4. Marcador do Raio
+   
     visualization_msgs::msg::MarkerArray marker_array;
     rclcpp::Time current_time = this->now();
 
@@ -114,7 +129,7 @@ std::vector<std::pair<float, float>> ProjectedReachabilityAnalysis::get_reachabl
     marker_array.markers.push_back(disk);
     marker_publisher_->publish(marker_array);
 
-    // RETORNA TODOS OS PONTOS
+   
     return valid_candidates;
 }
 

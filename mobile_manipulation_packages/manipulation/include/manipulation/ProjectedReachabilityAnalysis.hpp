@@ -27,7 +27,7 @@ public:
     );
 
 private:
-    float distanceToObstacle_ = 0.05;
+    float distanceToObstacle_ = 0.05, security_distance = 0.2;
     int decimals = 0;
 
     void publish_reachability_cloud(const std::vector<std::pair<float, float>>& points);
