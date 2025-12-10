@@ -24,7 +24,7 @@ IKValidator::IKValidator(const rclcpp::NodeOptions & options)
         std::bind(&IKValidator::delayed_init, this)
     );
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
     rclcpp::QoS qos(10);
     qos.reliable();

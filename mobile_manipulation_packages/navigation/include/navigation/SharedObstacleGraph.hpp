@@ -39,6 +39,11 @@ public:
     // O ponteiro é const para garantir que quem lê não estrague os dados.
     std::shared_ptr<const std::unordered_set<std::pair<float, float>, PairHash>> get_current_map() const;
 
+    double resolution_ = 0.05;
+    int decimals = 0;
+    inline float round_to_multiple(float value, float multiple, int decimals);
+    int count_decimals(float number);
+
 private:
 
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_sub_;
@@ -49,12 +54,9 @@ private:
     // Mutex para proteger APENAS a troca do ponteiro
     mutable std::mutex map_mutex_;
 
-    double resolution_ = 0.05;
-    int decimals = 0;
-
+    
     void point_cloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-    inline float round_to_multiple(float value, float multiple, int decimals);
-    int count_decimals(float number);
+    
 };
 
 } // namespace navigation

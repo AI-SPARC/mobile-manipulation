@@ -49,7 +49,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "Total de pontos ocupados carregados: %zu", occupied_points_.size());
 
         publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/obstacle_graph", 10);
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(200),
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(500),
                                          std::bind(&OccupancyGridLoader::publishPointCloud, this));
 
         

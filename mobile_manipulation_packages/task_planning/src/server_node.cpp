@@ -338,6 +338,7 @@ private:
 
     // Armazena o último caminho recebido do planejador
     nav_msgs::msg::Path last_calculated_path_;
+    nav_msgs::msg::Path last_no_filter_calculated_path_;
 
     // --- Odometria e Flags ---
     // Posição atual do robô no mapa
@@ -462,6 +463,7 @@ private:
                     double target_dx = target.position.x - px;
                     double target_dy = target.position.y - py;
 
+
                     double yaw = std::atan2(target_dy, target_dx);
 
                     tf2::Quaternion q;
@@ -472,6 +474,7 @@ private:
                     final_pose.orientation.z = q.z();
                     final_pose.orientation.w = q.w();
                     
+                   
                     self.setOutput("adjustment_pose", final_pose);
 
                     RCLCPP_INFO(this->get_logger(), "Ajuste necessário. Indo para (%.2f, %.2f) virado para o objeto.", px, py);
@@ -548,6 +551,40 @@ private:
             return BT::NodeStatus::SUCCESS;
         });
          // DOC-END: BT_ClearTarget
+
+        // DOC-START BT_IsPathClear
+        factory.registerSimpleCondition("IsPathClear", [&](BT::TreeNode& self)
+        {
+            
+            auto map_snapshot = this->obstacle_graph_node_->get_current_map();
+            std::pair<float, float> pair_point;
+
+
+            
+            {
+                std::lock_guard<std::mutex> lock(path_mutex_);
+                
+
+                for(const auto& point : last_no_filter_calculated_path_.poses)
+                {
+                    pair_point.first = static_cast<float>(point.pose.position.x);
+                    pair_point.second = static_cast<float>(point.pose.position.y);
+
+                    if (map_snapshot->find(pair_point) != map_snapshot->end())
+                    {
+                        cancel_controller_goal();
+                        std::cout << "tem merda aqui hein" << std::endl;
+                        return BT::NodeStatus::FAILURE; 
+                    } 
+                }
+            }
+            
+
+          
+            return BT::NodeStatus::SUCCESS;
+            
+        });
+        // DOC-END: BT_IsPathClear
 
          // DOC-START: BT_GetStorageInfo
         // --- Action: GetStorageInfo ---
@@ -725,75 +762,97 @@ private:
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
             {
-                // 1. Controle de Estado (Mantive sua lógica)
+                // 1. Monitoramento de Estado
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
-                    if (self.status() == BT::NodeStatus::IDLE && path_state_ != TaskState::IDLE) path_state_ = TaskState::IDLE;
-                    if (path_state_ == TaskState::SUCCESS) { path_state_ = TaskState::IDLE; return BT::NodeStatus::SUCCESS; }
-                    if (path_state_ == TaskState::FAILURE) { path_state_ = TaskState::IDLE; return BT::NodeStatus::FAILURE; }
+                    
+                    // Se já terminou (Sucesso ou Falha), retorna e reseta para IDLE
+                    if (path_state_ == TaskState::SUCCESS) { 
+                        path_state_ = TaskState::IDLE; 
+                        return BT::NodeStatus::SUCCESS; 
+                    }
+                    if (path_state_ == TaskState::FAILURE) { 
+                        path_state_ = TaskState::IDLE; 
+                        return BT::NodeStatus::FAILURE; 
+                    }
+                    // Se já está rodando, continua retornando RUNNING
                     if (path_state_ == TaskState::RUNNING) return BT::NodeStatus::RUNNING;
                 }
 
-                // 2. Obter Target da Blackboard
+                // 2. Se está IDLE, inicia o processo
                 auto target = self.getInput<geometry_msgs::msg::Pose>("target");
-
-
-                if (!target) 
-                {
-                    RCLCPP_ERROR(this->get_logger(), "Target não encontrado na Blackboard!");
+                if (!target) {
+                    RCLCPP_ERROR(this->get_logger(), "ComputePath: Target inválido na Blackboard.");
                     return BT::NodeStatus::FAILURE;
                 }
 
-                
+                // Tenta enviar o goal
                 this->send_path_goal(target.value());
 
+                // Define estado como RUNNING
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
                     path_state_ = TaskState::RUNNING;
                 }
+                
                 return BT::NodeStatus::RUNNING;
             });
         };
         factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "ComputePath", { BT::InputPort<geometry_msgs::msg::Pose>("target"), BT::InputPort<std::string>("planner") }, {} }, builder_compute);
         // DOC-END: BT_ComputePath
 
-        // DOC-START: BT_NavigateTo
-        // --- Action: NavigateTo (Assíncrona) ---
+        // DOC-START: BT_FollowPath
+        // --- Action: FollowPath (Assíncrona) ---
         // Envia o caminho calculado para o controlador local (Pure Pursuit).
-        factory.registerBuilder<AsyncAction>("NavigateTo", [&](const std::string& name, const BT::NodeConfig& config)
+        factory.registerBuilder<AsyncAction>("FollowPath", [&](const std::string& name, const BT::NodeConfig& config)
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
             {
-                if (self.status() == BT::NodeStatus::IDLE && nav_state_ != TaskState::IDLE) nav_state_ = TaskState::IDLE;
-
-                if (nav_state_ == TaskState::IDLE )
+                // 1. Monitoramento de Estado (Lógica Padrão)
                 {
-                    nav_msgs::msg::Path path_to_send;
-                    bool has_path = false;
-                    {
-                        std::lock_guard<std::mutex> lock(path_mutex_); // Protege leitura do path
-                        if (!last_calculated_path_.poses.empty())
-                        {
-                            path_to_send = last_calculated_path_;
-                            has_path = true;
-                        }
-                    }
-
-                    if (has_path)
-                    {
-                        if(this->send_controller_goal(path_to_send))
-                        {
-                            nav_state_ = TaskState::RUNNING;
-                            return BT::NodeStatus::RUNNING;
-                        }
-                        else return BT::NodeStatus::FAILURE;
-                    }
-                    else return BT::NodeStatus::RUNNING; // Aguarda path chegar
+                    std::lock_guard<std::mutex> lock(state_mutex_);
+                    if (nav_state_ == TaskState::SUCCESS) { nav_state_ = TaskState::IDLE; return BT::NodeStatus::SUCCESS; }
+                    if (nav_state_ == TaskState::FAILURE) { nav_state_ = TaskState::IDLE; return BT::NodeStatus::FAILURE; }
+                    if (nav_state_ == TaskState::RUNNING) return BT::NodeStatus::RUNNING;
                 }
-                return check_task_status(nav_state_);
+
+                // 2. Se está IDLE, tenta iniciar a navegação
+                nav_msgs::msg::Path path_to_send;
+                bool has_path = false;
+                
+                {
+                    std::lock_guard<std::mutex> lock(path_mutex_);
+                    if (!last_calculated_path_.poses.empty())
+                    {
+                        path_to_send = last_calculated_path_;
+                        has_path = true;
+                    }
+                }
+
+                if (has_path)
+                {
+                    if(this->send_controller_goal(path_to_send))
+                    {
+                        std::lock_guard<std::mutex> lock(state_mutex_);
+                        nav_state_ = TaskState::RUNNING;
+                        return BT::NodeStatus::RUNNING;
+                    }
+                    else 
+                    {
+                        RCLCPP_ERROR(this->get_logger(), "FollowPath: Falha ao enviar goal para o controlador.");
+                        return BT::NodeStatus::FAILURE;
+                    }
+                }
+                else 
+                {
+                    // [CORREÇÃO] Se chegou aqui, o nó anterior (ComputePath) disse que teve sucesso,
+                    // mas a variável de caminho está vazia. Isso é um erro lógico ou o caminho expirou.
+                    RCLCPP_ERROR(this->get_logger(), "FollowPath: Nenhum caminho disponível para seguir!");
+                    return BT::NodeStatus::FAILURE; 
+                }
             });
         });
-        // DOC-END: BT_NavigateTo
+        // DOC-END: BT_FollowPath
 
         // DOC-START: BT_PickObject
         // --- Action: PickObject ---
@@ -1026,7 +1085,7 @@ private:
         {
             std::lock_guard<std::mutex> lock(path_mutex_);
             last_calculated_path_.poses.clear();
-
+            last_no_filter_calculated_path_.poses.clear();
         }
 
         auto goal_msg = mobile_manipulation_interfaces::action::Path::Goal();
@@ -1072,49 +1131,35 @@ private:
     // Aqui é onde o Caminho (Path) chega quando o cálculo termina
     void path_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::WrappedResult & result)
     {
-        // Verifica se o handle ainda é válido
+        std::lock_guard<std::mutex> lock(state_mutex_); // Protege a transição de estado
+
+        // Verifica se o handle é do goal ativo
+        if (!this->active_path_goal_handle_ || result.goal_id != this->active_path_goal_handle_->get_goal_id()) {
+            return;
+        }
+        this->active_path_goal_handle_.reset();
+
+        if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
         {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            if (!this->active_path_goal_handle_ || result.goal_id != this->active_path_goal_handle_->get_goal_id()) {
-                // Resultado de um goal antigo ou cancelado, ignorar.
-                return;
+            // Verifica se o caminho retornado é válido e não vazio
+            if (result.result->success && !result.result->path.poses.empty())
+            {
+                std::lock_guard<std::mutex> p_lock(path_mutex_);
+                this->last_calculated_path_ = result.result->path;
+                this->last_no_filter_calculated_path_ = result.result->path_without_filter;
+                RCLCPP_INFO(this->get_logger(), "Path Calculation: SUCCESS (%zu poses)", this->last_calculated_path_.poses.size());
+                path_state_ = TaskState::SUCCESS; // Sinaliza sucesso para a BT
             }
-            this->active_path_goal_handle_.reset(); // Goal concluído
-        }
-
-        // Verifica o código do resultado (ROS 2 Action logic)
-        switch (result.code) 
-        {
-            case rclcpp_action::ResultCode::SUCCEEDED:
-                break;
-            case rclcpp_action::ResultCode::ABORTED:
-                RCLCPP_ERROR(this->get_logger(), "O cálculo do caminho foi ABORTADO pelo servidor.");
-                return;
-            case rclcpp_action::ResultCode::CANCELED:
-                RCLCPP_WARN(this->get_logger(), "O cálculo do caminho foi CANCELADO.");
-                return;
-            default:
-                RCLCPP_ERROR(this->get_logger(), "Erro desconhecido no retorno da Action.");
-                return;
-        }
-
-        // Verifica o bool 'success' definido na sua mensagem .action
-        if (result.result->success)
-        {
-            std::lock_guard<std::mutex> lock(path_mutex_);
-            
-            // SALVA O CAMINHO RECEBIDO
-            this->last_calculated_path_ = result.result->path;
-            
-            // ATUALIZA O CAMINHO DO MONITOR (Se estiver usando a lógica de reactive monitor)
-            // convert_nav_msg_to_vector(result.result->path, current_active_path_);
-
-            RCLCPP_INFO(this->get_logger(), "Caminho recebido com sucesso! Total de poses: %zu", 
-                this->last_calculated_path_.poses.size());
+            else
+            {
+                RCLCPP_WARN(this->get_logger(), "Path Calculation: Server retornou true, mas o caminho está VAZIO.");
+                path_state_ = TaskState::FAILURE;
+            }
         }
         else
         {
-            RCLCPP_WARN(this->get_logger(), "O servidor respondeu, mas não encontrou um caminho válido (success=false).");
+            RCLCPP_ERROR(this->get_logger(), "Path Calculation: ABORTED/CANCELED");
+            path_state_ = TaskState::FAILURE;
         }
     }
     // DOC-END: path_result_callback
@@ -1163,32 +1208,33 @@ private:
     // Resultado da navegação (Chegou ou Falhou).
     void controller_result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::WrappedResult & result)
     {
+        std::lock_guard<std::mutex> s_lock(state_mutex_);
+
+        // Verifica se o resultado pertence ao goal atual
         if (this->active_controller_goal_handle_ && result.goal_id != this->active_controller_goal_handle_->get_goal_id()) 
         {
-            return;
+            return; // Resultado antigo, ignora
         }
+        this->active_controller_goal_handle_.reset();
 
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
         {
             {
-                std::lock_guard<std::mutex> lock(path_mutex_);
-                last_calculated_path_.poses.clear(); // Limpa caminho executado
+                std::lock_guard<std::mutex> p_lock(path_mutex_);
+                last_calculated_path_.poses.clear(); 
             }
+            RCLCPP_INFO(this->get_logger(), "Controller: Chegou ao destino.");
             nav_state_ = TaskState::SUCCESS;
-            RCLCPP_INFO(this->get_logger(), "Navegação concluída!");
         }
         else if (result.code == rclcpp_action::ResultCode::CANCELED)
         {
-            nav_state_ = TaskState::IDLE;
+            RCLCPP_WARN(this->get_logger(), "Controller: Cancelado.");
+            nav_state_ = TaskState::IDLE; // Reset suave
         }
         else
         {
+            RCLCPP_ERROR(this->get_logger(), "Controller: FALHOU (Aborted).");
             nav_state_ = TaskState::FAILURE;
-        }
-
-        if (this->active_controller_goal_handle_ && result.goal_id == this->active_controller_goal_handle_->get_goal_id()) 
-        {
-            this->active_controller_goal_handle_.reset();
         }
     }
     // DOC-END: controller_result_callback

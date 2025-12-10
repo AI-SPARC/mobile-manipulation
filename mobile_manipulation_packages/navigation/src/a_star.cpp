@@ -553,14 +553,19 @@ private:
     }
 
 
-    nav_msgs::msg::Path store_edges_in_path(std::vector<std::pair<float, float>>& path) 
+    std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> filter_path(std::vector<std::pair<float, float>>& path, std::vector<std::pair<float, float>>& path_without_filter) 
     {
         nav_msgs::msg::Path nav_path;
         nav_path.header.frame_id = "world"; 
         nav_path.header.stamp = this->now();
 
-        if (path.empty()) {
-            return nav_path;
+        nav_msgs::msg::Path nav_path_without_filter;
+        nav_path_without_filter.header.frame_id = "world"; 
+        nav_path_without_filter.header.stamp = this->now();
+
+        if (path.empty() || path_without_filter.empty()) 
+        {
+            return std::make_pair(nav_path, nav_path_without_filter);
         }
 
         Eigen::Quaternionf final_orientation(1.0f, 0.0f, 0.0f, 0.0f); 
@@ -697,31 +702,64 @@ private:
             nav_path.poses.push_back(pose_stamped);
         }
 
-        return nav_path;
+
+        for (size_t i = 0; i < path_without_filter.size(); i++) 
+        {
+            geometry_msgs::msg::PoseStamped pose_stamped;
+            pose_stamped.header = nav_path_without_filter.header;
+            
+            pose_stamped.pose.position.x = path_without_filter[i].first;
+            pose_stamped.pose.position.y = path_without_filter[i].second;
+            pose_stamped.pose.position.z = 0.0;
+
+            if (i < path_without_filter.size() - 1) 
+            {
+                const auto& current_vertex = path_without_filter[i];
+                const auto& next_vertex = path_without_filter[i + 1];
+
+                float dx = next_vertex.first - current_vertex.first;
+                float dy = next_vertex.second - current_vertex.second;
+                
+                Eigen::Vector3f direction(dx, dy, 0.0f);
+                
+                if (direction.norm() > 1e-4) 
+                {
+                    direction.normalize(); 
+                    Eigen::Vector3f reference(1.0f, 0.0f, 0.0f); 
+
+                    Eigen::Quaternionf quaternion = Eigen::Quaternionf::FromTwoVectors(reference, direction);
+                    pose_stamped.pose.orientation.x = quaternion.x();
+                    pose_stamped.pose.orientation.y = quaternion.y();
+                    pose_stamped.pose.orientation.z = quaternion.z();
+                    pose_stamped.pose.orientation.w = quaternion.w();
+                } 
+                else 
+                {
+                    pose_stamped.pose.orientation.w = 1.0;
+                }
+            } 
+            else 
+            {
+                pose_stamped.pose.orientation.x = final_orientation.x();
+                pose_stamped.pose.orientation.y = final_orientation.y();
+                pose_stamped.pose.orientation.z = final_orientation.z();
+                pose_stamped.pose.orientation.w = final_orientation.w();
+            }
+
+            nav_path_without_filter.poses.push_back(pose_stamped);
+        }
+
+        return std::make_pair(nav_path, nav_path_without_filter);
     }
 
-    void publisher_dijkstra_path(const std::vector<VertexDijkstra>& points_to_publish)
+    void publisher_nav_path(const nav_msgs::msg::Path& path)
     {
         nav_msgs::msg::Path path_msg;
         path_msg.header.stamp = this->now();
         path_msg.header.frame_id = "world";
 
-        for (const auto& vertex : points_to_publish)
-        {
-            geometry_msgs::msg::PoseStamped pose_stamped;
-            pose_stamped.header.stamp = this->now();
-            pose_stamped.header.frame_id = "world";
-            
-            pose_stamped.pose.position.x = vertex.x;
-            pose_stamped.pose.position.y = vertex.y;
-            pose_stamped.pose.position.z = 0.0;
-            pose_stamped.pose.orientation.x = vertex.orientation_x;
-            pose_stamped.pose.orientation.y = vertex.orientation_y;
-            pose_stamped.pose.orientation.z = vertex.orientation_z;
-            pose_stamped.pose.orientation.w = vertex.orientation_w;
-            
-            path_msg.poses.push_back(pose_stamped);
-        }
+        path_msg.poses = path.poses;
+        
         publisher_nav_path_->publish(path_msg);
     }
 
@@ -806,6 +844,7 @@ private:
         try 
         {
             std::vector<std::pair<float, float>> a_star_result;
+            std::vector<std::pair<float, float>> a_star_result_without_filter;
 
             {
                 std::lock_guard<std::mutex> lock(map_mutex_);
@@ -819,12 +858,17 @@ private:
                     return;
                 }
 
-                a_star_result = run_a_star(start_pose, current_goal_pose);   
+                a_star_result = run_a_star(start_pose, current_goal_pose);
+                a_star_result_without_filter = a_star_result;   
             }
 
-            nav_msgs::msg::Path path = store_edges_in_path(a_star_result);
+            std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> path = filter_path(a_star_result, a_star_result_without_filter);
 
-            if (path.poses.empty())
+            
+
+            publisher_nav_path(std::get<0>(path));
+
+            if (std::get<0>(path).poses.empty() || std::get<1>(path).poses.empty())
             {
                 RCLCPP_WARN(this->get_logger(), "Falha: Não foi possível encontrar um caminho (Path vazio).");
                 
@@ -836,11 +880,12 @@ private:
             }
             else
             {
-                result->path = path;
+                result->path = std::get<0>(path);
+                result->path_without_filter = std::get<1>(path);
                 result->success = true;
 
-                RCLCPP_INFO(this->get_logger(), "Sucesso: Caminho encontrado e retornado (%zu poses).", path.poses.size());
-                
+                RCLCPP_INFO(this->get_logger(), "Sucesso: Caminho encontrado e retornado (%zu poses), (%zu poses sem filtro).", std::get<0>(path).poses.size(), std::get<1>(path).poses.size());
+                    
                 goal_handle->succeed(result);
             }
         }

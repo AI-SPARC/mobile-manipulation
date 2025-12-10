@@ -13,10 +13,17 @@
                       max_reach_3d="0.9" 
                       adjustment_pose="{nav_target}"/>
              
-             <ParallelAny> 
-                <NavigateTo/> 
-                <ComputePath planner="a_star" target="{nav_target}"/>
-             </ParallelAny>
+             <RetryUntilSuccessful num_attempts="-1">
+                <Sequence name="PlanAndExecute">
+                    <ComputePath planner="a_star" target="{nav_target}"/>
+                    
+                    <ReactiveSequence name="MonitorAndMove">
+                        <IsPathClear/>  
+                        <FollowPath/>   
+                      </ReactiveSequence>
+                </Sequence>
+             </RetryUntilSuccessful>
+
         </Fallback>
           
         <PickObject pose="{target_pose}" id="{target_id}"/>
@@ -36,14 +43,19 @@
                           max_reach_3d="0.9" 
                           adjustment_pose="{nav_target}"/>
                 
-                <ParallelAny name="Nav_Replan_Monitor">
-                    <NavigateTo/> 
-                    <ComputePath planner="a_star" target="{nav_target}"/>
-                    
-                    <KeepRunningUntilFailure>
-                        <IsGripperHoldingObject/>
-                    </KeepRunningUntilFailure>
-                </ParallelAny>
+                <RetryUntilSuccessful num_attempts="-1">
+                    <Sequence name="PlanAndExecuteDelivery">
+                        
+                        <ComputePath planner="a_star" target="{nav_target}"/>
+                        
+                        <ReactiveSequence name="MonitorMoveAndCargo">
+                            <IsGripperHoldingObject/> 
+                            <IsPathClear/> 
+                            <FollowPath/> 
+                          </ReactiveSequence>
+
+                    </Sequence>
+                </RetryUntilSuccessful>
             </Fallback>
 
             <Sequence name="OrganizeSequence">
@@ -54,7 +66,6 @@
 
         <Sequence name="FailureRecovery">
             <DecrementStorageCount storage_id="{storage_id}"/>
-            
             <AlwaysFailure/>
         </Sequence>
 
