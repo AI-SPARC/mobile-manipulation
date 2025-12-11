@@ -32,7 +32,6 @@ ProjectedReachabilityAnalysis::ProjectedReachabilityAnalysis(const rclcpp::NodeO
     reachability_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("reachability_zone", qos);
 }   
 
-// --- IMPLEMENTAÇÃO ATUALIZADA ---
 std::vector<std::pair<float, float>> ProjectedReachabilityAnalysis::get_reachable_points(
     const geometry_msgs::msg::Pose& origin, 
     const double& ROBOT_BASE_Z, 

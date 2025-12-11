@@ -136,7 +136,6 @@ std::optional<std::tuple<float, float, float>> IKValidator::find_best_base_posit
         
         RCLCPP_DEBUG(this->get_logger(), "Nenhum objeto autorizado fornecido. Colisão padrão mantida.");
     }
-    // =================================================================================
 
     moveit::core::RobotState& local_state = temp_scene->getCurrentStateNonConst();
     const moveit::core::JointModelGroup* arm_jmg = local_state.getJointModelGroup(group_name_);
@@ -186,9 +185,6 @@ std::optional<std::tuple<float, float, float>> IKValidator::find_best_base_posit
         double dx = check_pose.position.x - bx;
         double dy = check_pose.position.y - by;
         double dz = check_pose.position.z - bz;
-        double dist_3d = std::sqrt(dx*dx + dy*dy + dz*dz);
-
-        if (dist_3d > 0.95 || dist_3d < 0.15) continue; 
 
         
         double yaw_to_target = std::atan2(dy, dx);
@@ -218,12 +214,10 @@ std::optional<std::tuple<float, float, float>> IKValidator::find_best_base_posit
         if (found_ik)
         {
             valid_count++;
-            successful_ik_points.push_back(base_pos_3d);
             
-            if (dist_3d < min_dist_sq) {
-                min_dist_sq = dist_3d;
-                best_base = base_pos_3d;
-            }
+            successful_ik_points.push_back(base_pos_3d);
+            best_base = base_pos_3d;
+            break;
         }
     }
     

@@ -319,6 +319,8 @@ private:
     std::thread bt_thread_;
     // Mutex para proteger variáveis compartilhadas entre a thread ROS e a thread BT
     std::mutex bt_mutex_;
+    // Mutex para proteger a posição atual do robô.
+    std::mutex odom_mutex;
     // Objeto principal da árvore de comportamento
     BT::Tree bt_tree_;
 
@@ -420,6 +422,44 @@ private:
                 viable_points_3d.emplace_back(p.first, p.second, static_cast<float>(robot_base_z));
             }
 
+            std::tuple<float, float, float> actual_robot_position;
+
+            {
+                std::lock_guard<std::mutex> lock(odom_mutex);
+            
+                std::get<0>(actual_robot_position) = pose_x;
+                std::get<1>(actual_robot_position) = pose_y;
+                std::get<2>(actual_robot_position) = robot_base_z;
+            }
+
+            auto start_total = std::chrono::high_resolution_clock::now();
+            
+            std::sort(viable_points_3d.begin(), viable_points_3d.end(), 
+            [&actual_robot_position](const std::tuple<float, float, float>& a, const std::tuple<float, float, float>& b) 
+            {
+                float rx = std::get<0>(actual_robot_position);
+                float ry = std::get<1>(actual_robot_position);
+                float rz = std::get<2>(actual_robot_position);
+
+                float dax = std::get<0>(a) - rx;
+                float day = std::get<1>(a) - ry;
+                float daz = std::get<2>(a) - rz;
+                float dist_sq_a = (dax * dax) + (day * day) + (daz * daz);
+
+                float dbx = std::get<0>(b) - rx;
+                float dby = std::get<1>(b) - ry;
+                float dbz = std::get<2>(b) - rz;
+                float dist_sq_b = (dbx * dbx) + (dby * dby) + (dbz * dbz);
+
+                return dist_sq_a < dist_sq_b;
+            });
+
+            auto end_total = std::chrono::high_resolution_clock::now();
+            double ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
+            
+            RCLCPP_INFO(this->get_logger(), "(%.2f ms)", 
+                ms);
+
             
             best_base_opt = this->ik_validator_node_->find_best_base_position(
                 viable_points_3d, 
@@ -442,13 +482,13 @@ private:
 
                 float dx_curr = px - this->pose_x;
                 float dy_curr = py - this->pose_y;
-                float dist_sq = (dx_curr * dx_curr) + (dy_curr * dy_curr);
+                float dist_sq = std::sqrt((dx_curr * dx_curr) + (dy_curr * dy_curr));
 
-                const float threshold_sq = 0.075f; 
+                const float threshold_sq = 0.04f; 
 
                 if (dist_sq <= threshold_sq)
                 {
-                    RCLCPP_INFO(this->get_logger(), "O robô JÁ ESTÁ na posição ideal (Dist: %.4f).", std::sqrt(dist_sq));
+                    RCLCPP_INFO(this->get_logger(), "O robô JÁ ESTÁ na posição ideal (Dist: %.4f).", dist_sq);
                     return BT::NodeStatus::SUCCESS;
                 }
                 else
@@ -992,6 +1032,8 @@ private:
     // Callback de Odometria: Atualiza a posição (x, y) do robô.
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
+        std::lock_guard<std::mutex>lock(odom_mutex);
+
         pose_x = msg->pose.pose.position.x;
         pose_y = msg->pose.pose.position.y;
         pose_z = 0.0; // Assume robô em plano 2D
