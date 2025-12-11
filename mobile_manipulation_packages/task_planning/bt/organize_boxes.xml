@@ -7,15 +7,25 @@
         <DetectObject output_pose="{target_pose}" output_id="{target_id}" object_size="{object_size}"/>
         
         <Fallback name="EnsureProximity">
-             <IsReachable target="{target_pose}" 
-                      robot_base_z="0.11" 
-                      max_reach_3d="0.9"  
-                      adjustment_pose="{nav_target}"/>
+             <IsReachable target="{final_placement_pose}"
+                          object_id="{storage_id}" 
+                          robot_base_z="0.11" 
+                          max_reach_3d="0.9" 
+                          adjustment_pose="{nav_target}"/>
              
-             <ParallelAny> 
-                <NavigateTo/> 
-                <ComputePath planner="a_star" target="{nav_target}"/>
-             </ParallelAny>
+             <RetryUntilSuccessful num_attempts="-1">
+                    <Sequence name="PlanAndExecuteDelivery">
+                        
+                        <ComputePath planner="a_star" target="{nav_target}"/>
+                        
+                        <ReactiveSequence name="MonitorMoveAndCargo">
+                            <IsGripperHoldingObject/> 
+                            <IsPathClear/> 
+                            <FollowPath/> 
+                          </ReactiveSequence>
+
+                    </Sequence>
+                </RetryUntilSuccessful>
         </Fallback>
           
         <PickObject pose="{target_pose}" id="{target_id}"/>
@@ -29,19 +39,25 @@
         <Sequence name="ApproachAndPlace">
             
             <Fallback name="EnsureProximityStorage">
-                <IsReachable target="{storage_pose}" 
+                <IsReachable target="{final_placement_pose}"
+                          object_id="{storage_id}" 
                           robot_base_z="0.11" 
-                          max_reach_3d="0.9"  
-                          adjustment_pose="{storage_pose}"/>
+                          max_reach_3d="0.9" 
+                          adjustment_pose="{nav_target}"/>
                 
-                <ParallelAny name="Nav_Replan_Monitor">
-                    <NavigateTo/> 
-                    <ComputePath planner="a_star" target="{storage_pose}"/>
-                    
-                    <KeepRunningUntilFailure>
-                        <IsGripperHoldingObject/>
-                    </KeepRunningUntilFailure>
-                </ParallelAny>
+                <RetryUntilSuccessful num_attempts="-1">
+                    <Sequence name="PlanAndExecuteDelivery">
+                        
+                        <ComputePath planner="a_star" target="{nav_target}"/>
+                        
+                        <ReactiveSequence name="MonitorMoveAndCargo">
+                            <IsGripperHoldingObject/> 
+                            <IsPathClear/> 
+                            <FollowPath/> 
+                          </ReactiveSequence>
+
+                    </Sequence>
+                </RetryUntilSuccessful>
             </Fallback>
 
             <Sequence name="OrganizeSequence">

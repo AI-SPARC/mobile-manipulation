@@ -49,8 +49,7 @@
 #include "mobile_manipulation_interfaces/action/path.hpp"
 #include <sensor_msgs/point_cloud2_iterator.hpp> 
 #include <mutex>
-#include "geometry_msgs/msg/pose_array.hpp"
-#include <Eigen/Geometry> // Necessário para Quaternoins (se não tiver, verifique seus includes)
+#include <Eigen/Geometry> 
 
 using namespace std::chrono_literals;
 
@@ -553,7 +552,7 @@ private:
     }
 
 
-    std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> filter_path(std::vector<std::pair<float, float>>& path, std::vector<std::pair<float, float>>& path_without_filter) 
+    std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> filter_path(std::vector<std::pair<float, float>>& path, std::vector<std::pair<float, float>>& path_without_filter, const geometry_msgs::msg::Pose& goal_pose) 
     {
         nav_msgs::msg::Path nav_path;
         nav_path.header.frame_id = "world"; 
@@ -568,24 +567,14 @@ private:
             return std::make_pair(nav_path, nav_path_without_filter);
         }
 
-        Eigen::Quaternionf final_orientation(1.0f, 0.0f, 0.0f, 0.0f); 
 
-        if (path.size() >= 2) 
-        {
-            const auto& p_last = path.back();
-            const auto& p_before_last = path[path.size() - 2];
+        Eigen::Quaternionf final_orientation(
+            goal_pose.orientation.w,
+            goal_pose.orientation.x,
+            goal_pose.orientation.y,
+            goal_pose.orientation.z
+        ); 
 
-            float dx = p_last.first - p_before_last.first;
-            float dy = p_last.second - p_before_last.second;
-            
-            Eigen::Vector3f direction(dx, dy, 0.0f);
-            
-            if (direction.norm() > 1e-4) {
-                direction.normalize();
-                Eigen::Vector3f reference(1.0f, 0.0f, 0.0f);
-                final_orientation = Eigen::Quaternionf::FromTwoVectors(reference, direction);
-            }
-        }
 
         auto start_time1_ = std::chrono::high_resolution_clock::now();
         int k = 0;
@@ -701,7 +690,6 @@ private:
 
             nav_path.poses.push_back(pose_stamped);
         }
-
 
         for (size_t i = 0; i < path_without_filter.size(); i++) 
         {
@@ -833,7 +821,9 @@ private:
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::Path::Result>();
 
-        std::pair<float, float> current_goal_pose = {goal->pose.position.x, goal->pose.position.y};
+        geometry_msgs::msg::Pose goal_pose = goal->pose;
+
+        std::pair<float, float> current_goal_pose = {goal_pose.position.x, goal_pose.position.y};
         std::pair<float, float> start_pose;
 
         {
@@ -862,7 +852,7 @@ private:
                 a_star_result_without_filter = a_star_result;   
             }
 
-            std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> path = filter_path(a_star_result, a_star_result_without_filter);
+            std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> path = filter_path(a_star_result, a_star_result_without_filter, goal_pose);
 
             
 
