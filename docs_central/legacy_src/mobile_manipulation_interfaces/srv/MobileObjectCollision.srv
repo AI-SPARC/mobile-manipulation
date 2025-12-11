@@ -1,4 +1,0 @@
-string obstacle_id
-bool activate_movement
----
-bool success
