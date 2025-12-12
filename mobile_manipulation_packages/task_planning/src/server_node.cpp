@@ -133,21 +133,27 @@ class AsyncAction : public BT::StatefulActionNode
 {
 public:
     AsyncAction(const std::string& name, const BT::NodeConfig& config,
-                std::function<BT::NodeStatus(BT::TreeNode&)> tick_fun)
-        : BT::StatefulActionNode(name, config), tick_fun_(tick_fun) {}
+                std::function<BT::NodeStatus(BT::TreeNode&)> tick_fun,
+                std::function<void(BT::TreeNode&)> halt_fun = nullptr) 
+        : BT::StatefulActionNode(name, config), tick_fun_(tick_fun), halt_fun_(halt_fun) {}
 
-    // Chamado uma vez quando o nó sai de IDLE para RUNNING
     BT::NodeStatus onStart() override { return tick_fun_(*this); }
 
-    // Chamado a cada tick enquanto o nó estiver em RUNNING
     BT::NodeStatus onRunning() override { return tick_fun_(*this); }
 
-    void onHalted() override {}
+    void onHalted() override 
+    {
+        if (halt_fun_)
+        {
+            halt_fun_(*this);
+        }
+    }
 
 private:
-    // Armazena a função lógica injetada (lambda)
     std::function<BT::NodeStatus(BT::TreeNode&)> tick_fun_;
+    std::function<void(BT::TreeNode&)> halt_fun_; 
 };
+// DOC-END: AsyncAction
 // DOC-END: AsyncAction
 
 // ============================================================================
@@ -457,8 +463,7 @@ private:
             auto end_total = std::chrono::high_resolution_clock::now();
             double ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
             
-            RCLCPP_INFO(this->get_logger(), "(%.2f ms)", 
-                ms);
+       
 
             
             best_base_opt = this->ik_validator_node_->find_best_base_position(
@@ -523,8 +528,8 @@ private:
             }
             else
             {
-                RCLCPP_WARN(this->get_logger(), "IsReachable: Sucesso, o robô consegue pegar o objeto.");
-                return BT::NodeStatus::SUCCESS;
+                RCLCPP_WARN(this->get_logger(), "Falha. O robô não conseguirá pegar o objeto.");
+                return BT::NodeStatus::FAILURE;
             }
         },
         {
@@ -535,6 +540,26 @@ private:
             BT::OutputPort<geometry_msgs::msg::Pose>("adjustment_pose")
         });
         // DOC-END: BT_IsReachable
+
+        // DOC-START: BT_IsStillReachable
+        factory.registerSimpleCondition("IsStillReachable", [&](BT::TreeNode &self)
+        {
+            bool reachable = this->ik_validator_node_->is_still_reachable(this->obstacle_graph_node_);
+
+            if(reachable == true)
+            {
+                return BT::NodeStatus::SUCCESS;
+            }
+            else if(reachable == false)
+            {
+                return BT::NodeStatus::FAILURE;
+            }
+            
+            return BT::NodeStatus::FAILURE;
+        });
+        // DOC-END: BT_IsStillReachable
+
+
 
         // DOC-START: BT_DetectObject
         // --- Action: DetectObject ---
@@ -846,53 +871,65 @@ private:
         // Envia o caminho calculado para o controlador local (Pure Pursuit).
         factory.registerBuilder<AsyncAction>("FollowPath", [&](const std::string& name, const BT::NodeConfig& config)
         {
-            return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
-            {
-                // 1. Monitoramento de Estado (Lógica Padrão)
+            return std::make_unique<AsyncAction>(name, config, 
+           
+                [&](BT::TreeNode &self)
                 {
-                    std::lock_guard<std::mutex> lock(state_mutex_);
-                    if (nav_state_ == TaskState::SUCCESS) { nav_state_ = TaskState::IDLE; return BT::NodeStatus::SUCCESS; }
-                    if (nav_state_ == TaskState::FAILURE) { nav_state_ = TaskState::IDLE; return BT::NodeStatus::FAILURE; }
-                    if (nav_state_ == TaskState::RUNNING) return BT::NodeStatus::RUNNING;
-                }
-
-                // 2. Se está IDLE, tenta iniciar a navegação
-                nav_msgs::msg::Path path_to_send;
-                bool has_path = false;
-                
-                {
-                    std::lock_guard<std::mutex> lock(path_mutex_);
-                    if (!last_calculated_path_.poses.empty())
-                    {
-                        path_to_send = last_calculated_path_;
-                        has_path = true;
-                    }
-                }
-
-                if (has_path)
-                {
-                    if(this->send_controller_goal(path_to_send))
                     {
                         std::lock_guard<std::mutex> lock(state_mutex_);
-                        nav_state_ = TaskState::RUNNING;
-                        return BT::NodeStatus::RUNNING;
+                        if (nav_state_ == TaskState::SUCCESS) { nav_state_ = TaskState::IDLE; return BT::NodeStatus::SUCCESS; }
+                        if (nav_state_ == TaskState::FAILURE) { nav_state_ = TaskState::IDLE; return BT::NodeStatus::FAILURE; }
+                        if (nav_state_ == TaskState::RUNNING) return BT::NodeStatus::RUNNING;
+                    }
+
+                    nav_msgs::msg::Path path_to_send;
+                    bool has_path = false;
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(path_mutex_);
+                        if (!last_calculated_path_.poses.empty())
+                        {
+                            path_to_send = last_calculated_path_;
+                            has_path = true;
+                        }
+                    }
+
+                    if (has_path)
+                    {
+                        if(this->send_controller_goal(path_to_send))
+                        {
+                            std::lock_guard<std::mutex> lock(state_mutex_);
+                            nav_state_ = TaskState::RUNNING;
+                            return BT::NodeStatus::RUNNING;
+                        }
+                        else 
+                        {
+                            RCLCPP_ERROR(this->get_logger(), "FollowPath: Falha ao enviar goal.");
+                            return BT::NodeStatus::FAILURE;
+                        }
                     }
                     else 
                     {
-                        RCLCPP_ERROR(this->get_logger(), "FollowPath: Falha ao enviar goal para o controlador.");
-                        return BT::NodeStatus::FAILURE;
+                        return BT::NodeStatus::FAILURE; 
                     }
-                }
-                else 
+                },
+                
+                
+                [&](BT::TreeNode &self)
                 {
-                    // [CORREÇÃO] Se chegou aqui, o nó anterior (ComputePath) disse que teve sucesso,
-                    // mas a variável de caminho está vazia. Isso é um erro lógico ou o caminho expirou.
-                    RCLCPP_ERROR(this->get_logger(), "FollowPath: Nenhum caminho disponível para seguir!");
-                    return BT::NodeStatus::FAILURE; 
+                    RCLCPP_WARN(this->get_logger(), "FollowPath: HALT recebido! Cancelando Action...");
+                    
+                    // 1. Cancela a Action do ROS
+                    this->cancel_controller_goal();
+
+                    // 2. Reseta o estado interno para IDLE para permitir nova execução futura
+                    std::lock_guard<std::mutex> lock(state_mutex_);
+                    nav_state_ = TaskState::IDLE;
                 }
-            });
+            );
         });
         // DOC-END: BT_FollowPath
+
 
         // DOC-START: BT_PickObject
         // --- Action: PickObject ---

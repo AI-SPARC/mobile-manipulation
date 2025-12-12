@@ -82,7 +82,8 @@ std::optional<std::tuple<float, float, float>> IKValidator::find_best_base_posit
     std::string authorized_collision
 )
 {
-   
+    
+
     int attempts = 0;
     while (!initialized_.load()) {
         if (attempts++ > 50) return std::nullopt;
@@ -232,7 +233,168 @@ std::optional<std::tuple<float, float, float>> IKValidator::find_best_base_posit
     
     publish_viable_ik_points(successful_ik_points); 
     
+
+    selected_ik_position = best_base;
+    last_target = target_pose_global;
+    last_authorized_collision = authorized_collision;
+
+    
     return best_base;
+}
+
+bool IKValidator::is_still_reachable(const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node)
+{
+    int attempts = 0;
+
+    while (!initialized_.load()) 
+    {
+        if (attempts++ > 50) return false;
+        if (!rclcpp::ok()) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    
+    if (!graph_provider_node || !graph_provider_node->get_current_map()) 
+    {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Mapa 2D indisponível.");
+        return false; 
+    }
+    auto map_snapshot = graph_provider_node->get_current_map();
+
+    
+    psm_->requestPlanningSceneState();
+    planning_scene_monitor::LockedPlanningSceneRO parent_scene(psm_);
+    if (!parent_scene) return false;
+    planning_scene::PlanningScenePtr temp_scene = parent_scene->diff();
+
+    
+    collision_detection::AllowedCollisionMatrix& acm = temp_scene->getAllowedCollisionMatrixNonConst();
+    
+    
+    std::vector<std::string> gripper_links = {"panda_link8"}; 
+    
+    if (robot_model_->hasJointModelGroup("hand")) 
+    {
+        const auto& links = robot_model_->getJointModelGroup("hand")->getLinkModelNames();
+        gripper_links.insert(gripper_links.end(), links.begin(), links.end());
+    }
+
+    if (!last_authorized_collision.empty()) 
+    {
+        
+        for (const auto& link : gripper_links) 
+        {
+            if (robot_model_->hasLinkModel(link)) 
+            {
+                
+                acm.setEntry(link, last_authorized_collision, true);
+            }
+        }
+    }
+    else 
+    {
+        
+        RCLCPP_DEBUG(this->get_logger(), "Nenhum objeto autorizado fornecido. Colisão padrão mantida.");
+    }
+
+    moveit::core::RobotState& local_state = temp_scene->getCurrentStateNonConst();
+    const moveit::core::JointModelGroup* arm_jmg = local_state.getJointModelGroup(group_name_);
+
+    
+    moveit::core::GroupStateValidityCallbackFn validity_callback = 
+        [&temp_scene, &acm](moveit::core::RobotState* state, const moveit::core::JointModelGroup* group, const double* values) -> bool
+        {
+            state->setJointGroupPositions(group, values);
+            collision_detection::CollisionRequest req;
+            req.group_name = group->getName();
+            
+            
+            req.verbose = false; 
+            req.contacts = false;
+            
+            collision_detection::CollisionResult res;
+            
+            
+            temp_scene->checkCollision(req, res, *state, acm);
+            return !res.collision;
+        };
+
+    std::vector<std::tuple<float, float, float>> successful_ik_points;
+    std::optional<std::tuple<float, float, float>> best_base = std::nullopt;
+    double min_dist_sq = std::numeric_limits<double>::max(); 
+    int valid_count = 0;
+
+    
+    geometry_msgs::msg::Pose check_pose = last_target;
+    check_pose.position.z += 0.1; 
+
+    tf2::Quaternion q_grip; 
+
+
+    if (!selected_ik_position.has_value())
+    {
+        return false;
+    }
+
+    float bx = std::get<0>(selected_ik_position.value());
+    float by = std::get<1>(selected_ik_position.value());
+    float bz = std::get<2>(selected_ik_position.value());
+
+    if (std::isnan(bx) || std::isnan(by) || std::isnan(bz))
+    {
+        return false;
+    }
+
+    std::pair<float, float> base_pos_2d = {bx, by};
+
+    if (map_snapshot->find(base_pos_2d) != map_snapshot->end())
+    {
+        return false;
+    }
+
+    double dx = check_pose.position.x - bx;
+    double dy = check_pose.position.y - by;
+    double dz = check_pose.position.z - bz;
+
+    
+    double yaw_to_target = std::atan2(dy, dx);
+
+    if (!virtual_joint_name_.empty()) 
+    {
+        const auto* vjoint = robot_model_->getJointModel(virtual_joint_name_);
+
+        if (vjoint->getType() == moveit::core::JointModel::FLOATING) 
+        {
+            Eigen::Quaterniond q_base(Eigen::AngleAxisd(yaw_to_target, Eigen::Vector3d::UnitZ()));
+            std::vector<double> float_vals = { (double)bx, (double)by, (double)bz, q_base.x(), q_base.y(), q_base.z(), q_base.w() };
+            local_state.setJointPositions(virtual_joint_name_, float_vals);
+        } 
+        else 
+        { 
+            local_state.setJointPositions(virtual_joint_name_, {(double)bx, (double)by, yaw_to_target});
+        }
+    }
+
+    local_state.update(); 
+
+    
+    q_grip.setRPY(M_PI, 0.0, yaw_to_target); 
+    q_grip.normalize();
+    check_pose.orientation = tf2::toMsg(q_grip);
+
+    bool found_ik = local_state.setFromIK(arm_jmg, check_pose, 0.05, validity_callback);
+
+    if (found_ik)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 void IKValidator::publish_viable_ik_points(const std::vector<std::tuple<float, float, float>>& results)

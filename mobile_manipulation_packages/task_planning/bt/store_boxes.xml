@@ -6,25 +6,27 @@
       
         <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
         
-        <Fallback name="EnsureProximity">
-             <IsReachable target="{target_pose}"
-                      object_id="{target_id}" 
-                      robot_base_z="0.11" 
-                      max_reach_3d="0.9" 
-                      adjustment_pose="{nav_target}"/>
-             
-             <RetryUntilSuccessful num_attempts="-1">
-                <Sequence name="PlanAndExecute">
+        <RetryUntilSuccessful num_attempts="-1">
+            <Fallback name="EnsureProximity">
+                 
+                 <IsReachable target="{target_pose}"
+                          object_id="{target_id}" 
+                          robot_base_z="0.11" 
+                          max_reach_3d="0.9" 
+                          adjustment_pose="{nav_target}"/>
+                 
+                 <Sequence name="PlanAndExecute">
                     <ComputePath planner="a_star" target="{nav_target}"/>
                     
                     <ReactiveSequence name="MonitorAndMove">
+                        <IsStillReachable/>
                         <IsPathClear/>  
                         <FollowPath/>   
-                      </ReactiveSequence>
-                </Sequence>
-             </RetryUntilSuccessful>
-
-        </Fallback>
+                    </ReactiveSequence>
+                  </Sequence>
+    
+            </Fallback>
+        </RetryUntilSuccessful>
           
         <PickObject pose="{target_pose}" id="{target_id}"/>
       </Sequence>
@@ -35,7 +37,7 @@
     <Fallback name="PlaceOrCleanup">
         
         <Sequence name="ApproachAndPlace">
-            
+            <RetryUntilSuccessful num_attempts="-1">
             <Fallback name="EnsureProximityStorage">
                 <IsReachable target="{final_placement_pose}"
                           object_id="{storage_id}" 
@@ -43,21 +45,20 @@
                           max_reach_3d="0.9" 
                           adjustment_pose="{nav_target}"/>
                 
-                <RetryUntilSuccessful num_attempts="-1">
-                    <Sequence name="PlanAndExecuteDelivery">
-                        
+                
+                    <Sequence name="PlanAndExecuteDelivery">                        
                         <ComputePath planner="a_star" target="{nav_target}"/>
                         
                         <ReactiveSequence name="MonitorMoveAndCargo">
+                            <IsStillReachable/>
                             <IsGripperHoldingObject/> 
                             <IsPathClear/> 
                             <FollowPath/> 
                           </ReactiveSequence>
-
                     </Sequence>
-                </RetryUntilSuccessful>
+            
             </Fallback>
-
+             </RetryUntilSuccessful>
             <Sequence name="OrganizeSequence">
                 <PlaceObject pose="{final_placement_pose}"/>
             </Sequence>

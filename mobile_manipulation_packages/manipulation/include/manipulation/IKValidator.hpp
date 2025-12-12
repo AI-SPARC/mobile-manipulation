@@ -37,10 +37,10 @@ public:
         std::string authorized_collision
     );
 
+    bool is_still_reachable(const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node);
+
 private:
     void delayed_init();
-    
-
     void publish_viable_ik_points(const std::vector<std::tuple<float, float, float>>& results);
 
     // ROS
@@ -55,6 +55,10 @@ private:
 
     std::atomic<bool> initialized_{false};
     std::string virtual_joint_name_;
+
+    std::optional<std::tuple<float, float, float>> selected_ik_position;
+    std::string last_authorized_collision;
+    geometry_msgs::msg::Pose last_target;
 };
 
 } // namespace manipulation
