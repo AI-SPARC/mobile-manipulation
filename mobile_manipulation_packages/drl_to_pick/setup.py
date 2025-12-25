@@ -24,8 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'train_model = drl_to_pick.train_model:main',
-            'train_model_pcl = drl_to_pick.train_model_pcl:main'
+            'bridge_to_inference = drl_to_pick.bridge_to_inference:main',
+            'publish_test = drl_to_pick.publish_test:main'
         ],
     },
 )
