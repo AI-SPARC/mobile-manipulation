@@ -40,15 +40,14 @@ find_package(yaml-cpp REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
 find_package(navigation REQUIRED)
 
-# 1. Adicionando a implementação na biblioteca (ISSO ESTÁ CERTO)
-# Como você adicionou aqui, qualquer nó que use 'manipulation_lib'
-# terá acesso à classe ProjectedReachabilityAnalysis
+
 add_library(manipulation_lib SHARED
   src/add_collision_impl.cpp
   src/manipulation_impl.cpp
   src/is_gripper_holding_impl.cpp
   src/projected_reachability_analysis.cpp 
   src/ik_validator.cpp
+  src/cloud_box_filter.cpp
 )
 
 target_include_directories(manipulation_lib
@@ -90,12 +89,10 @@ target_link_libraries(manipulation_lib
   ${PCL_LIBRARIES}
 )
 
-# 2. Criando os executáveis (APENAS OS QUE TÊM MAIN)
 add_executable(add_collision src/add_collision_main.cpp)
 add_executable(manipulation src/manipulation_main.cpp)
 add_executable(is_gripper_holding src/is_gripper_holding_main.cpp)
 
-# 3. Linkando executáveis com a biblioteca
 
 foreach(target add_collision manipulation is_gripper_holding)
   target_include_directories(${target}
