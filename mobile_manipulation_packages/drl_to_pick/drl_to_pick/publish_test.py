@@ -12,8 +12,8 @@ class NpyToPointCloudPublisher(Node):
         super().__init__('npy_pc_publisher')
         
         
-        self.declare_parameter('npy_path', '/home/momesso/isaac-sim/toma/run_0/object_pointcloud.npy')
-        self.publisher_ = self.create_publisher(PointCloud2, '/object_pointcloud', 10)
+        self.declare_parameter('npy_path', '/home/momesso/isaac-sim/toma/run_5/object_pointcloud.npy')
+        self.publisher_ = self.create_publisher(PointCloud2, '/depth_pcl', 10)
         
         
         self.timer = self.create_timer(2.0, self.timer_callback)
