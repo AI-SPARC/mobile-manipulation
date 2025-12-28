@@ -54,7 +54,7 @@ private:
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
   // Parâmetros
-  bool debug_filtered_points_;
+  bool debug_filtered_points_ = true;
 
   // Bounding box
   geometry_msgs::msg::Pose bbox_pose_;

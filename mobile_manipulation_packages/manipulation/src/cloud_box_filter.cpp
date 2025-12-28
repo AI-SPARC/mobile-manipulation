@@ -1,6 +1,7 @@
 #include "manipulation/CloudBoxFilter.hpp"
 
 #include <pcl/filters/crop_box.h>
+#include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <tf2_eigen/tf2_eigen.hpp>
 
