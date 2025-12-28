@@ -401,7 +401,7 @@ def generate_launch_description():
     if 'PickObject' in bt_actions or 'PlaceObject' in bt_actions or 'DetectObject' in bt_actions:
         print("[LAUNCH] >> Manipulação (Pick/Place/Detect) detectada na BT.")
         final_launch_list.append(manipulation)
-        final_launch_list.append(add_collision)
+        # final_launch_list.append(add_collision)
 
     if 'NavigateTo' in bt_actions or 'FollowPath' in bt_actions:
         print("[LAUNCH] >> Controlador de caminho (NavigateTo) detectado.")

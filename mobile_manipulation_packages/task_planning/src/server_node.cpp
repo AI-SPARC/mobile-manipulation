@@ -403,50 +403,20 @@ private:
         factory.registerSimpleCondition("IsReachable", [&](BT::TreeNode &self)
         {
             auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target_pose");
-            auto target_size_opt = self.getInput<geometry_msgs::msg::Vector3>("target_size");
             auto authorized_id_opt = self.getInput<std::string>("object_id");
             auto robot_base_z_opt = self.getInput<double>("robot_base_z");
             auto max_reach_3d_opt = self.getInput<double>("max_reach_3d");
 
             if (!target_pose_opt) return BT::NodeStatus::FAILURE;
-            if (!target_size_opt) return BT::NodeStatus::FAILURE;
             if (!authorized_id_opt) return BT::NodeStatus::FAILURE;
             if (!robot_base_z_opt) return BT::NodeStatus::FAILURE;
             if (!max_reach_3d_opt) return BT::NodeStatus::FAILURE;
 
 
             geometry_msgs::msg::Pose target = target_pose_opt.value();
-            geometry_msgs::msg::Vector3 target_size = target_size_opt.value();
             std::string authorized_id = authorized_id_opt.value();
             double robot_base_z = robot_base_z_opt.value();
             double max_reach_3d = max_reach_3d_opt.value();
-
-            target_size.x += 0.005;
-            target_size.y += 0.005;
-            target_size.z += 0.005;
-
-            this->cloud_box_filter_node_->set_bounding_box(target, target_size);
-            rclcpp::sleep_for(std::chrono::milliseconds(2000));
-
-            // Obtém os pontos filtrados
-            if (this->cloud_box_filter_node_->has_points()) 
-            {
-                pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
-            
-                std::vector<geometry_msgs::msg::Pose> result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
-
-                RCLCPP_WARN(get_logger(), "Recebidos %zu grasps", result.size());
-                
-            }
-            else
-            {
-                RCLCPP_WARN(get_logger(), "Sem pontos");
-            }
-
-
-            rclcpp::sleep_for(std::chrono::milliseconds(5000)); 
-
-
 
 
             std::vector<std::pair<float, float>> viable_points;
@@ -530,7 +500,7 @@ private:
                 float dy_curr = py - this->pose_y;
                 float dist_sq = std::sqrt((dx_curr * dx_curr) + (dy_curr * dy_curr));
 
-                const float threshold_sq = 0.04f; 
+                const float threshold_sq = 0.07f; 
 
                 if (dist_sq <= threshold_sq)
                 {
@@ -562,7 +532,6 @@ private:
                     
                    
                     self.setOutput("adjustment_pose", final_pose);
-
                     RCLCPP_INFO(this->get_logger(), "Ajuste necessário. Indo para (%.2f, %.2f) virado para o objeto.", px, py);
                     return BT::NodeStatus::FAILURE;
                 }
@@ -680,7 +649,6 @@ private:
                     if (map_snapshot->find(pair_point) != map_snapshot->end())
                     {
                         cancel_controller_goal();
-                        std::cout << "tem merda aqui hein" << std::endl;
                         return BT::NodeStatus::FAILURE; 
                     } 
                 }
@@ -888,8 +856,10 @@ private:
 
                 // 2. Se está IDLE, inicia o processo
                 auto target = self.getInput<geometry_msgs::msg::Pose>("target");
-                if (!target) {
+                if (!target) 
+                {
                     RCLCPP_ERROR(this->get_logger(), "ComputePath: Target inválido na Blackboard.");
+                    
                     rclcpp::sleep_for(std::chrono::milliseconds(2000)); 
 
                     return BT::NodeStatus::FAILURE;
@@ -984,18 +954,57 @@ private:
             {
                 if (manipulation_state_ == TaskState::IDLE)
                 {
-                    auto pose = self.getInput<geometry_msgs::msg::Pose>("pose");
+                    auto object_pose = self.getInput<geometry_msgs::msg::Pose>("object_pose");
+                    auto object_size = self.getInput<geometry_msgs::msg::Vector3>("object_size");
                     auto id = self.getInput<std::string>("id");
-                    if (!pose || !id) return BT::NodeStatus::FAILURE;
 
-                    this->send_goal(id.value(), pose.value(), true); // true = Pick
+                    if (!object_pose || !id || !object_size) 
+                    {
+                        return BT::NodeStatus::FAILURE;
+                    }
+                    geometry_msgs::msg::Pose target = object_pose.value();
+                    geometry_msgs::msg::Vector3 target_size = object_size.value();
+
+                    target_size.x += 0.005;
+                    target_size.y += 0.005;
+                    target_size.z += 0.005;
+
+                    this->cloud_box_filter_node_->set_bounding_box(target, target_size);
+
+                    rclcpp::sleep_for(std::chrono::milliseconds(2000));
+                    std::vector<geometry_msgs::msg::Pose> result;
+
+                    // Obtém os pontos filtrados
+                    if (this->cloud_box_filter_node_->has_points()) 
+                    {
+                        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
+                    
+                        result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
+
+                        RCLCPP_WARN(get_logger(), "Recebidos %zu grasps", result.size());
+                        
+                    }
+                    else
+                    {
+                        RCLCPP_WARN(get_logger(), "Sem pontos");
+                    }
+
+                    
+                    
+
+                    this->send_goal(id.value(), result[0], true); // true = Pick
                     manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
                 return check_task_status(manipulation_state_);
             });
         };
-        factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "PickObject", { BT::InputPort<geometry_msgs::msg::Pose>("pose"), BT::InputPort<std::string>("id") }, {} }, builder_pick);
+        factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "PickObject", 
+        { 
+            BT::InputPort<geometry_msgs::msg::Pose>("object_pose"), 
+            BT::InputPort<geometry_msgs::msg::Vector3>("object_size"), 
+            BT::InputPort<std::string>("id") 
+        }, {} }, builder_pick);
         // DOC-END: BT_PickObject
 
         // DOC-START: BT_PlaceObject

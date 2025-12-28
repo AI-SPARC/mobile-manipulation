@@ -10,7 +10,6 @@
             <Fallback name="EnsureProximity">
                  
                  <IsReachable target_pose="{target_pose}"
-                          target_size="{target_size}"
                           object_id="{target_id}" 
                           robot_base_z="0.11" 
                           max_reach_3d="0.9" 
@@ -29,7 +28,7 @@
             </Fallback>
         </RetryUntilSuccessful>
           
-        <PickObject pose="{target_pose}" id="{target_id}"/>
+        <PickObject object_pose="{target_pose}" object_size="{target_size}" id="{target_id}"/>
       </Sequence>
     </RetryUntilSuccessful>
   </BehaviorTree>
@@ -41,7 +40,6 @@
             <RetryUntilSuccessful num_attempts="-1">
             <Fallback name="EnsureProximityStorage">
                 <IsReachable target_pose="{final_placement_pose}"
-                          target_size="{target_size}"
                           object_id="{storage_id}" 
                           robot_base_z="0.11" 
                           max_reach_3d="0.9" 
