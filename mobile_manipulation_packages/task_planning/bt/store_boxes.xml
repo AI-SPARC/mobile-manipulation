@@ -4,12 +4,13 @@
     <RetryUntilSuccessful num_attempts="-1">
       <Sequence name="AcquireSequence">
       
-        <DetectObject output_pose="{target_pose}" output_id="{target_id}"/>
+        <DetectObject output_pose="{target_pose}" output_size="{target_size}" output_id="{target_id}"/>
         
         <RetryUntilSuccessful num_attempts="-1">
             <Fallback name="EnsureProximity">
                  
-                 <IsReachable target="{target_pose}"
+                 <IsReachable target_pose="{target_pose}"
+                          target_size="{target_size}"
                           object_id="{target_id}" 
                           robot_base_z="0.11" 
                           max_reach_3d="0.9" 
@@ -39,7 +40,8 @@
         <Sequence name="ApproachAndPlace">
             <RetryUntilSuccessful num_attempts="-1">
             <Fallback name="EnsureProximityStorage">
-                <IsReachable target="{final_placement_pose}"
+                <IsReachable target_pose="{final_placement_pose}"
+                          target_size="{target_size}"
                           object_id="{storage_id}" 
                           robot_base_z="0.11" 
                           max_reach_3d="0.9" 

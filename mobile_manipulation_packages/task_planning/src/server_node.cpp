@@ -47,9 +47,12 @@
 #include <manipulation/IsGripperHolding.hpp>
 #include <manipulation/ProjectedReachabilityAnalysis.hpp>
 #include <manipulation/IKValidator.hpp>
+#include <manipulation/CloudBoxFilter.hpp>
 #include <storage_manager/GetStorageInfo.hpp>
 #include <storage_manager/Organize.hpp>
 #include <navigation/SharedObstacleGraph.hpp>
+
+#include <drl_to_pick_cpp/BridgeToInference.hpp>
 
 namespace BT
 {
@@ -173,7 +176,9 @@ public:
         std::shared_ptr<storage_manager::OrganizeNode> organize_node,
         std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node,
         std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node,
-        std::shared_ptr<manipulation::IKValidator> ik_validator_node 
+        std::shared_ptr<manipulation::IKValidator> ik_validator_node,
+        std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node,
+        std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node
     )
     : Node("server_node"),
     gripper_monitor_node_(gripper_node),
@@ -181,7 +186,9 @@ public:
     organize_node_(organize_node),
     reachability_node_(reachability_node),
     obstacle_graph_node_(obstacle_graph_node),
-    ik_validator_node_(ik_validator_node) 
+    ik_validator_node_(ik_validator_node),
+    cloud_box_filter_node_(cloud_box_filter_node),
+    bridge_to_inference_node_(bridge_to_inference_node)
     {
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
@@ -260,6 +267,10 @@ private:
 
     // DOC-START: member_variables
     // --- Injeção de Dependências ---
+    // Ponteiro para o nó que envia a point cloud via msgpack para o arquivo python que faz a inferência no graspnet.
+     std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
+    // Ponteiro para o nó que retira a point cloud da bounding box do objeto e depois aumenta a quantidade de pontos para melhor inferência.
+    std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node_;
     // Ponteiro para o nó que verifica se o robô consegue achar uma IK para uma série de pontos passados.
     std::shared_ptr<manipulation::IKValidator> ik_validator_node_;
     // Ponteiro para o nó que modifica o grafo de obstáculos.
@@ -391,23 +402,53 @@ private:
         // Verifica se a distância euclidiana entre o robô e o alvo está dentro de um limite.
         factory.registerSimpleCondition("IsReachable", [&](BT::TreeNode &self)
         {
-            auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target");
+            auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target_pose");
+            auto target_size_opt = self.getInput<geometry_msgs::msg::Vector3>("target_size");
             auto authorized_id_opt = self.getInput<std::string>("object_id");
             auto robot_base_z_opt = self.getInput<double>("robot_base_z");
             auto max_reach_3d_opt = self.getInput<double>("max_reach_3d");
 
             if (!target_pose_opt) return BT::NodeStatus::FAILURE;
+            if (!target_size_opt) return BT::NodeStatus::FAILURE;
             if (!authorized_id_opt) return BT::NodeStatus::FAILURE;
             if (!robot_base_z_opt) return BT::NodeStatus::FAILURE;
             if (!max_reach_3d_opt) return BT::NodeStatus::FAILURE;
 
 
             geometry_msgs::msg::Pose target = target_pose_opt.value();
+            geometry_msgs::msg::Vector3 target_size = target_size_opt.value();
             std::string authorized_id = authorized_id_opt.value();
             double robot_base_z = robot_base_z_opt.value();
             double max_reach_3d = max_reach_3d_opt.value();
+
+            target_size.x += 0.005;
+            target_size.y += 0.005;
+            target_size.z += 0.005;
+
+            this->cloud_box_filter_node_->set_bounding_box(target, target_size);
+            rclcpp::sleep_for(std::chrono::milliseconds(2000));
+
+            // Obtém os pontos filtrados
+            if (this->cloud_box_filter_node_->has_points()) 
+            {
+                pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
             
-         
+                std::vector<geometry_msgs::msg::Pose> result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
+
+                RCLCPP_WARN(get_logger(), "Recebidos %zu grasps", result.size());
+                
+            }
+            else
+            {
+                RCLCPP_WARN(get_logger(), "Sem pontos");
+            }
+
+
+            rclcpp::sleep_for(std::chrono::milliseconds(5000)); 
+
+
+
+
             std::vector<std::pair<float, float>> viable_points;
           
             this->reachability_node_->get_reachable_points(target, robot_base_z, max_reach_3d, viable_points);
@@ -533,7 +574,8 @@ private:
             }
         },
         {
-            BT::InputPort<geometry_msgs::msg::Pose>("target"),
+            BT::InputPort<geometry_msgs::msg::Pose>("target_pose"),
+            BT::InputPort<geometry_msgs::msg::Vector3>("target_size"),
             BT::InputPort<std::string>("object_id"),
             BT::InputPort<double>("robot_base_z"),
             BT::InputPort<double>("max_reach_3d"),
@@ -573,7 +615,7 @@ private:
             {
                 self.setOutput("output_pose", current_target_pose_);
                 self.setOutput("output_id", current_target_id_);
-                self.setOutput("object_size", cached_object_.size);
+                self.setOutput("output_size", cached_object_.size);
                 return BT::NodeStatus::SUCCESS;
             }
 
@@ -589,7 +631,7 @@ private:
 
             self.setOutput("output_pose", current_target_pose_);
             self.setOutput("output_id", current_target_id_);
-            self.setOutput("object_size", cached_object_.size);
+            self.setOutput("output_size", cached_object_.size);
 
             // Marca o ID como 'picked' para evitar pegar o mesmo objeto em loop
             picked.insert(current_target_id_);
@@ -601,7 +643,7 @@ private:
         {
             BT::OutputPort<geometry_msgs::msg::Pose>("output_pose"),
             BT::OutputPort<std::string>("output_id"),
-            BT::OutputPort<geometry_msgs::msg::Vector3>("object_size")
+            BT::OutputPort<geometry_msgs::msg::Vector3>("output_size")
         });
         // DOC-END: BT_DetectObject
 
@@ -848,6 +890,8 @@ private:
                 auto target = self.getInput<geometry_msgs::msg::Pose>("target");
                 if (!target) {
                     RCLCPP_ERROR(this->get_logger(), "ComputePath: Target inválido na Blackboard.");
+                    rclcpp::sleep_for(std::chrono::milliseconds(2000)); 
+
                     return BT::NodeStatus::FAILURE;
                 }
 
@@ -1430,14 +1474,24 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions ik_validator_opts;
     ik_validator_opts.arguments({"--ros-args", "-r", "__node:=ik_validator_node"});
 
+    rclcpp::NodeOptions cloud_box_filter_opts;
+    cloud_box_filter_opts.arguments({"--ros-args", "-r", "__node:=cloud_box_filter"});
+
+    rclcpp::NodeOptions bridge_to_inference_opts;
+    bridge_to_inference_opts.arguments({"--ros-args", "-r", "__node:=bridge_to_inference"});
+
     std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
     std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
 
     std::shared_ptr<manipulation::IsGripperHolding> gripper_node = nullptr;
     std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node = nullptr; 
     std::shared_ptr<manipulation::IKValidator> ik_validator_node = nullptr; 
+    std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node = nullptr; 
 
     std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node = nullptr; 
+
+    std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node = nullptr; 
+
 
     rclcpp::executors::MultiThreadedExecutor executor;
 
@@ -1469,7 +1523,15 @@ int main(int argc, char * argv[])
     ik_validator_node = std::make_shared<manipulation::IKValidator>(ik_validator_opts);
     executor.add_node(ik_validator_node);
 
-    auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node, obstacle_graph_node, ik_validator_node);
+    cloud_box_filter_node = std::make_shared<manipulation::CloudBoxFilter>(cloud_box_filter_opts);
+    executor.add_node(cloud_box_filter_node);
+
+    bridge_to_inference_node = std::make_shared<drl_to_pick_cpp::BridgeToInference>(bridge_to_inference_opts);
+    executor.add_node(bridge_to_inference_node);
+
+    auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node, 
+        obstacle_graph_node, ik_validator_node, cloud_box_filter_node, bridge_to_inference_node);
+
     executor.add_node(server_node);
 
     executor.spin();
