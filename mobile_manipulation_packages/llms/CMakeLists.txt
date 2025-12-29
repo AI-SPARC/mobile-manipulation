@@ -1,45 +1,110 @@
 cmake_minimum_required(VERSION 3.8)
 project(llms)
 
-# 1. Dependências do ROS
+# ==========================================
+# 1. DEPENDÊNCIAS
+# ==========================================
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(vision_msgs REQUIRED)
+find_package(CURL REQUIRED)           
+find_package(nlohmann_json REQUIRED)   
+find_package(SQLite3 REQUIRED)         
 
-# 2. Dependências de Sistema (HTTP e JSON)
-find_package(CURL REQUIRED)
-find_package(nlohmann_json REQUIRED)
+# ==========================================
+# 2. EXECUTÁVEL: bridge_to_phi_3.5 (Cliente Ollama)
+# ==========================================
+add_executable(bridge_to_phi_3.5 src/bridge_to_phi_3.5.cpp)
 
-add_executable(bridge_to_llama src/bridge_to_llama.cpp)
-
-# 3. Diretórios de Include
-# Garante que o compilador ache o seu "include/OllamaClient.hpp"
-target_include_directories(bridge_to_llama PUBLIC
+target_include_directories(bridge_to_phi_3.5 PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${CURL_INCLUDE_DIRS}
 )
 
-# 4. Linkar bibliotecas do SISTEMA (CURL, JSON)
-# Use target_link_libraries para coisas que NÃO são ROS
-target_link_libraries(bridge_to_llama
+target_link_libraries(bridge_to_phi_3.5
   ${CURL_LIBRARIES}
   nlohmann_json::nlohmann_json
 )
 
-# 5. Linkar bibliotecas do ROS (A CORREÇÃO ESTÁ AQUI)
-# ament_target_dependencies gerencia automaticamente os targets complexos de mensagens
-ament_target_dependencies(bridge_to_llama
+ament_target_dependencies(bridge_to_phi_3.5
   rclcpp
   std_msgs
 )
 
-# 6. Instalação
-install(TARGETS bridge_to_llama
-  DESTINATION lib/${PROJECT_NAME})
+# ==========================================
+# 3. BIBLIOTECA: world_state_node (Banco de Dados)
+# ==========================================
+# Esta é a lib que você quer usar no outro pacote
+add_library(world_state_node SHARED
+  src/world_state_node.cpp
+)
 
-# 7. Copiar a pasta include (opcional, mas boa prática se o header for usado externamente)
+# Adiciona o diretório include para a biblioteca
+target_include_directories(world_state_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(world_state_node
+  rclcpp_components::component 
+  SQLite::SQLite3             
+  nlohmann_json::nlohmann_json
+)
+
+ament_target_dependencies(world_state_node
+  rclcpp
+  rclcpp_components
+  std_msgs
+  vision_msgs
+)
+
+# Registra o componente para uso via Composition ou ros2 run
+rclcpp_components_register_node(world_state_node
+  PLUGIN "llms::WorldStateNode"
+  EXECUTABLE world_state_server
+)
+
+# ==========================================
+# 4. EXPORTAÇÃO E INSTALAÇÃO (CRUCIAL)
+# ==========================================
+
+# Instala o executável da ponte (Ollama)
+install(TARGETS bridge_to_phi_3.5
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Instala a biblioteca do componente E EXPORTA O TARGET
+# O nome "export_llms" cria o vínculo para outros pacotes
+install(TARGETS world_state_node
+  EXPORT export_llms
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+# Instala os headers (hpp)
 install(DIRECTORY include/
-  DESTINATION include/${PROJECT_NAME})
+  DESTINATION include
+)
+
+# --- AMENT EXPORTS ---
+# Isso avisa o CMake do outro pacote onde estão os headers
+ament_export_include_directories(include)
+
+# Isso avisa o outro pacote quais libs ele precisa carregar junto
+ament_export_dependencies(
+  rclcpp
+  rclcpp_components
+  std_msgs
+  vision_msgs
+  SQLite3
+  nlohmann_json
+)
+
+# Isso exporta o target "world_state_node" para ser visível como "llms::world_state_node"
+ament_export_targets(export_llms HAS_LIBRARY_TARGET)
 
 ament_package()

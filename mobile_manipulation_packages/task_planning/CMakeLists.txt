@@ -41,10 +41,23 @@ find_package(manipulation REQUIRED)
 find_package(storage_manager REQUIRED)
 find_package(navigation REQUIRED)
 find_package(drl_to_pick_cpp REQUIRED)
+find_package(llms REQUIRED)
 
 add_executable(server_node src/server_node.cpp)
+add_executable(server_node_with_llms src/server_node_with_llms.cpp)
 
 target_include_directories(server_node
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${manipulation_INCLUDE_DIRS}
+    ${navigation_INCLUDE_DIRS}
+    ${storage_manager_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_include_directories(server_node_with_llms
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -83,6 +96,29 @@ ament_target_dependencies(server_node
   storage_manager
 )
 
+ament_target_dependencies(server_node_with_llms
+  rclcpp
+  std_msgs
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_sensor_msgs
+  tf2_geometry_msgs
+  tf2_eigen
+  pcl_conversions
+  trajectory_msgs
+  vision_msgs
+  message_filters
+  moveit_ros_planning_interface
+  mobile_manipulation_interfaces
+  behaviortree_cpp
+  Eigen3
+  storage_manager
+)
+
 target_link_libraries(server_node
   ${PCL_LIBRARIES}
   ${GLEW_LIBRARIES}
@@ -95,8 +131,23 @@ target_link_libraries(server_node
   drl_to_pick_cpp::drl_to_pick_cpp
 )
 
+target_link_libraries(server_node_with_llms
+  ${PCL_LIBRARIES}
+  ${GLEW_LIBRARIES}
+  ${OpenGL_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  yaml-cpp
+  ${manipulation_LIBRARIES}
+  ${storage_manager_LIBRARIES}
+  ${navigation_LIBRARIES}
+  drl_to_pick_cpp::drl_to_pick_cpp
+  llms::world_state_node
+)
+
 install(
-  TARGETS server_node
+  TARGETS 
+  server_node 
+  server_node_with_llms
   DESTINATION lib/${PROJECT_NAME}
 )
 

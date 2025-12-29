@@ -54,6 +54,9 @@
 
 #include <drl_to_pick_cpp/BridgeToInference.hpp>
 
+#include <llms/WorldStateNode.hpp>
+
+
 namespace BT
 {
     // DOC-START: convertFromString
@@ -178,7 +181,8 @@ public:
         std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node,
         std::shared_ptr<manipulation::IKValidator> ik_validator_node,
         std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node,
-        std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node
+        std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node,
+        std::shared_ptr<llms::WorldStateNode> world_state_node
     )
     : Node("server_node"),
     gripper_monitor_node_(gripper_node),
@@ -188,7 +192,8 @@ public:
     obstacle_graph_node_(obstacle_graph_node),
     ik_validator_node_(ik_validator_node),
     cloud_box_filter_node_(cloud_box_filter_node),
-    bridge_to_inference_node_(bridge_to_inference_node)
+    bridge_to_inference_node_(bridge_to_inference_node),
+    world_state_node_(world_state_node)
     {
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
@@ -196,12 +201,6 @@ public:
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         std::string bt_xml_path = this->get_parameter("bt_xml_path").as_string();
-
-        // 1. Subscribers:
-        // Ouve as detecções do YOLO ("vision_msgs")
-        sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-            "/bbox_3d_with_labels", 10,
-            std::bind(&ServerNode::detection_callback, this, std::placeholders::_1));
 
         // Ouve a posição do robô ("nav_msgs")
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -233,16 +232,6 @@ public:
         // Timer para debug (publica pose do alvo)
         timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&ServerNode::publish_pose, this));
 
-        // Carrega lista de objetos permitidos do YAML
-        if(!yaml_file.empty())
-        {
-            loadLocationsFromYaml(yaml_file);
-        }
-
-        
-
-        // Publishers
-
     }
     // DOC-END: ServerNode
 
@@ -267,8 +256,10 @@ private:
 
     // DOC-START: member_variables
     // --- Injeção de Dependências ---
+    // Ponteiro para o nó que cria/atualiza o banco de dados com as informações sobre os objetos na cena.
+    std::shared_ptr<llms::WorldStateNode> world_state_node_;
     // Ponteiro para o nó que envia a point cloud via msgpack para o arquivo python que faz a inferência no graspnet.
-     std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
+    std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
     // Ponteiro para o nó que retira a point cloud da bounding box do objeto e depois aumenta a quantidade de pontos para melhor inferência.
     std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node_;
     // Ponteiro para o nó que verifica se o robô consegue achar uma IK para uma série de pontos passados.
@@ -1100,24 +1091,6 @@ private:
     }
     // DOC-END: bt_loop
 
-    // DOC-START: loadLocationsFromYaml
-    // Carrega do YAML a lista de classes de objetos (labels) que o robô está autorizado a pegar.
-    void loadLocationsFromYaml(const std::string &yaml_path)
-    {
-        try
-        {
-            YAML::Node config = YAML::LoadFile(yaml_path);
-            for (const auto &label_node : config) {
-                authorized_labels.insert(label_node.first.as<std::string>());
-            }
-        }
-        catch (const YAML::Exception &e)
-        {
-            RCLCPP_ERROR(this->get_logger(), "Failed to load YAML: %s", e.what());
-        }
-    }
-    // DOC-END: loadLocationsFromYaml
-
     // DOC-START: odom_callback
     // Callback de Odometria: Atualiza a posição (x, y) do robô.
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
@@ -1129,64 +1102,6 @@ private:
         pose_z = 0.0; // Assume robô em plano 2D
     }
     // DOC-END: odom_callback
-
-    // DOC-START: detection_callback
-    // Callback de Visão (YOLO/Depth).
-    // Filtra detecções, verifica se o objeto é autorizado e se é novo.
-    void detection_callback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
-    {
-        std::lock_guard<std::mutex> lock(bt_mutex_);
-
-        // 1. Modo de Rastreamento: Se já temos um alvo, apenas atualiza a posição dele.
-        if (!current_target_id_.empty() || has_new_object_)
-        {
-            for (const auto &det : msg->detections)
-            {
-                if (det.results.empty()) continue;
-                std::string raw_id = det.results[0].hypothesis.class_id;
-
-                if (raw_id == current_target_id_)
-                {
-                    current_target_pose_.position = det.bbox.center.position;
-                    current_target_pose_.orientation = det.bbox.center.orientation;
-                    cached_object_.pose = current_target_pose_;
-                    cached_object_.size = det.bbox.size;
-                    return;
-                }
-            }
-            return;
-        }
-
-        // 2. Modo de Busca: Procura um novo objeto válido.
-        for (const auto &det : msg->detections)
-        {
-            if (det.results.empty()) continue;
-
-            std::string raw_id = det.results[0].hypothesis.class_id;
-            std::string label = raw_id;
-            size_t pos = raw_id.find('_');
-            if (pos != std::string::npos) label = raw_id.substr(0, pos);
-
-            // Verifica lista de autorização e lista de 'já pegos'
-            if (authorized_labels.find(label) == authorized_labels.end()) continue;
-            if (picked.find(raw_id) != picked.end()) continue;
-
-            // Novo objeto encontrado!
-            geometry_msgs::msg::Pose pose;
-            pose.position = det.bbox.center.position;
-            pose.orientation = det.bbox.center.orientation;
-
-            cached_object_.id = raw_id;
-            cached_object_.pose = pose;
-            cached_object_.size = det.bbox.size;
-            has_new_object_ = true; // Acorda a Behavior Tree
-
-            RCLCPP_INFO(this->get_logger(), "Nova detecção salva: '%s'", raw_id.c_str());
-            break;
-        }
-    }
-    // DOC-END: detection_callback
-
 
     // DOC-START: cancel_controller_goal
     // Cancela o movimento do robô se necessário (ex: recálculo de rota).
@@ -1489,6 +1404,9 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions bridge_to_inference_opts;
     bridge_to_inference_opts.arguments({"--ros-args", "-r", "__node:=bridge_to_inference"});
 
+    rclcpp::NodeOptions world_state_node_opts;
+    world_state_node_opts.arguments({"--ros-args", "-r", "__node:=world_state_node"});
+
     std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
     std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
 
@@ -1500,6 +1418,9 @@ int main(int argc, char * argv[])
     std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node = nullptr; 
 
     std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node = nullptr; 
+
+    std::shared_ptr<llms::WorldStateNode> world_state_node = nullptr; 
+
 
 
     rclcpp::executors::MultiThreadedExecutor executor;
@@ -1538,8 +1459,11 @@ int main(int argc, char * argv[])
     bridge_to_inference_node = std::make_shared<drl_to_pick_cpp::BridgeToInference>(bridge_to_inference_opts);
     executor.add_node(bridge_to_inference_node);
 
+    world_state_node = std::make_shared<llms::WorldStateNode>(world_state_node_opts);
+    executor.add_node(world_state_node);
+
     auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node, 
-        obstacle_graph_node, ik_validator_node, cloud_box_filter_node, bridge_to_inference_node);
+        obstacle_graph_node, ik_validator_node, cloud_box_filter_node, bridge_to_inference_node, world_state_node);
 
     executor.add_node(server_node);
 
