@@ -1,0 +1,46 @@
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="PlaceRoutine">
+    <Fallback name="PlaceOrCleanup">
+        
+        <Sequence name="ApproachAndPlace">
+            <RetryUntilSuccessful num_attempts="3">
+                <Fallback name="EnsureProximityStorage">
+                    <IsReachable target_pose="{final_placement_pose}"
+                            object_id="{storage_id}" 
+                            robot_base_z="0.11" 
+                            max_reach_3d="0.9" 
+                            adjustment_pose="{nav_target}"/>
+                    
+                    
+                        <Sequence name="PlanAndExecuteDelivery">                        
+                            <ComputePath planner="a_star" target="{nav_target}"/>
+                            
+                            <ReactiveSequence name="MonitorMoveAndCargo">
+                                <IsStillReachable/>
+                                <IsGripperHoldingObject/> 
+                                <IsPathClear/> 
+                                <FollowPath/> 
+                            </ReactiveSequence>
+                        </Sequence>
+                </Fallback>
+             </RetryUntilSuccessful>
+
+            <Sequence name="OrganizeSequence">
+                <PlaceObject pose="{final_placement_pose}"/>
+            </Sequence>
+            
+            <ClearTarget/> 
+        </Sequence>
+
+        <Sequence name="FailureRecovery">
+            <DecrementStorageCount storage_id="{storage_id}"/>
+            <AlwaysFailure/>
+        </Sequence>
+
+    </Fallback>
+  </BehaviorTree>
+
+
+
+</root>

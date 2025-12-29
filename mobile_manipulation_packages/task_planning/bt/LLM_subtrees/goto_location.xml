@@ -1,0 +1,13 @@
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="GoToLocation">
+    <Sequence name="PlanAndExecute">
+        <ComputePath planner="a_star" target="{nav_target}"/>
+        
+        <ReactiveSequence name="MonitorAndMove">
+            <IsPathClear/>  
+            <FollowPath/>   
+        </ReactiveSequence>
+        </Sequence>
+  </BehaviorTree>
+</root>
