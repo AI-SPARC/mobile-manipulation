@@ -18,7 +18,6 @@ public:
         curl_global_cleanup();
     }
 
-    // Função que envia o comando e retorna o JSON já parseado
     json infer(const std::string& user_command) {
         CURL* curl;
         CURLcode res;
@@ -26,32 +25,30 @@ public:
 
         curl = curl_easy_init();
         if(curl) {
-            // Configura Headers
             struct curl_slist* headers = NULL;
             headers = curl_slist_append(headers, "Content-Type: application/json");
             
-            // Monta o Payload JSON
             json payload = {
-                {"model", "phi35_leve"}, // <--- SEU MODELO OTIMIZADO
+                {"model", "phi35_leve"},
                 {"prompt", build_prompt(user_command)},
-                {"format", "json"},      // <--- FORÇA SAÍDA JSON
-                {"stream", false},       // <--- Resposta completa de uma vez
+                {"format", "json"},
+                {"stream", false},
                 {"options", {
-                    {"temperature", 0.0} // <--- Zero criatividade
+                    {"temperature", 0.0},
+                    {"top_p", 0.1},
+                    {"repeat_penalty", 1.2}
                 }}
             };
 
             std::string payload_str = payload.dump();
 
-            // Configura o cURL
             curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:11434/api/generate");
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_str.c_str());
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L); // Timeout de 10s
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
 
-            // Executa
             res = curl_easy_perform(curl);
             
             curl_slist_free_all(headers);
@@ -63,11 +60,8 @@ public:
             }
         }
 
-        // Parse da resposta
         try {
             auto response_wrapper = json::parse(readBuffer);
-            // O Ollama devolve o texto dentro de "response". 
-            // Esse texto interno é o nosso JSON final.
             std::string actual_json_str = response_wrapper["response"];
             return json::parse(actual_json_str);
         } catch (const std::exception& e) {
@@ -82,18 +76,46 @@ private:
         return size * nmemb;
     }
 
-    // Aqui definimos suas Habilidades (Skills)
     std::string build_prompt(const std::string& cmd) {
-        return R"(
-LISTA DE FERRAMENTAS (SKILLS):
-1. {"skill": "pick", "params": {"id": "obj_id"}} 
-   - Pegar/Segurar objeto.
-2. {"skill": "place", "params": {"id": "loc_name"}} 
-   - Guardar/Colocar objeto.
-3. {"skill": "goto_location", "params": {"id": "loc_name"}} 
-   - Ir/Navegar para local.
+        return R"(You are a robot task planner. Convert commands to JSON.
 
-USER COMMAND: )" + cmd;
+AVAILABLE SKILLS (use EXACTLY these names):
+- "pick" = grab/take/pick up an object
+- "place" = put/place/store an object somewhere  
+- "goto_location" = go/move/navigate to a location
+
+OUTPUT FORMAT (strict JSON):
+{"commands": [{"skill": "SKILL_NAME", "params": {"id": "OBJECT_ID"}}]}
+
+RULES:
+1. Field name must be exactly "skill" (not "skills", not "skillful", not anything else)
+2. Field name must be exactly "params" with "id" inside
+3. Output ONLY valid JSON, no explanation
+4. Extract object IDs from the command (e.g., "box_01", "storage_02")
+
+EXAMPLES:
+
+Input: "Pick up box_01"
+Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}]}
+
+Input: "Take box_01 and put it in storage_02"
+Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}, {"skill": "place", "params": {"id": "storage_02"}}]}
+
+Input: "Go to storage_02"
+Output: {"commands": [{"skill": "goto_location", "params": {"id": "storage_02"}}]}
+
+Input: "Grab box_01 and go to storage_02 but don't place it"
+Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}, {"skill": "goto_location", "params": {"id": "storage_02"}}]}
+
+Input: "Pegue a box_01"
+Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}]}
+
+Input: "Leve box_01 para storage_02"
+Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}, {"skill": "goto_location", "params": {"id": "storage_02"}}, {"skill": "place", "params": {"id": "storage_02"}}]}
+
+Now convert this command to JSON:
+Input: ")" + cmd + R"("
+Output: )";
     }
 };
 
