@@ -79,7 +79,7 @@ void WorldStateNode::handle_detections(const vision_msgs::msg::Detection3DArray:
     for (const auto& detection : msg->detections)
     {
         if (detection.results.empty()) continue;
-        
+
         std::string obj_id = detection.results[0].hypothesis.class_id;
         if (obj_id.empty()) continue;
 
