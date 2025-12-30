@@ -28,17 +28,24 @@ public:
             struct curl_slist* headers = NULL;
             headers = curl_slist_append(headers, "Content-Type: application/json");
             
+            // --- AQUI ESTÁ A MUDANÇA PARA SALVAR SUA VRAM ---
             json payload = {
                 {"model", "phi35_leve"},
                 {"prompt", build_prompt(user_command)},
                 {"format", "json"},
                 {"stream", false},
+                
+                // keep_alive: 0 força o modelo a sair da RAM/VRAM imediatamente após a resposta.
+                // Sem isso, ele ficaria lá por 5 minutos ocupando seus 4GB.
+                {"keep_alive", 0}, 
+
                 {"options", {
                     {"temperature", 0.0},
                     {"top_p", 0.1},
                     {"repeat_penalty", 1.2}
                 }}
             };
+            // ------------------------------------------------
 
             std::string payload_str = payload.dump();
 
@@ -47,7 +54,7 @@ public:
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_str.c_str());
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L); // Timeout aumentado para garantir tempo de load
 
             res = curl_easy_perform(curl);
             
