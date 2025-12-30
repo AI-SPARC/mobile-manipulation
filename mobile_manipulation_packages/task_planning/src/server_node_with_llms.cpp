@@ -824,18 +824,24 @@ private:
                     
                     RCLCPP_INFO(this->get_logger(), "Registrando árvore: %s", unique_tree_name.c_str());
                     
+                    groot_publisher_.reset();
+                    
                     factory_.registerBehaviorTreeFromText(modified_xml);
                     
                     bt_tree_ = std::make_unique<BT::Tree>(
                         factory_.createTree(unique_tree_name)
                     );
 
-                    groot_publisher_ = std::make_unique<BT::Groot2Publisher>(*bt_tree_, 1666);
+                    try {
+                        groot_publisher_ = std::make_unique<BT::Groot2Publisher>(*bt_tree_, 1666);
+                    } catch (const std::exception& e) {
+                        RCLCPP_WARN(this->get_logger(), "Groot2 não disponível: %s", e.what());
+                    }
 
                     RCLCPP_INFO(this->get_logger(), "Nova árvore '%s' criada com sucesso!", unique_tree_name.c_str());
-
-                    RCLCPP_INFO(this->get_logger(), "\n%s", BT::WriteTreeToXML(*bt_tree_, false, false).c_str());
-
+                    
+                    RCLCPP_INFO(this->get_logger(), "Árvore expandida:\n%s", 
+                               BT::WriteTreeToXML(*bt_tree_, false, false).c_str());
                 }
                 catch (const std::exception& e)
                 {
@@ -859,12 +865,14 @@ private:
                     {
                         RCLCPP_INFO(this->get_logger(), "========== ÁRVORE: SUCESSO ==========");
                         reset_states();
-                        bt_tree_.reset();  // Libera a árvore para receber nova
+                        groot_publisher_.reset();  // Libera porta do Groot
+                        bt_tree_.reset();
                     }
                     else if (result == BT::NodeStatus::FAILURE)
                     {
                         RCLCPP_ERROR(this->get_logger(), "========== ÁRVORE: FALHOU ==========");
                         reset_states();
+                        groot_publisher_.reset();  // Libera porta do Groot
                         bt_tree_.reset();
                     }
                 }

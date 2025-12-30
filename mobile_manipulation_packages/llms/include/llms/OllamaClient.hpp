@@ -28,24 +28,18 @@ public:
             struct curl_slist* headers = NULL;
             headers = curl_slist_append(headers, "Content-Type: application/json");
             
-            // --- AQUI ESTÁ A MUDANÇA PARA SALVAR SUA VRAM ---
             json payload = {
                 {"model", "phi35_leve"},
                 {"prompt", build_prompt(user_command)},
                 {"format", "json"},
                 {"stream", false},
-                
-                // keep_alive: 0 força o modelo a sair da RAM/VRAM imediatamente após a resposta.
-                // Sem isso, ele ficaria lá por 5 minutos ocupando seus 4GB.
                 {"keep_alive", 0}, 
-
                 {"options", {
                     {"temperature", 0.0},
                     {"top_p", 0.1},
-                    {"repeat_penalty", 1.2}
+                    {"num_predict", 500}
                 }}
             };
-            // ------------------------------------------------
 
             std::string payload_str = payload.dump();
 
@@ -54,7 +48,7 @@ public:
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_str.c_str());
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L); // Timeout aumentado para garantir tempo de load
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
 
             res = curl_easy_perform(curl);
             
@@ -70,9 +64,13 @@ public:
         try {
             auto response_wrapper = json::parse(readBuffer);
             std::string actual_json_str = response_wrapper["response"];
+            
+            std::cout << "[OllamaClient] Resposta raw: " << actual_json_str << std::endl;
+            
             return json::parse(actual_json_str);
         } catch (const std::exception& e) {
             std::cerr << "Erro ao ler JSON da LLM: " << e.what() << std::endl;
+            std::cerr << "[OllamaClient] Buffer recebido: " << readBuffer << std::endl;
             return json::array();
         }
     }
@@ -84,45 +82,14 @@ private:
     }
 
     std::string build_prompt(const std::string& cmd) {
-        return R"(You are a robot task planner. Convert commands to JSON.
+        std::string prompt = R"DELIM(Convert to JSON. Skills: pick, place, goto_location. Use "x;y;z" for coordinates.
 
-AVAILABLE SKILLS (use EXACTLY these names):
-- "pick" = grab/take/pick up an object
-- "place" = put/place/store an object somewhere  
-- "goto_location" = go/move/navigate to a location
+"Pick box_01" = {"commands":[{"skill":"pick","params":{"id":"box_01"}}]}
+"Go to (1,2,3)" = {"commands":[{"skill":"goto_location","params":{"id":"1;2;3"}}]}
+"Pick box and go to (0,0,0)" = {"commands":[{"skill":"pick","params":{"id":"box"}},{"skill":"goto_location","params":{"id":"0;0;0"}}]}
 
-OUTPUT FORMAT (strict JSON):
-{"commands": [{"skill": "SKILL_NAME", "params": {"id": "OBJECT_ID"}}]}
-
-RULES:
-1. Field name must be exactly "skill" (not "skills", not "skillful", not anything else)
-2. Field name must be exactly "params" with "id" inside
-3. Output ONLY valid JSON, no explanation
-4. Extract object IDs from the command (e.g., "box_01", "storage_02")
-
-EXAMPLES:
-
-Input: "Pick up box_01"
-Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}]}
-
-Input: "Take box_01 and put it in storage_02"
-Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}, {"skill": "place", "params": {"id": "storage_02"}}]}
-
-Input: "Go to storage_02"
-Output: {"commands": [{"skill": "goto_location", "params": {"id": "storage_02"}}]}
-
-Input: "Grab box_01 and go to storage_02 but don't place it"
-Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}, {"skill": "goto_location", "params": {"id": "storage_02"}}]}
-
-Input: "Pegue a box_01"
-Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}]}
-
-Input: "Leve box_01 para storage_02"
-Output: {"commands": [{"skill": "pick", "params": {"id": "box_01"}}, {"skill": "goto_location", "params": {"id": "storage_02"}}, {"skill": "place", "params": {"id": "storage_02"}}]}
-
-Now convert this command to JSON:
-Input: ")" + cmd + R"("
-Output: )";
+)DELIM";
+        return prompt + "\"" + cmd + "\" = ";
     }
 };
 
