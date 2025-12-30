@@ -1,9 +1,6 @@
 <root BTCPP_format="4">
-  <BehaviorTree ID="Pick">
-    <in_port name="target_pose" />
-    <in_port name="target_id" />
-    <in_port name="target_size" />
 
+  <BehaviorTree ID="Pick">
     <RetryUntilSuccessful num_attempts="3">
       <Sequence name="AcquireSequence">
         
@@ -33,4 +30,13 @@
       </Sequence>
     </RetryUntilSuccessful>
   </BehaviorTree>
+
+  <TreeNodesModel>
+    <SubTree ID="Pick">
+      <input_port name="target_id" description="ID do objeto a ser pego"/>
+      <input_port name="target_pose" description="Pose do objeto (x;y;z)"/>
+      <input_port name="target_size" description="Tamanho do objeto (w;h;d)"/>
+    </SubTree>
+  </TreeNodesModel>
+
 </root>

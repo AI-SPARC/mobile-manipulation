@@ -10,7 +10,7 @@ namespace llms
 WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 : Node("world_state_node", options), db_(nullptr)
 {
-    this->declare_parameter<std::string>("database_path", "");
+    this->declare_parameter<std::string>("database_path", "/home/momesso/AQUI/robot_data.db");
 
     std::string db_path = this->get_parameter("database_path").as_string();
     

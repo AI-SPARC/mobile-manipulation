@@ -12,6 +12,7 @@ find_package(vision_msgs REQUIRED)
 find_package(CURL REQUIRED)           
 find_package(nlohmann_json REQUIRED)   
 find_package(SQLite3 REQUIRED)         
+find_package(behaviortree_cpp REQUIRED)
 
 # ==========================================
 # 2. EXECUTÁVEL: bridge_to_phi_3.5 (Cliente Ollama)
@@ -27,11 +28,13 @@ target_include_directories(bridge_to_phi_3.5 PUBLIC
 target_link_libraries(bridge_to_phi_3.5
   ${CURL_LIBRARIES}
   nlohmann_json::nlohmann_json
+  SQLite::SQLite3
 )
 
 ament_target_dependencies(bridge_to_phi_3.5
   rclcpp
   std_msgs
+  behaviortree_cpp
 )
 
 # ==========================================

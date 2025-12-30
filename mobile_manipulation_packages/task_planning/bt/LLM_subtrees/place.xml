@@ -1,6 +1,6 @@
-<root BTCPP_format="4" main_tree_to_execute="MainTree">
+<root BTCPP_format="4">
 
-  <BehaviorTree ID="PlaceRoutine">
+  <BehaviorTree ID="Place">
     <Fallback name="PlaceOrCleanup">
         
         <Sequence name="ApproachAndPlace">
@@ -12,17 +12,16 @@
                             max_reach_3d="0.9" 
                             adjustment_pose="{nav_target}"/>
                     
-                    
-                        <Sequence name="PlanAndExecuteDelivery">                        
-                            <ComputePath planner="a_star" target="{nav_target}"/>
-                            
-                            <ReactiveSequence name="MonitorMoveAndCargo">
-                                <IsStillReachable/>
-                                <IsGripperHoldingObject/> 
-                                <IsPathClear/> 
-                                <FollowPath/> 
-                            </ReactiveSequence>
-                        </Sequence>
+                    <Sequence name="PlanAndExecuteDelivery">                        
+                        <ComputePath planner="a_star" target="{nav_target}"/>
+                        
+                        <ReactiveSequence name="MonitorMoveAndCargo">
+                            <IsStillReachable/>
+                            <IsGripperHoldingObject/> 
+                            <IsPathClear/> 
+                            <FollowPath/> 
+                        </ReactiveSequence>
+                    </Sequence>
                 </Fallback>
              </RetryUntilSuccessful>
 
@@ -41,6 +40,12 @@
     </Fallback>
   </BehaviorTree>
 
-
+  <!-- Documentação das portas para Groot -->
+  <TreeNodesModel>
+    <SubTree ID="Place">
+      <input_port name="storage_id" description="ID do local de armazenamento"/>
+      <input_port name="final_placement_pose" description="Pose final para colocar objeto (x;y;z)"/>
+    </SubTree>
+  </TreeNodesModel>
 
 </root>

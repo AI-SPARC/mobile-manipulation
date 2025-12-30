@@ -1,4 +1,4 @@
-<root BTCPP_format="4" main_tree_to_execute="MainTree">
+<root BTCPP_format="4">
 
   <BehaviorTree ID="GoToLocation">
     <Sequence name="PlanAndExecute">
@@ -8,6 +8,14 @@
             <IsPathClear/>  
             <FollowPath/>   
         </ReactiveSequence>
-        </Sequence>
+    </Sequence>
   </BehaviorTree>
+
+  <!-- Documentação das portas para Groot -->
+  <TreeNodesModel>
+    <SubTree ID="GoToLocation">
+      <input_port name="nav_target" description="Pose de destino (x;y;z)"/>
+    </SubTree>
+  </TreeNodesModel>
+
 </root>

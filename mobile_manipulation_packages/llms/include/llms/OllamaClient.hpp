@@ -49,7 +49,7 @@ public:
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_str.c_str());
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // Timeout de 10s
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L); // Timeout de 10s
 
             // Executa
             res = curl_easy_perform(curl);
@@ -88,9 +88,9 @@ private:
 LISTA DE FERRAMENTAS (SKILLS):
 1. {"skill": "pick", "params": {"id": "obj_id"}} 
    - Pegar/Segurar objeto.
-2. {"skill": "place", "params": {"location": "loc_name"}} 
+2. {"skill": "place", "params": {"id": "loc_name"}} 
    - Guardar/Colocar objeto.
-3. {"skill": "goto_location", "params": {"location": "loc_name"}} 
+3. {"skill": "goto_location", "params": {"id": "loc_name"}} 
    - Ir/Navegar para local.
 
 USER COMMAND: )" + cmd;
