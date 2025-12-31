@@ -48,7 +48,7 @@ public:
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_str.c_str());
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 45L); 
 
             res = curl_easy_perform(curl);
             
@@ -65,6 +65,7 @@ public:
             auto response_wrapper = json::parse(readBuffer);
             std::string actual_json_str = response_wrapper["response"];
             
+           
             std::cout << "[OllamaClient] Resposta raw: " << actual_json_str << std::endl;
             
             return json::parse(actual_json_str);
@@ -82,11 +83,13 @@ private:
     }
 
     std::string build_prompt(const std::string& cmd) {
-        std::string prompt = R"DELIM(Convert to JSON. Skills: pick, place, goto_location. Use "x;y;z" for coordinates.
+        std::string prompt = R"DELIM(Convert to JSON. Skills: pick, place, goto_location.
+Coordinates: "x;y;z". Range: "prefix_start:prefix_end". Variables: $item, $dest.
 
 "Pick box_01" = {"commands":[{"skill":"pick","params":{"id":"box_01"}}]}
 "Go to (1,2,3)" = {"commands":[{"skill":"goto_location","params":{"id":"1;2;3"}}]}
-"Pick box and go to (0,0,0)" = {"commands":[{"skill":"pick","params":{"id":"box"}},{"skill":"goto_location","params":{"id":"0;0;0"}}]}
+"Pick box_01 to box_03, place in storage" = {"commands":[{"loop":{"item":"box_01:box_03"},"do":[{"skill":"pick","params":{"id":"$item"}},{"skill":"place","params":{"id":"storage"}}]}]}
+"Pick box_01 to box_03, place in storage_01 to storage_03" = {"commands":[{"loop":{"item":"box_01:box_03","dest":"storage_01:storage_03"},"do":[{"skill":"pick","params":{"id":"$item"}},{"skill":"place","params":{"id":"$dest"}}]}]}
 
 )DELIM";
         return prompt + "\"" + cmd + "\" = ";
