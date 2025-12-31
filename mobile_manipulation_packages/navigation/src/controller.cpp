@@ -16,8 +16,23 @@ class RobotController : public rclcpp::Node
 {
 public:
     RobotController() : Node("controller"), 
-                              pose_initialized_(false)
+        pose_initialized_(false)
     {
+        this->declare_parameter<double>("linear_speed", 1.75);
+        this->declare_parameter<double>("angular_speed", 3.0);
+        this->declare_parameter<double>("waypoint_tolerance", 0.075);
+        this->declare_parameter<double>("lookahead_distance", 0.15);
+
+        linear_speed_ = this->get_parameter("linear_speed").get_parameter_value().get<double>();
+        angular_speed_ = this->get_parameter("angular_speed").get_parameter_value().get<double>();
+        waypoint_tolerance_ = this->get_parameter("waypoint_tolerance").get_parameter_value().get<double>();
+        lookahead_distance_ = this->get_parameter("lookahead_distance").get_parameter_value().get<double>();
+
+        RCLCPP_INFO(this->get_logger(), "linear_speed is set to: %.4lf", linear_speed_);
+        RCLCPP_INFO(this->get_logger(), "angular_speed is set to: %.4lf", angular_speed_);
+        RCLCPP_INFO(this->get_logger(), "waypoint_tolerance is set to: %.4lf", waypoint_tolerance_);
+        RCLCPP_INFO(this->get_logger(), "lookahead_distance is set to: %.4lf", lookahead_distance_);
+
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
         
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -30,11 +45,6 @@ public:
             std::bind(&RobotController::handle_cancel, this, std::placeholders::_1),
             std::bind(&RobotController::handle_accepted, this, std::placeholders::_1));
 
-        linear_speed_ = 1.75;
-        angular_speed_ = 3.0;
-        
-        waypoint_tolerance_ = 0.075; 
-        lookahead_distance_ = 0.15; 
 
         RCLCPP_INFO(this->get_logger(), "RobotController iniciado (Logica de Parada Forçada no Final)");
     }
@@ -219,7 +229,6 @@ private:
                 in_zone_2 = false;
             }
 
-            size_t target_idx = current_idx;
             double dx, dy, dist_to_target;
             
             for (size_t i = current_idx; i < path.size(); i++)
@@ -228,7 +237,6 @@ private:
                 double d_y = path[i].position.y - local_pose.position.y;
                 double dist = std::hypot(d_x, d_y);
                 
-                target_idx = i;
                 dx = d_x;
                 dy = d_y;
                 dist_to_target = dist;
