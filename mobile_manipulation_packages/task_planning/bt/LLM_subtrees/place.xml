@@ -6,7 +6,7 @@
         <Sequence name="ApproachAndPlace">
             <RetryUntilSuccessful num_attempts="3">
                 <Fallback name="EnsureProximityStorage">
-                    <IsReachable target="{final_placement_pose}"
+                    <IsReachable target_pose="{final_placement_pose}"
                             object_id="{storage_id}" 
                             robot_base_z="0.11" 
                             max_reach_3d="0.9" 

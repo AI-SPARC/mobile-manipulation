@@ -1,9 +1,3 @@
-/**
- * @file server_node.cpp
- * @brief Nó central de controle (Task Planner) - Versão LLM
- * Recebe XML de BehaviorTree via tópico e executa dinamicamente
- */
-
 #include <memory>
 #include <vector>
 #include <string>
@@ -61,12 +55,14 @@
 
 namespace BT
 {
-   
+ 
+    // Converte "x;y;z" ou "x;y;z;qx;qy;qz;qw" para geometry_msgs::msg::Pose
     template <>
     inline geometry_msgs::msg::Pose convertFromString(StringView str)
     {
         geometry_msgs::msg::Pose pose;
         
+        // Inicializa com valores padrão
         pose.position.x = 0.0;
         pose.position.y = 0.0;
         pose.position.z = 0.0;
@@ -109,6 +105,7 @@ namespace BT
         return pose;
     }
 
+    // Converte "x;y;z" para geometry_msgs::msg::Vector3
     template <>
     inline geometry_msgs::msg::Vector3 convertFromString(StringView str)
     {
@@ -144,6 +141,7 @@ namespace BT
     }
 }
 
+// Estados possíveis para uma tarefa assíncrona (Action Client)
 enum class TaskState
 {
     IDLE,
@@ -152,7 +150,119 @@ enum class TaskState
     FAILURE
 };
 
-// Nó de Controle Personalizado: "Parallel Any"
+
+class ForEach : public BT::DecoratorNode
+{
+public:
+    ForEach(const std::string& name, const BT::NodeConfig& config)
+        : BT::DecoratorNode(name, config), current_index_(0) {}
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<std::string>("items"),      // Lista de items separados por ;
+            BT::InputPort<std::string>("poses"),      // Poses correspondentes
+            BT::InputPort<std::string>("sizes"),      // Sizes correspondentes
+            BT::InputPort<std::string>("dests"),      // Destinos (opcional)
+            BT::InputPort<std::string>("dest_poses"), // Poses dos destinos (opcional)
+            BT::OutputPort<std::string>("item"),      // Item atual -> blackboard
+            BT::OutputPort<std::string>("pose"),      // Pose atual -> blackboard
+            BT::OutputPort<std::string>("size"),      // Size atual -> blackboard
+            BT::OutputPort<std::string>("dest"),      // Destino atual -> blackboard
+            BT::OutputPort<std::string>("dest_pose")  // Pose do destino -> blackboard
+        };
+    }
+
+    BT::NodeStatus tick() override
+    {
+        // Primeira execução: parseia listas
+        if (current_index_ == 0 && items_.empty())
+        {
+            auto items_str = getInput<std::string>("items");
+            auto poses_str = getInput<std::string>("poses");
+            auto sizes_str = getInput<std::string>("sizes");
+            
+            if (!items_str) {
+                return BT::NodeStatus::FAILURE;
+            }
+            
+            // Usa | como delimitador de itens (para não conflitar com ; das coordenadas)
+            items_ = split(items_str.value(), '|');
+            poses_ = poses_str ? split(poses_str.value(), '|') : std::vector<std::string>{};
+            sizes_ = sizes_str ? split(sizes_str.value(), '|') : std::vector<std::string>{};
+            
+            // Destinos opcionais
+            auto dests_str = getInput<std::string>("dests");
+            auto dest_poses_str = getInput<std::string>("dest_poses");
+            dests_ = dests_str ? split(dests_str.value(), '|') : std::vector<std::string>{};
+            dest_poses_ = dest_poses_str ? split(dest_poses_str.value(), '|') : std::vector<std::string>{};
+        }
+        
+        // Verifica se terminou
+        if (current_index_ >= items_.size())
+        {
+            reset();
+            return BT::NodeStatus::SUCCESS;
+        }
+        
+        // Seta variáveis no blackboard
+        setOutput("item", items_[current_index_]);
+        if (current_index_ < poses_.size()) setOutput("pose", poses_[current_index_]);
+        if (current_index_ < sizes_.size()) setOutput("size", sizes_[current_index_]);
+        if (current_index_ < dests_.size()) setOutput("dest", dests_[current_index_]);
+        if (current_index_ < dest_poses_.size()) setOutput("dest_pose", dest_poses_[current_index_]);
+        
+        // Executa filho
+        BT::NodeStatus child_status = child_node_->executeTick();
+        
+        if (child_status == BT::NodeStatus::SUCCESS)
+        {
+            current_index_++;
+            haltChild();  // Reset filho para próxima iteração
+            return BT::NodeStatus::RUNNING;  // Continua para próximo item
+        }
+        else if (child_status == BT::NodeStatus::FAILURE)
+        {
+            reset();
+            return BT::NodeStatus::FAILURE;
+        }
+        
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void halt() override
+    {
+        reset();
+        BT::DecoratorNode::halt();
+    }
+
+private:
+    size_t current_index_;
+    std::vector<std::string> items_, poses_, sizes_, dests_, dest_poses_;
+    
+    void reset()
+    {
+        current_index_ = 0;
+        items_.clear();
+        poses_.clear();
+        sizes_.clear();
+        dests_.clear();
+        dest_poses_.clear();
+    }
+    
+    std::vector<std::string> split(const std::string& str, char delim)
+    {
+        std::vector<std::string> result;
+        std::stringstream ss(str);
+        std::string item;
+        while (std::getline(ss, item, delim)) {
+            result.push_back(item);
+        }
+        return result;
+    }
+};
+
+
 class ParallelAny : public BT::ControlNode
 {
 public:
@@ -238,18 +348,16 @@ public:
     bridge_to_inference_node_(bridge_to_inference_node),
     world_state_node_(world_state_node)
     {
-        // Parâmetros
         this->declare_parameter<std::string>("yaml_file", "");
-        this->declare_parameter<std::string>("subtrees_path", "/home/momesso/pibic/src/mobile_manipulation_packages/task_planning/bt/LLM_subtrees");
+        this->declare_parameter<std::string>("subtrees_path", "");
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         subtrees_path_ = this->get_parameter("subtrees_path").as_string();
 
-        // Subscriber para odometria
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
 
-       
+        
         bt_xml_sub_ = this->create_subscription<std_msgs::msg::String>(
             "/behavior_tree_xml", 10,
             std::bind(&ServerNode::on_bt_xml_received, this, std::placeholders::_1));
@@ -260,7 +368,6 @@ public:
         path_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Path>(this, "path");
         controller_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Controller>(this, "controller");
 
-        // Estados
         path_state_ = TaskState::IDLE;
         nav_state_ = TaskState::IDLE;
         manipulation_state_ = TaskState::IDLE;
@@ -281,7 +388,6 @@ public:
     }
 
 private:
-    // --- Injeção de Dependências ---
     std::shared_ptr<llms::WorldStateNode> world_state_node_;
     std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
     std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node_;
@@ -328,7 +434,6 @@ private:
 
     rclcpp::TimerBase::SharedPtr timer_;
 
-    // --- Behavior Tree ---
     std::thread bt_thread_;
     std::mutex bt_mutex_;
     std::mutex odom_mutex;
@@ -336,7 +441,7 @@ private:
     std::unique_ptr<BT::Tree> bt_tree_;  
     std::atomic<bool> has_new_tree_{false};  
     std::atomic<bool> running_{true};
-    std::string pending_xml_; 
+    std::string pending_xml_;  
     std::mutex xml_mutex_;
     std::atomic<int> tree_counter_{0};  
 
@@ -353,7 +458,7 @@ private:
     float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
     bool has_new_object_ = false;
 
-  
+    
     void on_bt_xml_received(const std_msgs::msg::String::SharedPtr msg)
     {
         if (msg->data.empty())
@@ -378,16 +483,17 @@ private:
         }
     }
 
-    
+   
     void setup_behavior_tree_factory()
     {
+        
+        factory_.registerNodeType<ForEach>("ForEach");
         factory_.registerNodeType<ParallelAny>("ParallelAny");
 
-    
-        // --- IsReachable ---
+       
         factory_.registerSimpleCondition("IsReachable", [&](BT::TreeNode &self)
         {
-            auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target");
+            auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target_pose");
             auto authorized_id_opt = self.getInput<std::string>("object_id");
             auto robot_base_z_opt = self.getInput<double>("robot_base_z");
             auto max_reach_3d_opt = self.getInput<double>("max_reach_3d");
@@ -497,7 +603,7 @@ private:
             }
         },
         {
-            BT::InputPort<geometry_msgs::msg::Pose>("target"),
+            BT::InputPort<geometry_msgs::msg::Pose>("target_pose"),
             BT::InputPort<std::string>("object_id"),
             BT::InputPort<double>("robot_base_z"),
             BT::InputPort<double>("max_reach_3d"),
@@ -765,7 +871,7 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "Todos os nós registrados na factory.");
 
-    
+        
         if (!subtrees_path_.empty())
         {
             try
@@ -788,7 +894,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "Factory completamente configurada.");
     }
 
-  
+    
     void bt_loop()
     {
         rclcpp::Rate rate(50);
@@ -805,17 +911,22 @@ private:
                     has_new_tree_ = false;
                 }
 
+                
                 try
                 {
+                    
                     int tree_id = tree_counter_++;
                     std::string unique_tree_name = "LLMPlan_" + std::to_string(tree_id);
                     
+                    
                     std::string modified_xml = xml_to_process;
                     
+                   
                     size_t pos = modified_xml.find("main_tree_to_execute=\"MainPlan\"");
                     if (pos != std::string::npos) {
                         modified_xml.replace(pos, 31, "main_tree_to_execute=\"" + unique_tree_name + "\"");
                     }
+                    
                     
                     pos = modified_xml.find("ID=\"MainPlan\"");
                     if (pos != std::string::npos) {
@@ -824,21 +935,28 @@ private:
                     
                     RCLCPP_INFO(this->get_logger(), "Registrando árvore: %s", unique_tree_name.c_str());
                     
+                    
                     groot_publisher_.reset();
                     
+                    
                     factory_.registerBehaviorTreeFromText(modified_xml);
+                    
                     
                     bt_tree_ = std::make_unique<BT::Tree>(
                         factory_.createTree(unique_tree_name)
                     );
 
-                    try {
+                    
+                    try 
+                    {
                         groot_publisher_ = std::make_unique<BT::Groot2Publisher>(*bt_tree_, 1666);
-                    } catch (const std::exception& e) {
+                    } 
+                    catch (const std::exception& e) {
                         RCLCPP_WARN(this->get_logger(), "Groot2 não disponível: %s", e.what());
                     }
 
                     RCLCPP_INFO(this->get_logger(), "Nova árvore '%s' criada com sucesso!", unique_tree_name.c_str());
+                    
                     
                     RCLCPP_INFO(this->get_logger(), "Árvore expandida:\n%s", 
                                BT::WriteTreeToXML(*bt_tree_, false, false).c_str());
@@ -851,12 +969,12 @@ private:
                 }
             }
 
-            // Executa tick se houver árvore
+            
             if (bt_tree_ && bt_tree_->rootNode())
             {
                 BT::NodeStatus status = bt_tree_->rootNode()->status();
 
-                // Se não está em IDLE, continua executando
+                
                 if (status == BT::NodeStatus::RUNNING || status == BT::NodeStatus::IDLE)
                 {
                     BT::NodeStatus result = bt_tree_->tickOnce();
@@ -865,14 +983,14 @@ private:
                     {
                         RCLCPP_INFO(this->get_logger(), "========== ÁRVORE: SUCESSO ==========");
                         reset_states();
-                        groot_publisher_.reset();  // Libera porta do Groot
+                        groot_publisher_.reset();  
                         bt_tree_.reset();
                     }
                     else if (result == BT::NodeStatus::FAILURE)
                     {
                         RCLCPP_ERROR(this->get_logger(), "========== ÁRVORE: FALHOU ==========");
                         reset_states();
-                        groot_publisher_.reset();  // Libera porta do Groot
+                        groot_publisher_.reset();  
                         bt_tree_.reset();
                     }
                 }
@@ -905,6 +1023,7 @@ private:
         return BT::NodeStatus::RUNNING;
     }
 
+    
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {

@@ -125,6 +125,11 @@ def generate_launch_description():
         'config',
         'storages.yaml'
     )
+
+    subtree_path = os.path.join(
+        get_package_share_directory('task_planning'),
+        'bt/LLM_subtrees'
+    )
   
     move_group_node = Node(
         package="moveit_ros_move_group",
@@ -285,6 +290,7 @@ def generate_launch_description():
         parameters=[
             {'yaml_file': pick_place_yaml},
             {'bt_xml_path': bt_file},
+            {'subtrees_path': subtree_path},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
             
             {'label_to_storage_yaml_file': label_to_storage_yaml},
@@ -348,6 +354,17 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    bridge_to_phi_35 = Node(
+        package="llms",
+        executable="bridge_to_phi_3_5",
+        name="bridge_to_phi_3_5",
+        output="screen",
+        parameters=[
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
     synchronize_isaac = Node(
         package='isaacsim_moveit',
         executable='synchronize_isaac_sim_labels',
@@ -386,7 +403,8 @@ def generate_launch_description():
         ros2_control_node,
         joint_state_broadcaster_spawner,
         panda_arm_controller_spawner,
-        server_node_with_llms,           
+        server_node_with_llms,
+        bridge_to_phi_35,           
         synchronize_isaac,
     ]
 
