@@ -32,9 +32,7 @@ BridgeToInference::BridgeToInference(const rclcpp::NodeOptions & options)
 
   pub_grasps_ = create_publisher<geometry_msgs::msg::PoseArray>("/grasp_poses", 10);
 
-  RCLCPP_INFO(get_logger(), "============================================================");
   RCLCPP_INFO(get_logger(), "BRIDGE TO INFERENCE (C++)");
-  RCLCPP_INFO(get_logger(), "============================================================");
   RCLCPP_INFO(get_logger(), "Server: %s:%d", server_host_.c_str(), server_port_);
   RCLCPP_INFO(get_logger(), "Score threshold: %.2f", score_threshold_);
   RCLCPP_INFO(get_logger(), "Max grasps: %d", max_grasps_);
@@ -126,7 +124,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
     return {};
   }
 
-  // Serialize with msgpack
+  
   msgpack::sbuffer sbuf;
   msgpack::packer<msgpack::sbuffer> packer(sbuf);
 
@@ -144,7 +142,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
     packer.pack(p.z);
   }
 
-  // Send size
+  
   uint64_t data_size = sbuf.size();
   uint64_t data_size_be = htobe64(data_size);
   if (send(sock, &data_size_be, 8, 0) != 8)
@@ -154,7 +152,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
     return {};
   }
 
-  // Send data
+  
   size_t total_sent = 0;
   while (total_sent < sbuf.size())
   {
@@ -168,7 +166,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
     total_sent += sent;
   }
 
-  // Receive response size
+  
   uint64_t resp_size_be;
   if (recv(sock, &resp_size_be, 8, MSG_WAITALL) != 8)
   {
@@ -178,7 +176,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
   }
   uint64_t resp_size = be64toh(resp_size_be);
 
-  // Receive response data
+  
   std::vector<char> resp_data(resp_size);
   size_t total_recv = 0;
   while (total_recv < resp_size)
@@ -195,7 +193,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
 
   close(sock);
 
-  // Deserialize response
+  
   std::vector<geometry_msgs::msg::Pose> grasps;
 
   try

@@ -6,10 +6,7 @@
 #include <mutex>
 #include <stdexcept>
 
-/**
- * @brief Estrutura para armazenar propriedades de objetos do banco de dados
- * Compatível com a tabela criada pelo WorldStateNode
- */
+
 struct ObjectProperties {
     std::string id;         // Chave primária (ex: "box_01", "storage_02")
     std::string pose_str;   // Pose como string: "x;y;z"
@@ -35,15 +32,11 @@ public:
         }
     }
 
-    // Previne cópia
+   
     DatabaseHandler(const DatabaseHandler&) = delete;
     DatabaseHandler& operator=(const DatabaseHandler&) = delete;
     
-    /**
-     * @brief Busca dados de um objeto pelo ID
-     * @param id Identificador único (chave primária)
-     * @return std::optional<ObjectProperties> - dados se encontrado, std::nullopt caso contrário
-     */
+    
     std::optional<ObjectProperties> get_object_data(const std::string& id) 
     {
         std::lock_guard<std::mutex> lock(db_mutex_);
@@ -59,10 +52,11 @@ public:
         
         std::optional<ObjectProperties> result = std::nullopt;
         
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) 
+        {
             ObjectProperties props;
             
-            // Lê os campos TEXT diretamente
+            
             const char* id_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
             const char* pose_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
             const char* size_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
@@ -79,9 +73,7 @@ public:
         return result;
     }
 
-    /**
-     * @brief Verifica se um objeto existe no banco
-     */
+   
     bool object_exists(const std::string& id)
     {
         std::lock_guard<std::mutex> lock(db_mutex_);
@@ -89,7 +81,9 @@ public:
         const char* sql = "SELECT 1 FROM objects WHERE id = ? LIMIT 1";
         
         sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        
+        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) 
+        {
             return false;
         }
         

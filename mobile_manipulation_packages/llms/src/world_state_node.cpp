@@ -2,7 +2,7 @@
 #include <filesystem>
 #include <sstream> 
 #include "rclcpp_components/register_node_macro.hpp"
-#include <filesystem> // Garanta que isso está no topo
+#include <filesystem> 
 
 namespace llms
 {
@@ -105,7 +105,7 @@ bool WorldStateNode::upsert_object(const std::string& id,
 {
     std::lock_guard<std::mutex> lock(db_mutex_);
 
-    // Query simplificada
+    
     std::string sql = R"(
         INSERT INTO objects (id, pose, size, last_update)
         VALUES (?, ?, ?, strftime('%s','now'))

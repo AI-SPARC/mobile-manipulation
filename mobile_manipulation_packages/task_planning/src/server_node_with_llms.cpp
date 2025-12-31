@@ -21,7 +21,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
-// Mensagens ROS
+
 #include "geometry_msgs/msg/pose.hpp"
 #include "vision_msgs/msg/detection3_d_array.hpp"
 #include "std_msgs/msg/float32.hpp"
@@ -34,12 +34,13 @@
 
 #include <yaml-cpp/yaml.h>
 
-// Interfaces Customizadas
+#include <llms/DatabaseHandler.hpp>
+
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/action/path.hpp"
 #include "mobile_manipulation_interfaces/action/controller.hpp"
 
-// Classes Auxiliares
+
 #include <manipulation/IsGripperHolding.hpp>
 #include <manipulation/ProjectedReachabilityAnalysis.hpp>
 #include <manipulation/IKValidator.hpp>
@@ -52,17 +53,18 @@
 
 #include <llms/WorldStateNode.hpp>
 
+static DatabaseHandler* g_db_handler = nullptr;
+
 
 namespace BT
 {
- 
-    // Converte "x;y;z" ou "x;y;z;qx;qy;qz;qw" para geometry_msgs::msg::Pose
+    
     template <>
     inline geometry_msgs::msg::Pose convertFromString(StringView str)
     {
         geometry_msgs::msg::Pose pose;
         
-        // Inicializa com valores padrão
+        
         pose.position.x = 0.0;
         pose.position.y = 0.0;
         pose.position.z = 0.0;
@@ -105,7 +107,7 @@ namespace BT
         return pose;
     }
 
-    // Converte "x;y;z" para geometry_msgs::msg::Vector3
+    
     template <>
     inline geometry_msgs::msg::Vector3 convertFromString(StringView str)
     {
@@ -141,7 +143,7 @@ namespace BT
     }
 }
 
-// Estados possíveis para uma tarefa assíncrona (Action Client)
+
 enum class TaskState
 {
     IDLE,
@@ -160,69 +162,126 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<std::string>("items"),      // Lista de items separados por ;
-            BT::InputPort<std::string>("poses"),      // Poses correspondentes
-            BT::InputPort<std::string>("sizes"),      // Sizes correspondentes
-            BT::InputPort<std::string>("dests"),      // Destinos (opcional)
-            BT::InputPort<std::string>("dest_poses"), // Poses dos destinos (opcional)
-            BT::OutputPort<std::string>("item"),      // Item atual -> blackboard
-            BT::OutputPort<std::string>("pose"),      // Pose atual -> blackboard
-            BT::OutputPort<std::string>("size"),      // Size atual -> blackboard
-            BT::OutputPort<std::string>("dest"),      // Destino atual -> blackboard
-            BT::OutputPort<std::string>("dest_pose")  // Pose do destino -> blackboard
+            BT::InputPort<std::string>("items"),      
+            BT::InputPort<std::string>("dests"),      
+            BT::OutputPort<std::string>("item"),      
+            BT::OutputPort<std::string>("pose"),      
+            BT::OutputPort<std::string>("size"),      
+            BT::OutputPort<std::string>("dest"),      
+            BT::OutputPort<std::string>("dest_pose")  
         };
     }
 
     BT::NodeStatus tick() override
     {
-        // Primeira execução: parseia listas
+        
         if (current_index_ == 0 && items_.empty())
         {
             auto items_str = getInput<std::string>("items");
-            auto poses_str = getInput<std::string>("poses");
-            auto sizes_str = getInput<std::string>("sizes");
             
-            if (!items_str) {
+            if (!items_str) 
+            {
+                std::cerr << "[ForEach] Erro: 'items' não fornecido!" << std::endl;
                 return BT::NodeStatus::FAILURE;
             }
             
-            // Usa | como delimitador de itens (para não conflitar com ; das coordenadas)
             items_ = split(items_str.value(), '|');
-            poses_ = poses_str ? split(poses_str.value(), '|') : std::vector<std::string>{};
-            sizes_ = sizes_str ? split(sizes_str.value(), '|') : std::vector<std::string>{};
             
-            // Destinos opcionais
+            
             auto dests_str = getInput<std::string>("dests");
-            auto dest_poses_str = getInput<std::string>("dest_poses");
-            dests_ = dests_str ? split(dests_str.value(), '|') : std::vector<std::string>{};
-            dest_poses_ = dest_poses_str ? split(dest_poses_str.value(), '|') : std::vector<std::string>{};
+
+            if (dests_str) 
+            {
+                dests_ = split(dests_str.value(), '|');
+            }
+            
+            std::cout << "[ForEach] Iniciando loop com " << items_.size() << " items" << std::endl;
         }
         
-        // Verifica se terminou
+       
         if (current_index_ >= items_.size())
         {
+            std::cout << "[ForEach] Loop completo!" << std::endl;
             reset();
             return BT::NodeStatus::SUCCESS;
         }
         
-        // Seta variáveis no blackboard
-        setOutput("item", items_[current_index_]);
-        if (current_index_ < poses_.size()) setOutput("pose", poses_[current_index_]);
-        if (current_index_ < sizes_.size()) setOutput("size", sizes_[current_index_]);
-        if (current_index_ < dests_.size()) setOutput("dest", dests_[current_index_]);
-        if (current_index_ < dest_poses_.size()) setOutput("dest_pose", dest_poses_[current_index_]);
+       
+        std::string current_item = items_[current_index_];
+        setOutput("item", current_item);
         
-        // Executa filho
+        
+        if (g_db_handler) 
+        {
+            auto props = g_db_handler->get_object_data(current_item);
+            if (props) 
+            {
+                
+                setOutput("pose", props->pose_str);
+                setOutput("size", props->size_str);
+            } 
+            else 
+            {
+                
+                setOutput("pose", "");
+                setOutput("size", "");
+            }
+        }
+        else
+        {
+            std::cerr << "[ForEach] ERRO CRÍTICO: g_db_handler é nullptr!" << std::endl;
+        }
+        
+        
+        if (!dests_.empty())
+        {
+            size_t dest_idx;
+            if (dests_.size() == 1) 
+            {
+                dest_idx = 0;
+            } 
+            else 
+            {
+                dest_idx = current_index_;
+            }
+            
+            if (dest_idx < dests_.size())
+            {
+                std::string current_dest = dests_[dest_idx];
+                setOutput("dest", current_dest);
+                
+                
+                if (g_db_handler) 
+                {
+                    auto props = g_db_handler->get_object_data(current_dest);
+
+                    if (props) 
+                    {
+                        
+                        setOutput("dest_pose", props->pose_str);
+                    } 
+                    else 
+                    {
+                        
+                        setOutput("dest_pose", "");
+                    }
+                }
+            }
+        }
+        
+      
+        
         BT::NodeStatus child_status = child_node_->executeTick();
         
         if (child_status == BT::NodeStatus::SUCCESS)
         {
             current_index_++;
-            haltChild();  // Reset filho para próxima iteração
-            return BT::NodeStatus::RUNNING;  // Continua para próximo item
+            haltChild();  
+            return BT::NodeStatus::RUNNING;  
         }
         else if (child_status == BT::NodeStatus::FAILURE)
         {
+            std::cerr << "[ForEach] Filho falhou no item: " << current_item << std::endl;
             reset();
             return BT::NodeStatus::FAILURE;
         }
@@ -238,16 +297,13 @@ public:
 
 private:
     size_t current_index_;
-    std::vector<std::string> items_, poses_, sizes_, dests_, dest_poses_;
+    std::vector<std::string> items_, dests_;
     
     void reset()
     {
         current_index_ = 0;
         items_.clear();
-        poses_.clear();
-        sizes_.clear();
         dests_.clear();
-        dest_poses_.clear();
     }
     
     std::vector<std::string> split(const std::string& str, char delim)
@@ -256,7 +312,9 @@ private:
         std::stringstream ss(str);
         std::string item;
         while (std::getline(ss, item, delim)) {
-            result.push_back(item);
+            if (!item.empty()) {
+                result.push_back(item);
+            }
         }
         return result;
     }
@@ -300,7 +358,7 @@ public:
     }
 };
 
-// Wrapper para Actions Assíncronas
+
 class AsyncAction : public BT::StatefulActionNode
 {
 public:
@@ -348,32 +406,45 @@ public:
     bridge_to_inference_node_(bridge_to_inference_node),
     world_state_node_(world_state_node)
     {
+        
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<std::string>("subtrees_path", "");
+        this->declare_parameter<std::string>("database_path", "/home/momesso/AQUI/robot_data.db");
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         subtrees_path_ = this->get_parameter("subtrees_path").as_string();
+        std::string db_path = this->get_parameter("database_path").as_string();
+        
+        
+        db_handler_ = std::make_unique<DatabaseHandler>(db_path);
+        g_db_handler = db_handler_.get();  
 
+        RCLCPP_INFO(this->get_logger(), "DatabaseHandler conectado: %s", db_path.c_str());
+
+        
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odom", 10, std::bind(&ServerNode::odom_callback, this, std::placeholders::_1));
 
-        
-        bt_xml_sub_ = this->create_subscription<std_msgs::msg::String>(
-            "/behavior_tree_xml", 10,
+       
+        bt_xml_sub_ = this->create_subscription<std_msgs::msg::String>("/behavior_tree_xml", 10,
             std::bind(&ServerNode::on_bt_xml_received, this, std::placeholders::_1));
 
         publisher_ = this->create_publisher<geometry_msgs::msg::Pose>("object_pose", 10);
         
+        // Action Clients
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(this, "pick_object");
         path_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Path>(this, "path");
         controller_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Controller>(this, "controller");
 
+        // Estados
         path_state_ = TaskState::IDLE;
         nav_state_ = TaskState::IDLE;
         manipulation_state_ = TaskState::IDLE;
 
+        // Configura a factory (registra nós, mas NÃO cria árvore ainda)
         setup_behavior_tree_factory();
 
+        // Thread da BT
         bt_thread_ = std::thread(&ServerNode::bt_loop, this);
 
         RCLCPP_INFO(this->get_logger(), "ServerNode iniciado. Aguardando XML em /behavior_tree_xml");
@@ -388,6 +459,7 @@ public:
     }
 
 private:
+    // --- Injeção de Dependências ---
     std::shared_ptr<llms::WorldStateNode> world_state_node_;
     std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
     std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node_;
@@ -403,7 +475,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr publisher_;
     rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr bt_xml_sub_;  
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr bt_xml_sub_; 
 
     // --- Action Clients ---
     rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SharedPtr client_ptr_;
@@ -420,13 +492,13 @@ private:
     std::unordered_set<std::string> authorized_labels;
     std::unordered_set<std::string> picked;
 
+    // --- Estado ---
     struct ObjectInfo
     {
         std::string id;
         geometry_msgs::msg::Pose pose;
         geometry_msgs::msg::Vector3 size;
     };
-
     std::pair<std::string, geometry_msgs::msg::Pose> pick_pose;
     ObjectInfo cached_object_;
     std::string current_target_id_ = "";
@@ -434,6 +506,7 @@ private:
 
     rclcpp::TimerBase::SharedPtr timer_;
 
+    // --- Behavior Tree ---
     std::thread bt_thread_;
     std::mutex bt_mutex_;
     std::mutex odom_mutex;
@@ -444,7 +517,11 @@ private:
     std::string pending_xml_;  
     std::mutex xml_mutex_;
     std::atomic<int> tree_counter_{0};  
+    
+    // --- Database ---
+    std::unique_ptr<DatabaseHandler> db_handler_;
 
+    // --- Task States ---
     TaskState path_state_;
     TaskState nav_state_;
     TaskState manipulation_state_;
@@ -458,7 +535,7 @@ private:
     float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
     bool has_new_object_ = false;
 
-    
+   
     void on_bt_xml_received(const std_msgs::msg::String::SharedPtr msg)
     {
         if (msg->data.empty())
@@ -467,6 +544,7 @@ private:
             return;
         }
 
+        
         if (bt_tree_ && bt_tree_->rootNode() && 
             bt_tree_->rootNode()->status() == BT::NodeStatus::RUNNING)
         {
@@ -476,21 +554,278 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "XML recebido via tópico:\n%s", msg->data.c_str());
 
+        
+        std::string expanded_xml = expand_xml_with_db(msg->data);
+        
+        RCLCPP_INFO(this->get_logger(), "XML expandido:\n%s", expanded_xml.c_str());
+
+        
         {
             std::lock_guard<std::mutex> lock(xml_mutex_);
-            pending_xml_ = msg->data;
+            pending_xml_ = expanded_xml;
             has_new_tree_ = true;
         }
     }
 
-   
+    
+    std::string expand_xml_with_db(const std::string& xml)
+    {
+        std::string result = xml;
+        
+        
+        result = expand_pick_subtrees(result);
+        
+        
+        result = expand_place_subtrees(result);
+        
+        
+        result = expand_goto_subtrees(result);
+        
+        return result;
+    }
+    
+    std::string expand_pick_subtrees(const std::string& xml)
+    {
+        std::string result = xml;
+        std::string search = "<SubTree ID=\"Pick\" target_id=\"";
+        size_t pos = 0;
+        
+        while ((pos = result.find(search, pos)) != std::string::npos)
+        {
+            size_t id_start = pos + search.length();
+            size_t id_end = result.find("\"", id_start);
+            if (id_end == std::string::npos) break;
+            
+            std::string target_id = result.substr(id_start, id_end - id_start);
+            
+            
+            if (!target_id.empty() && target_id[0] == '{')
+            {
+                pos = id_end;
+                continue;
+            }
+            
+            
+            size_t line_end = result.find("/>", id_end);
+            std::string line = result.substr(pos, line_end - pos);
+            if (line.find("target_pose=") != std::string::npos) 
+            {
+                pos = line_end;
+                continue;
+            }
+            
+            
+            std::string pose_str = "";
+            std::string size_str = "";
+            if (db_handler_)
+            {
+                auto props = db_handler_->get_object_data(target_id);
+                if (props) {
+                    pose_str = props->pose_str;
+                    size_str = props->size_str;
+                    RCLCPP_INFO(this->get_logger(), "Pick expandido: '%s' -> pose=%s", target_id.c_str(), pose_str.c_str());
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "Pick: objeto '%s' não encontrado no DB!", target_id.c_str());
+                }
+            }
+            
+            
+            std::string insert = " target_pose=\"" + pose_str + "\" target_size=\"" + size_str + "\"";
+            result.insert(line_end, insert);
+            
+            pos = line_end + insert.length();
+        }
+        
+        return result;
+    }
+    
+    std::string expand_place_subtrees(const std::string& xml)
+    {
+        std::string result = xml;
+        std::string search = "<SubTree ID=\"Place\" storage_id=\"";
+        size_t pos = 0;
+        
+        while ((pos = result.find(search, pos)) != std::string::npos)
+        {
+            size_t id_start = pos + search.length();
+            size_t id_end = result.find("\"", id_start);
+            if (id_end == std::string::npos) break;
+            
+            std::string storage_id = result.substr(id_start, id_end - id_start);
+            
+            
+            if (!storage_id.empty() && storage_id[0] == '{')
+            {
+                pos = id_end;
+                continue;
+            }
+            
+            
+            size_t line_end = result.find("/>", id_end);
+            std::string line = result.substr(pos, line_end - pos);
+            if (line.find("final_placement_pose=") != std::string::npos) 
+            {
+                pos = line_end;
+                continue;
+            }
+            
+            
+            std::string pose_str = "";
+            if (db_handler_)
+            {
+                auto props = db_handler_->get_object_data(storage_id);
+                if (props) 
+                {
+                    pose_str = props->pose_str;
+                    RCLCPP_INFO(this->get_logger(), "Place expandido: '%s' -> pose=%s", storage_id.c_str(), pose_str.c_str());
+                } 
+                else 
+                {
+                    RCLCPP_WARN(this->get_logger(), "Place: storage '%s' não encontrado no DB!", storage_id.c_str());
+                }
+            }
+            
+            
+            std::string insert = " final_placement_pose=\"" + pose_str + "\"";
+            result.insert(line_end, insert);
+            
+            pos = line_end + insert.length();
+        }
+        
+        
+        search = "<SubTree ID=\"Place\" target=\"";
+        pos = 0;
+        while ((pos = result.find(search, pos)) != std::string::npos)
+        {
+            size_t target_start = pos + search.length();
+            size_t target_end = result.find("\"", target_start);
+            if (target_end == std::string::npos) break;
+            
+            std::string target_coords = result.substr(target_start, target_end - target_start);
+            
+            
+            if (!target_coords.empty() && target_coords[0] == '{')
+            {
+                pos = target_end;
+                continue;
+            }
+            
+            size_t line_end = result.find("/>", target_end);
+            std::string line = result.substr(pos, line_end - pos);
+            if (line.find("final_placement_pose=") != std::string::npos) 
+            {
+                pos = line_end;
+                continue;
+            }
+            
+            
+            std::string insert = " storage_id=\"direct\" final_placement_pose=\"" + target_coords + "\"";
+            result.insert(line_end, insert);
+            
+            pos = line_end + insert.length();
+        }
+        
+        return result;
+    }
+    
+    std::string expand_goto_subtrees(const std::string& xml)
+    {
+        std::string result = xml;
+        
+        
+        std::string search = "<SubTree ID=\"GoToLocation\" target_id=\"";
+        size_t pos = 0;
+        
+        while ((pos = result.find(search, pos)) != std::string::npos)
+        {
+            size_t id_start = pos + search.length();
+            size_t id_end = result.find("\"", id_start);
+            if (id_end == std::string::npos) break;
+            
+            std::string target_id = result.substr(id_start, id_end - id_start);
+            
+            
+            if (!target_id.empty() && target_id[0] == '{')
+            {
+                pos = id_end;
+                continue;
+            }
+            
+            size_t line_end = result.find("/>", id_end);
+            std::string line = result.substr(pos, line_end - pos);
+            if (line.find("nav_target=") != std::string::npos) 
+            {
+                pos = line_end;
+                continue;
+            }
+            
+            
+            std::string pose_str = "";
+            if (db_handler_)
+            {
+                auto props = db_handler_->get_object_data(target_id);
+                if (props) 
+                {
+                    pose_str = props->pose_str;
+                    RCLCPP_INFO(this->get_logger(), "GoTo expandido: '%s' -> pose=%s", target_id.c_str(), pose_str.c_str());
+                } 
+                else 
+                {
+                    RCLCPP_WARN(this->get_logger(), "GoTo: local '%s' não encontrado no DB!", target_id.c_str());
+                }
+            }
+            
+            std::string insert = " nav_target=\"" + pose_str + "\"";
+            result.insert(line_end, insert);
+            
+            pos = line_end + insert.length();
+        }
+        
+        
+        search = "<SubTree ID=\"GoToLocation\" target=\"";
+        pos = 0;
+        while ((pos = result.find(search, pos)) != std::string::npos)
+        {
+            size_t target_start = pos + search.length();
+            size_t target_end = result.find("\"", target_start);
+            if (target_end == std::string::npos) break;
+            
+            std::string target_coords = result.substr(target_start, target_end - target_start);
+            
+            
+            if (!target_coords.empty() && target_coords[0] == '{')
+            {
+                pos = target_end;
+                continue;
+            }
+            
+            size_t line_end = result.find("/>", target_end);
+            std::string line = result.substr(pos, line_end - pos);
+            if (line.find("nav_target=") != std::string::npos) 
+            {
+                pos = line_end;
+                continue;
+            }
+            
+            std::string insert = " nav_target=\"" + target_coords + "\"";
+            result.insert(line_end, insert);
+            
+            pos = line_end + insert.length();
+        }
+        
+        return result;
+    }
+
+    
     void setup_behavior_tree_factory()
     {
         
+        // --- Nós de Controle Customizados ---
         factory_.registerNodeType<ForEach>("ForEach");
         factory_.registerNodeType<ParallelAny>("ParallelAny");
 
-       
+        
+        // --- IsReachable ---
         factory_.registerSimpleCondition("IsReachable", [&](BT::TreeNode &self)
         {
             auto target_pose_opt = self.getInput<geometry_msgs::msg::Pose>("target_pose");
@@ -901,6 +1236,7 @@ private:
 
         while (running_ && rclcpp::ok())
         {
+            
             if (has_new_tree_)
             {
                 std::string xml_to_process;
@@ -918,10 +1254,10 @@ private:
                     int tree_id = tree_counter_++;
                     std::string unique_tree_name = "LLMPlan_" + std::to_string(tree_id);
                     
-                    
+                   
                     std::string modified_xml = xml_to_process;
                     
-                   
+                    
                     size_t pos = modified_xml.find("main_tree_to_execute=\"MainPlan\"");
                     if (pos != std::string::npos) {
                         modified_xml.replace(pos, 31, "main_tree_to_execute=\"" + unique_tree_name + "\"");
@@ -947,11 +1283,9 @@ private:
                     );
 
                     
-                    try 
-                    {
+                    try {
                         groot_publisher_ = std::make_unique<BT::Groot2Publisher>(*bt_tree_, 1666);
-                    } 
-                    catch (const std::exception& e) {
+                    } catch (const std::exception& e) {
                         RCLCPP_WARN(this->get_logger(), "Groot2 não disponível: %s", e.what());
                     }
 
@@ -981,14 +1315,14 @@ private:
 
                     if (result == BT::NodeStatus::SUCCESS)
                     {
-                        RCLCPP_INFO(this->get_logger(), "========== ÁRVORE: SUCESSO ==========");
+                        RCLCPP_INFO(this->get_logger(), "Árvore sucesso");
                         reset_states();
                         groot_publisher_.reset();  
                         bt_tree_.reset();
                     }
                     else if (result == BT::NodeStatus::FAILURE)
                     {
-                        RCLCPP_ERROR(this->get_logger(), "========== ÁRVORE: FALHOU ==========");
+                        RCLCPP_ERROR(this->get_logger(), "Árvore falhou.");
                         reset_states();
                         groot_publisher_.reset();  
                         bt_tree_.reset();
@@ -1023,7 +1357,9 @@ private:
         return BT::NodeStatus::RUNNING;
     }
 
-    
+    // =========================================================================
+    // CALLBACKS E HELPERS
+    // =========================================================================
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
@@ -1246,9 +1582,6 @@ private:
     }
 };
 
-// ============================================================================
-// MAIN
-// ============================================================================
 
 bool has_flag(const std::vector<std::string>& args, const std::string& flag) 
 {
