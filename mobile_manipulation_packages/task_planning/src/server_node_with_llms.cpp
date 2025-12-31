@@ -395,7 +395,7 @@ public:
         std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node,
         std::shared_ptr<llms::WorldStateNode> world_state_node
     )
-    : Node("server_node"),
+    : Node("server_node_with_llms"),
     gripper_monitor_node_(gripper_node),
     storage_node_(storage_node),
     organize_node_(organize_node),
@@ -409,7 +409,7 @@ public:
         
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<std::string>("subtrees_path", "");
-        this->declare_parameter<std::string>("database_path", "/home/momesso/AQUI/robot_data.db");
+        this->declare_parameter<std::string>("database_path", "");
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         subtrees_path_ = this->get_parameter("subtrees_path").as_string();
@@ -1583,21 +1583,11 @@ private:
 };
 
 
-bool has_flag(const std::vector<std::string>& args, const std::string& flag) 
-{
-    return std::find(args.begin(), args.end(), flag) != args.end();
-}
-
 int main(int argc, char * argv[])
 {
     rclcpp::init(argc, argv);
 
-    std::vector<std::string> args(argv, argv + argc);
-
-    bool enable_organize = !has_flag(args, "--no-organize");
-    bool enable_storage  = !has_flag(args, "--no-storage");
-    bool enable_gripper  = !has_flag(args, "--no-gripper");
-
+    
     rclcpp::NodeOptions organize_opts;
     organize_opts.arguments({"--ros-args", "-r", "__node:=organize_node"});
 
@@ -1625,63 +1615,44 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions world_state_node_opts;
     world_state_node_opts.arguments({"--ros-args", "-r", "__node:=world_state_node"});
 
-    std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
-    std::shared_ptr<storage_manager::StorageNode> storage_node = nullptr;
-    std::shared_ptr<manipulation::IsGripperHolding> gripper_node = nullptr;
-    std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node = nullptr; 
-    std::shared_ptr<manipulation::IKValidator> ik_validator_node = nullptr; 
-    std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node = nullptr; 
-    std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node = nullptr; 
-    std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node = nullptr; 
-    std::shared_ptr<llms::WorldStateNode> world_state_node = nullptr; 
+    // Cria todos os composable nodes
+    auto organize_node = std::make_shared<storage_manager::OrganizeNode>(organize_opts);
+    auto storage_node = std::make_shared<storage_manager::StorageNode>(storage_opts);
+    auto gripper_node = std::make_shared<manipulation::IsGripperHolding>(gripper_opts);
+    auto reachability_node = std::make_shared<manipulation::ProjectedReachabilityAnalysis>(reachability_opts);
+    auto obstacle_graph_node = std::make_shared<navigation::SharedObstacleGraph>(obstacle_graph_opts);
+    auto ik_validator_node = std::make_shared<manipulation::IKValidator>(ik_validator_opts);
+    auto cloud_box_filter_node = std::make_shared<manipulation::CloudBoxFilter>(cloud_box_filter_opts);
+    auto bridge_to_inference_node = std::make_shared<drl_to_pick_cpp::BridgeToInference>(bridge_to_inference_opts);
+    auto world_state_node = std::make_shared<llms::WorldStateNode>(world_state_node_opts);
 
-    rclcpp::executors::MultiThreadedExecutor executor;
-
-    if (enable_organize)
-    {
-        organize_node = std::make_shared<storage_manager::OrganizeNode>(organize_opts);
-        executor.add_node(organize_node);
-    }
-
-    if (enable_storage)
-    {
-        storage_node = std::make_shared<storage_manager::StorageNode>(storage_opts);
-        executor.add_node(storage_node);
-    }
-
-    if (enable_gripper)
-    {
-        gripper_node = std::make_shared<manipulation::IsGripperHolding>(gripper_opts);
-        executor.add_node(gripper_node);
-    }
-
-    reachability_node = std::make_shared<manipulation::ProjectedReachabilityAnalysis>(reachability_opts);
-    executor.add_node(reachability_node);
-
-    obstacle_graph_node = std::make_shared<navigation::SharedObstacleGraph>(obstacle_graph_opts);
-    executor.add_node(obstacle_graph_node);
-
-    ik_validator_node = std::make_shared<manipulation::IKValidator>(ik_validator_opts);
-    executor.add_node(ik_validator_node);
-
-    cloud_box_filter_node = std::make_shared<manipulation::CloudBoxFilter>(cloud_box_filter_opts);
-    executor.add_node(cloud_box_filter_node);
-
-    bridge_to_inference_node = std::make_shared<drl_to_pick_cpp::BridgeToInference>(bridge_to_inference_opts);
-    executor.add_node(bridge_to_inference_node);
-
-    world_state_node = std::make_shared<llms::WorldStateNode>(world_state_node_opts);
-    executor.add_node(world_state_node);
-
+    
     auto server_node = std::make_shared<ServerNode>(
-        gripper_node, storage_node, organize_node, reachability_node, 
-        obstacle_graph_node, ik_validator_node, cloud_box_filter_node, 
-        bridge_to_inference_node, world_state_node
+        gripper_node, 
+        storage_node, 
+        organize_node, 
+        reachability_node, 
+        obstacle_graph_node, 
+        ik_validator_node, 
+        cloud_box_filter_node, 
+        bridge_to_inference_node, 
+        world_state_node
     );
 
+  
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(organize_node);
+    executor.add_node(storage_node);
+    executor.add_node(gripper_node);
+    executor.add_node(reachability_node);
+    executor.add_node(obstacle_graph_node);
+    executor.add_node(ik_validator_node);
+    executor.add_node(cloud_box_filter_node);
+    executor.add_node(bridge_to_inference_node);
+    executor.add_node(world_state_node);
     executor.add_node(server_node);
+    
     executor.spin();
-
     rclcpp::shutdown();
     return 0;
 }

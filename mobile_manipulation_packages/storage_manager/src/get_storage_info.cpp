@@ -5,7 +5,7 @@ namespace storage_manager
 {
 
 StorageNode::StorageNode(const rclcpp::NodeOptions & options)
-: Node("storage_manager_node", options)
+: Node("storage_node", options)
 {
     this->declare_parameter<std::string>("label_to_storage_yaml_file", "");
     this->declare_parameter<std::string>("storage_poses_yaml_file", "");
@@ -29,7 +29,7 @@ StorageNode::StorageNode(const rclcpp::NodeOptions & options)
         RCLCPP_WARN(this->get_logger(), "Param 'storage_poses_yaml_file' is empty.");
     }
 
-    RCLCPP_INFO(this->get_logger(), "StorageNode Initialized (Ready for Direct Access).");
+    RCLCPP_INFO(this->get_logger(), "StorageNode Initialized.");
 }
 
 StorageResult StorageNode::getBestStorage(const std::string& label, const geometry_msgs::msg::Pose& robot_pose)
