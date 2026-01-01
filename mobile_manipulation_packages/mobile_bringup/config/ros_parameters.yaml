@@ -3,6 +3,7 @@
 /**:
   ros__parameters:
     use_sim_time: true
+    use_graspnet: false
 
 # SERVER NODE
 

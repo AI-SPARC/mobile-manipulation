@@ -94,7 +94,9 @@ private:
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
     std::atomic<bool> moveit_ready_{false};
-    
+
+    bool use_graspnet = false;
+
     void object_pose_callback(const geometry_msgs::msg::Pose & msg);
     void loadLocationsFromYaml(const std::string &yaml_path);
     void initMoveGroup();

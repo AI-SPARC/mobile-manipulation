@@ -35,8 +35,10 @@ SimpleManipulation::SimpleManipulation()
  : Node("simple_manipulation")
 {
     this->declare_parameter<std::string>("yaml_file", "");
+    this->declare_parameter<bool>("use_graspnet", false);
 
     yaml_file = this->get_parameter("yaml_file").as_string();
+    use_graspnet = this->get_parameter("use_graspnet").as_bool();
 
     moveit_node_ = std::make_shared<rclcpp::Node>("simple_manipulation_moveit_node");
 
@@ -48,8 +50,7 @@ SimpleManipulation::SimpleManipulation()
     subscription_ = this->create_subscription<std_msgs::msg::Float32>(
             "contact_sensor", 10, std::bind(&SimpleManipulation::topic_callback, this, std::placeholders::_1));
 
-    subscription_1 = this->create_subscription<geometry_msgs::msg::Pose>(
-      "object_pose", 
+    subscription_1 = this->create_subscription<geometry_msgs::msg::Pose>("object_pose", 
       10, 
       std::bind(&SimpleManipulation::object_pose_callback, this, std::placeholders::_1));
 
@@ -180,7 +181,6 @@ void SimpleManipulation::initMoveGroup()
         move_group_gripper = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
             moveit_node_, "hand"); 
 
-        std::cout << "alo" << std::endl;
 
         move_group_arm->startStateMonitor(); 
 
@@ -425,106 +425,198 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
     }
 
     
-
-    if(pick == true)
+    if(use_graspnet == true)
     {
-
-        tf2::Quaternion q_original(
-            pose.orientation.x,
-            pose.orientation.y,
-            pose.orientation.z,
-            pose.orientation.w
-        );
-        double roll_orig, pitch_orig, yaw_orig;
-        tf2::Matrix3x3(q_original).getRPY(roll_orig, pitch_orig, yaw_orig);
-
-        // Criar novo quaternion com roll=π, pitch=0, yaw=yaw_original
-        tf2::Quaternion q_new;
-        q_new.setRPY(M_PI, 0.0, yaw_orig + M_PI/4.0);
-        q_new.normalize();
-
-        // Atribuir à pose
-        pose.orientation.x = q_new.x();
-        pose.orientation.y = q_new.y();
-        pose.orientation.z = q_new.z();
-        pose.orientation.w = q_new.w();
-        pose.position.z = pose.position.z + 0.11;
-
-        if (positions_for_arm(pose, 1.0, false)) 
+        if(pick == true)
         {
-            send_request(received_id, false);
 
-            std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
-            move_group_arm->attachObject(received_id, "panda_link8", touch_links);
-            
-            rclcpp::sleep_for(std::chrono::milliseconds(100));
+            tf2::Quaternion q_original(
+                pose.orientation.x,
+                pose.orientation.y,
+                pose.orientation.z,
+                pose.orientation.w
+            );
+            double roll_orig, pitch_orig, yaw_orig;
+            tf2::Matrix3x3(q_original).getRPY(roll_orig, pitch_orig, yaw_orig);
 
-            close_gripper();
-            
-            rclcpp::sleep_for(std::chrono::milliseconds(100));
-            
-            bool picked = false;
-            int contador = 0;
+            // Criar novo quaternion com roll=π, pitch=0, yaw=yaw_original
+            tf2::Quaternion q_new;
+            q_new.setRPY(M_PI, 0.0, yaw_orig + M_PI/4.0);
+            q_new.normalize();
 
+            // Atribuir à pose
+            pose.orientation.x = q_new.x();
+            pose.orientation.y = q_new.y();
+            pose.orientation.z = q_new.z();
+            pose.orientation.w = q_new.w();
+            pose.position.z = pose.position.z + 0.11;
+
+            if (positions_for_arm(pose, 1.0, false)) 
             {
-                std::lock_guard<std::mutex> lock(contact_sensor_mutex);
+                send_request(received_id, false);
 
-                for(size_t i = 0; i < contact_sensor_data.size(); i++)
+                std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
+                move_group_arm->attachObject(received_id, "panda_link8", touch_links);
+                
+                rclcpp::sleep_for(std::chrono::milliseconds(100));
+
+                close_gripper();
+                
+                rclcpp::sleep_for(std::chrono::milliseconds(100));
+                
+                bool picked = false;
+                int contador = 0;
+
                 {
-                    if(contact_sensor_data[i] > 0.8)
+                    std::lock_guard<std::mutex> lock(contact_sensor_mutex);
+
+                    for(size_t i = 0; i < contact_sensor_data.size(); i++)
                     {
-                        contador++;
+                        if(contact_sensor_data[i] > 0.8)
+                        {
+                            contador++;
+                        }
+
                     }
 
-                }
-
-                if(contador >= 9)
-                {
-                    picked = true;
-                }
-            }
-            
-            if(picked == false)
-            {
-                open_gripper();
-                move_group_arm->detachObject(received_id);
-
-                rclcpp::sleep_for(std::chrono::milliseconds(150));
-
-                geometry_msgs::msg::Pose updated_object_pose;
-
-                {
-                    std::lock_guard<std::mutex> lock(object_pose_mutex);
-
-                    updated_object_pose = object_pose;
+                    if(contador >= 9)
+                    {
+                        picked = true;
+                    }
                 }
                 
+                if(picked == false)
+                {
+                    open_gripper();
+                    move_group_arm->detachObject(received_id);
+
+                    rclcpp::sleep_for(std::chrono::milliseconds(150));
+
+                    geometry_msgs::msg::Pose updated_object_pose;
+
+                    {
+                        std::lock_guard<std::mutex> lock(object_pose_mutex);
+
+                        updated_object_pose = object_pose;
+                    }
+                    
+                    pose.position.z += 0.125;
+                    attempt_cartesian_move(pose, 1.0, false);
+
+                    return calculate_global_pose(received_id, updated_object_pose, pick);
+                    
+                }
+
                 pose.position.z += 0.125;
                 attempt_cartesian_move(pose, 1.0, false);
 
-                return calculate_global_pose(received_id, updated_object_pose, pick);
-                
+                // set_collision_allowance(received_id, "ground_plane", true);
+
+                // rclcpp::sleep_for(std::chrono::milliseconds(200));
+
+                ready();
+
+                return true;
             }
-
-            pose.position.z += 0.125;
-            attempt_cartesian_move(pose, 1.0, false);
-
-            // set_collision_allowance(received_id, "ground_plane", true);
-
-            // rclcpp::sleep_for(std::chrono::milliseconds(200));
-
-            ready();
-
-            return true;
+            else
+            {
+                return false;
+            }
         }
-        else
-        {
-            return false;
-        }
+        else if(pick == false)
+                {
+
+                    const auto &poses = pick_and_place_poses[id];
+                    geometry_msgs::msg::Pose target_pose_world;
+
+                    for (size_t i = 0; i < poses.size(); ++i) 
+                    {
+                        const auto &pose_local = poses[i];
+
+                        tf2::Vector3 local_point(
+                            pose_local.position.x,
+                            pose_local.position.y,
+                            pose_local.position.z
+                        );
+
+                        tf2::Quaternion q_object(
+                            pose.orientation.x,
+                            pose.orientation.y,
+                            pose.orientation.z,
+                            pose.orientation.w
+                        );
+
+                        tf2::Vector3 t_object(
+                            pose.position.x,
+                            pose.position.y,
+                            pose.position.z
+                        );
+
+                        tf2::Transform object_transform(q_object, t_object);
+                        tf2::Vector3 world_point = object_transform * local_point;
+
+                        
+                        target_pose_world.position.x = world_point.x();
+                        target_pose_world.position.y = world_point.y();
+                        target_pose_world.position.z = world_point.z();
+
+                        double obj_r, obj_p, obj_y;
+                        tf2::Matrix3x3(q_object).getRPY(obj_r, obj_p, obj_y);
+
+                        
+                        double off_r, off_p, off_y;
+                        tf2::Quaternion q_offset(
+                            pose_local.orientation.x,
+                            pose_local.orientation.y,
+                            pose_local.orientation.z,
+                            pose_local.orientation.w
+                        );
+                        tf2::Matrix3x3(q_offset).getRPY(off_r, off_p, off_y);
+
+                    
+                        bool use_roll  = true;
+                        bool use_pitch = true; 
+                        bool use_yaw   = true; 
+
+                        double final_r = obj_r + (use_roll  ? off_r : 0.0);
+                        double final_p = obj_p + (use_pitch ? off_p : 0.0);
+                        double final_y = obj_y + (use_yaw   ? off_y : 0.0);
+
+                        tf2::Quaternion q_final;
+                        q_final.setRPY(final_r, final_p, final_y);
+                        q_final.normalize();
+
+                        target_pose_world.orientation.x = q_final.x();
+                        target_pose_world.orientation.y = q_final.y();
+                        target_pose_world.orientation.z = q_final.z();
+                        target_pose_world.orientation.w = q_final.w();
+
+                        if (positions_for_arm(target_pose_world, 1.0, false)) 
+                        {
+                            open_gripper();
+                            
+                            rclcpp::sleep_for(std::chrono::milliseconds(300));
+
+                            move_group_arm->detachObject(received_id);
+
+                            rclcpp::sleep_for(std::chrono::milliseconds(200));
+                            set_collision_allowance(received_id, "ground_plane", false);
+
+                            send_request(received_id, true);
+                            ready();
+
+                            return true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                }
+
     }
-    else if(pick == false)
+    else
     {
-
         const auto &poses = pick_and_place_poses[id];
         geometry_msgs::msg::Pose target_pose_world;
 
@@ -590,29 +682,108 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
             target_pose_world.orientation.z = q_final.z();
             target_pose_world.orientation.w = q_final.w();
 
-            if (positions_for_arm(target_pose_world, 1.0, false)) 
+            if(pick == true)
             {
-                open_gripper();
-                
-                rclcpp::sleep_for(std::chrono::milliseconds(300));
+                if (positions_for_arm(target_pose_world, 1.0, false)) 
+                {
+                    send_request(received_id, false);
 
-                move_group_arm->detachObject(received_id);
+                    std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
+                    move_group_arm->attachObject(received_id, "panda_link8", touch_links);
+                    
+                    rclcpp::sleep_for(std::chrono::milliseconds(100));
 
-                rclcpp::sleep_for(std::chrono::milliseconds(200));
-                set_collision_allowance(received_id, "ground_plane", false);
+                    close_gripper();
+                    
+                    rclcpp::sleep_for(std::chrono::milliseconds(100));
+                    
+                    bool picked = false;
+                    int contador = 0;
 
-                send_request(received_id, true);
-                ready();
+                    {
+                        std::lock_guard<std::mutex> lock(contact_sensor_mutex);
 
-                return true;
+                        for(size_t i = 0; i < contact_sensor_data.size(); i++)
+                        {
+                            if(contact_sensor_data[i] > 0.8)
+                            {
+                                contador++;
+                            }
+
+                        }
+
+                        if(contador >= 9)
+                        {
+                            picked = true;
+                        }
+                    }
+                    
+                    if(picked == false)
+                    {
+                        open_gripper();
+                        move_group_arm->detachObject(received_id);
+
+                        rclcpp::sleep_for(std::chrono::milliseconds(150));
+
+                        geometry_msgs::msg::Pose updated_object_pose;
+
+                        {
+                            std::lock_guard<std::mutex> lock(object_pose_mutex);
+
+                            updated_object_pose = object_pose;
+                        }
+                        
+                        target_pose_world.position.z += 0.125;
+                        attempt_cartesian_move(target_pose_world, 1.0, false);
+
+                        return calculate_global_pose(received_id, updated_object_pose, pick);
+                        
+                    }
+
+                    target_pose_world.position.z += 0.125;
+                    attempt_cartesian_move(target_pose_world, 1.0, false);
+
+                    // set_collision_allowance(received_id, "ground_plane", true);
+
+                    // rclcpp::sleep_for(std::chrono::milliseconds(200));
+
+                    ready();
+
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
             }
-            else
+            else if(pick == false)
             {
-                return false;
+                if (positions_for_arm(target_pose_world, 1.0, false)) 
+                {
+                    open_gripper();
+                    
+                    rclcpp::sleep_for(std::chrono::milliseconds(300));
+
+                    move_group_arm->detachObject(received_id);
+
+                    rclcpp::sleep_for(std::chrono::milliseconds(200));
+                    set_collision_allowance(received_id, "ground_plane", false);
+
+                    send_request(received_id, true);
+                    ready();
+
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
             }
+
+            
         }
     }
-
+    
     
 
 

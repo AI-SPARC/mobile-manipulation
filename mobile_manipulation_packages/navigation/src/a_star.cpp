@@ -816,7 +816,7 @@ private:
     
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::Path>> goal_handle)
     {
-        RCLCPP_INFO(this->get_logger(), "THREAD START: Calculando caminho (One-shot)...");
+        RCLCPP_INFO(this->get_logger(), "Calculando caminho.");
         
         const auto goal = goal_handle->get_goal();
         auto result = std::make_shared<mobile_manipulation_interfaces::action::Path::Result>();
