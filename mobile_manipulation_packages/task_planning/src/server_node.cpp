@@ -193,10 +193,12 @@ public:
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<std::string>("bt_xml_path", "");
+        this->declare_parameter<bool>("use_graspnet", false);
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         std::string bt_xml_path = this->get_parameter("bt_xml_path").as_string();
-
+        use_graspnet = this->get_parameter("use_graspnet").as_bool();
+        
         // 1. Subscribers:
         // Ouve as detecções do YOLO ("vision_msgs")
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
@@ -364,6 +366,8 @@ private:
     float pose_x = 0.0, pose_y = 0.0, pose_z = 0.0;
     // Flag atômica para indicar à BT que um novo objeto foi visto
     bool has_new_object_ = false;
+
+    bool use_graspnet = false;
     // DOC-END: member_variables
 
     // DOC-START: check_task_status
@@ -960,51 +964,72 @@ private:
 
                     if (!object_pose || !id || !object_size) 
                     {
+                        RCLCPP_ERROR(this->get_logger(), "PickObject: Parâmetros faltando");
                         return BT::NodeStatus::FAILURE;
                     }
-                    geometry_msgs::msg::Pose target = object_pose.value();
-                    geometry_msgs::msg::Vector3 target_size = object_size.value();
 
-                    target_size.x += 0.005;
-                    target_size.y += 0.005;
-                    target_size.z += 0.005;
-
-                    this->cloud_box_filter_node_->set_bounding_box(target, target_size);
-
-                    rclcpp::sleep_for(std::chrono::milliseconds(2000));
-                    std::vector<geometry_msgs::msg::Pose> result;
-
-                    // Obtém os pontos filtrados
-                    if (this->cloud_box_filter_node_->has_points()) 
+                
+                    if(use_graspnet == true)
                     {
-                        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
-                    
-                        result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
+                        geometry_msgs::msg::Pose target = object_pose.value();
+                        geometry_msgs::msg::Vector3 target_size = object_size.value();
 
-                        RCLCPP_WARN(get_logger(), "Recebidos %zu grasps", result.size());
+                        // Armazena em cache
+                        cached_object_.id = id.value();
+                        cached_object_.pose = target;
+                        cached_object_.size = target_size;
+
+                        target_size.x += 0.005;
+                        target_size.y += 0.005;
+                        target_size.z += 0.005;
+
+                        this->cloud_box_filter_node_->set_bounding_box(target, target_size);
+
+                        rclcpp::sleep_for(std::chrono::milliseconds(2000));
+                        std::vector<geometry_msgs::msg::Pose> result;
+
+                        if (this->cloud_box_filter_node_->has_points()) 
+                        {
+                            pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
+                            result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
+                            RCLCPP_INFO(get_logger(), "Recebidos %zu grasps", result.size());
+                        }
+                        else
+                        {
+                            RCLCPP_WARN(get_logger(), "Sem pontos para grasp");
+                            return BT::NodeStatus::FAILURE;
+                        }
+
+                        if (result.empty())
+                        {
+                            RCLCPP_ERROR(get_logger(), "Nenhum grasp válido encontrado");
+                            return BT::NodeStatus::FAILURE;
+                        }
+
+                        this->send_goal(id.value(), result[0], true);
+                        manipulation_state_ = TaskState::RUNNING;
                         
                     }
                     else
                     {
-                        RCLCPP_WARN(get_logger(), "Sem pontos");
+                        this->send_goal(id.value(), object_pose.value(), true);
+                        manipulation_state_ = TaskState::RUNNING; 
                     }
 
-                    
-                    
-
-                    this->send_goal(id.value(), result[0], true); // true = Pick
-                    manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
                 return check_task_status(manipulation_state_);
             });
         };
-        factory.registerBuilder(BT::TreeNodeManifest{BT::NodeType::ACTION, "PickObject", 
-        { 
-            BT::InputPort<geometry_msgs::msg::Pose>("object_pose"), 
-            BT::InputPort<geometry_msgs::msg::Vector3>("object_size"), 
-            BT::InputPort<std::string>("id") 
-        }, {} }, builder_pick);
+        factory.registerBuilder(BT::TreeNodeManifest{
+            BT::NodeType::ACTION, "PickObject", 
+            { 
+                BT::InputPort<geometry_msgs::msg::Pose>("object_pose"), 
+                BT::InputPort<geometry_msgs::msg::Vector3>("object_size"), 
+                BT::InputPort<std::string>("id") 
+            }, 
+            {} 
+        }, builder_pick);
         // DOC-END: BT_PickObject
 
         // DOC-START: BT_PlaceObject
