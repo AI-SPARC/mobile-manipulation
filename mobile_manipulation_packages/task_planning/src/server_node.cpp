@@ -968,17 +968,17 @@ private:
                         return BT::NodeStatus::FAILURE;
                     }
 
-                
+                    geometry_msgs::msg::Pose target = object_pose.value();
+                    geometry_msgs::msg::Vector3 target_size = object_size.value();
+
+                    // Armazena em cache
+                    cached_object_.id = id.value();
+                    cached_object_.pose = target;
+                    cached_object_.size = target_size;
+            
                     if(use_graspnet == true)
                     {
-                        geometry_msgs::msg::Pose target = object_pose.value();
-                        geometry_msgs::msg::Vector3 target_size = object_size.value();
-
-                        // Armazena em cache
-                        cached_object_.id = id.value();
-                        cached_object_.pose = target;
-                        cached_object_.size = target_size;
-
+                        
                         target_size.x += 0.005;
                         target_size.y += 0.005;
                         target_size.z += 0.005;

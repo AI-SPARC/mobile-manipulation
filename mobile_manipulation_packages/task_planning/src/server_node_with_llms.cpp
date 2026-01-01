@@ -958,6 +958,47 @@ private:
             return reachable ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
         });
 
+        // --- DetectObject ---
+        factory_.registerSimpleAction("DetectObject", [&](BT::TreeNode &self)
+        {
+            std::lock_guard<std::mutex> lock(bt_mutex_); 
+
+            // Se já temos um alvo travado, retornamos ele (persistencia de alvo)
+            if (!current_target_id_.empty())
+            {
+                self.setOutput("output_pose", current_target_pose_);
+                self.setOutput("output_id", current_target_id_);
+                self.setOutput("output_size", cached_object_.size);
+                return BT::NodeStatus::SUCCESS;
+            }
+
+            // Se não, verifica a flag setada pelo detection_callback
+            if (!has_new_object_)
+            {
+                return BT::NodeStatus::RUNNING;
+            }
+
+            // Promove o objeto cacheado para alvo atual
+            current_target_id_ = cached_object_.id;
+            current_target_pose_ = cached_object_.pose;
+
+            self.setOutput("output_pose", current_target_pose_);
+            self.setOutput("output_id", current_target_id_);
+            self.setOutput("output_size", cached_object_.size);
+
+            // Marca o ID como 'picked' para evitar pegar o mesmo objeto em loop
+            picked.insert(current_target_id_);
+            has_new_object_ = false;
+
+            RCLCPP_INFO(this->get_logger(), "BT: Alvo '%s' travado.", current_target_id_.c_str());
+            return BT::NodeStatus::SUCCESS;
+        },
+        {
+            BT::OutputPort<geometry_msgs::msg::Pose>("output_pose"),
+            BT::OutputPort<std::string>("output_id"),
+            BT::OutputPort<geometry_msgs::msg::Vector3>("output_size")
+        });
+
         // --- ClearTarget ---
         factory_.registerSimpleAction("ClearTarget", [&](BT::TreeNode &self)
         {
@@ -988,6 +1029,132 @@ private:
                 }
             }
             return BT::NodeStatus::SUCCESS;
+        });
+
+        // --- GetStorageInfo ---
+        factory_.registerSimpleAction("GetStorageInfo", [&](BT::TreeNode &self)
+        {
+            auto id_opt = self.getInput<std::string>("object_id");
+            if (!id_opt) return BT::NodeStatus::FAILURE;
+
+            // Limpa o ID (ex: "can_34" -> "can") para buscar categoria genérica
+            std::string full_id = id_opt.value();
+            std::string label = full_id;
+            size_t pos = full_id.find('_');
+            if (pos != std::string::npos) label = full_id.substr(0, pos);
+
+            geometry_msgs::msg::Pose current_obj_pose;
+            {
+                std::lock_guard<std::mutex> lock(bt_mutex_);
+                current_obj_pose = current_target_pose_;
+            }
+
+            // Chama o StorageNode
+            auto result = storage_node_->getBestStorage(label, current_obj_pose);
+
+            if (result.success)
+            {
+                // Exporta os dados da caixa encontrada para a Blackboard
+                self.setOutput("storage_pose", result.pose);
+                self.setOutput("storage_limits", result.limits);
+                self.setOutput("storage_id", result.storage_name);
+                self.setOutput("indexes", result.indexes);
+                self.setOutput("storage_size", result.size);
+                return BT::NodeStatus::SUCCESS;
+            }
+
+            RCLCPP_WARN(this->get_logger(), "Storage cheio ou não encontrado para %s", label.c_str());
+            return BT::NodeStatus::FAILURE;
+        },
+        {
+            BT::InputPort<std::string>("object_id"),
+            BT::OutputPort<geometry_msgs::msg::Pose>("storage_pose"),
+            BT::OutputPort<std::vector<double>>("storage_limits"),
+            BT::OutputPort<std::string>("storage_id"),
+            BT::OutputPort<std::vector<int>>("indexes"),
+            BT::OutputPort<geometry_msgs::msg::Vector3>("storage_size")
+        });
+
+        // --- ComputePoseToOrganize ---
+        factory_.registerSimpleAction("ComputePoseToOrganize", [&](BT::TreeNode &self)
+        {
+            auto storagePose = self.getInput<geometry_msgs::msg::Pose>("storage_pose");
+            auto storageSize = self.getInput<geometry_msgs::msg::Vector3>("storage_size");
+            auto objectSize = self.getInput<geometry_msgs::msg::Vector3>("object_size");
+            auto indexes = self.getInput<std::vector<int>>("indexes");
+            auto objectPadding = self.getInput<float>("object_padding");
+            auto zLiftOffset = self.getInput<float>("z_lift_offset");
+
+            if (!storagePose || !storageSize || !objectSize || !indexes || !objectPadding || !zLiftOffset)
+            {
+                RCLCPP_ERROR(this->get_logger(), "BT: Parâmetros de organização faltando.");
+                return BT::NodeStatus::FAILURE;
+            }
+
+            std::vector<int> idx_vec = indexes.value();
+            if (idx_vec.size() != 3) return BT::NodeStatus::FAILURE;
+
+            // Chama o algoritmo de cálculo geométrico
+            std::pair<geometry_msgs::msg::Pose, std::vector<int>> result = organize_node_->placeObjectInBox(
+                storagePose.value(), storageSize.value(), objectSize.value(),
+                objectPadding.value(), zLiftOffset.value(),
+                idx_vec[0], idx_vec[1], idx_vec[2]
+            );
+
+            self.setOutput("output_final_pose", std::get<0>(result));
+            self.setOutput("new_indexes", std::get<1>(result));
+
+            RCLCPP_INFO(this->get_logger(), "Nova posição de organização calculada.");
+            return BT::NodeStatus::SUCCESS;
+        },
+        {
+            BT::InputPort<geometry_msgs::msg::Pose>("storage_pose"),
+            BT::InputPort<geometry_msgs::msg::Vector3>("storage_size"),
+            BT::InputPort<geometry_msgs::msg::Vector3>("object_size"),
+            BT::InputPort<std::vector<int>>("indexes"),
+            BT::InputPort<float>("object_padding"),
+            BT::InputPort<float>("z_lift_offset"),
+            BT::OutputPort<std::vector<int>>("new_indexes"),
+            BT::OutputPort<geometry_msgs::msg::Pose>("output_final_pose")
+        });
+
+        // --- ComputePoseToStore ---
+        factory_.registerSimpleAction("ComputePoseToStore", [&](BT::TreeNode &self)
+        {
+            auto storagePose = self.getInput<geometry_msgs::msg::Pose>("storage_pose");
+            auto storageSize = self.getInput<geometry_msgs::msg::Vector3>("storage_size");
+            auto zLiftOffset = self.getInput<float>("z_lift_offset");
+
+            if (!storagePose || !storageSize || !zLiftOffset) return BT::NodeStatus::FAILURE;
+
+            geometry_msgs::msg::Pose output_final_pose = storagePose.value();
+            output_final_pose.position.z += storageSize.value().z + zLiftOffset.value();
+
+            self.setOutput("output_final_pose", output_final_pose);
+            return BT::NodeStatus::SUCCESS;
+        },
+        {
+            BT::InputPort<geometry_msgs::msg::Pose>("storage_pose"),
+            BT::InputPort<geometry_msgs::msg::Vector3>("storage_size"),
+            BT::InputPort<float>("z_lift_offset"),
+            BT::OutputPort<geometry_msgs::msg::Pose>("output_final_pose")
+        });
+
+        // --- IncrementOrganizedStorageIndexes ---
+        factory_.registerSimpleAction("IncrementOrganizedStorageIndexes", [&](BT::TreeNode &self)
+        {
+            // Persiste a ocupação do espaço no banco de dados
+            auto id_opt = self.getInput<std::string>("storage_id");
+            auto newIndexes = self.getInput<std::vector<int>>("new_indexes");
+            if (!id_opt || !newIndexes) return BT::NodeStatus::FAILURE;
+
+            storage_node_->addNewIndexes(id_opt.value(), newIndexes.value());
+            RCLCPP_WARN(this->get_logger(), "Storage '%s' atualizado.", id_opt.value().c_str());
+            return BT::NodeStatus::SUCCESS;
+        },
+        { 
+            BT::InputPort<std::string>("storage_id"), 
+            BT::InputPort<std::vector<int>>("new_indexes") 
         });
 
         // --- IsGripperHoldingObject ---
@@ -1134,16 +1301,17 @@ private:
                         return BT::NodeStatus::FAILURE;
                     }
 
-                 
+                    geometry_msgs::msg::Pose target = object_pose.value();
+                    geometry_msgs::msg::Vector3 target_size = object_size.value();
+
+                    // Armazena em cache
+                    cached_object_.id = id.value();
+                    cached_object_.pose = target;
+                    cached_object_.size = target_size;
+            
                     if(use_graspnet == true)
                     {
-                        geometry_msgs::msg::Pose target = object_pose.value();
-                        geometry_msgs::msg::Vector3 target_size = object_size.value();
-
-                        // Armazena em cache
-                        cached_object_.id = id.value();
-                        cached_object_.pose = target;
-                        cached_object_.size = target_size;
+                        
 
                         target_size.x += 0.005;
                         target_size.y += 0.005;
@@ -1245,7 +1413,6 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "Factory completamente configurada.");
     }
-
     
     void bt_loop()
     {
