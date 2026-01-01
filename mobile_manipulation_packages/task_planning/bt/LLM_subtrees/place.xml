@@ -3,19 +3,17 @@
     <Sequence name="PlaceSequence">
         
         
-        <GetStorageInfo object_id="{storage_id}"
+        <GetStorageInfo object_id="{object_id}"
                         indexes="{indexes}" 
                         storage_pose="{storage_pose}" 
                         storage_size="{storage_size}"
                         storage_id="{resolved_storage_id}"/>
-        
         
         <ComputePoseToStore storage_pose="{storage_pose}" 
                             storage_size="{storage_size}"
                             z_lift_offset="0.05"            
                             output_final_pose="{final_placement_pose}"/> 
 
-        
         <Fallback name="PlaceOrCleanup">
             <Sequence name="ApproachAndPlace">
                 <RetryUntilSuccessful num_attempts="3">
@@ -53,7 +51,8 @@
 
   <TreeNodesModel>
     <SubTree ID="Place">
-      <input_port name="storage_id" description="ID do storage (ex: storage_01)"/>
+      <input_port name="storage_id" description="ID do storage (opcional)"/>
+      <input_port name="object_id" description="ID do objeto sendo armazenado"/>
     </SubTree>
   </TreeNodesModel>
 </root>

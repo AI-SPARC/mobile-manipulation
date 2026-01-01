@@ -66,7 +66,6 @@ private:
             return cmd["skill"].get<std::string>();
         }
         
-        
         for (auto it = cmd.begin(); it != cmd.end(); ++it) 
         {
             std::string key = it.key();
@@ -84,7 +83,6 @@ private:
 
     std::optional<std::string> extract_coordinates(const json& params)
     {
-        
         if (params.contains("x") && params.contains("y") && params.contains("z"))
         {
             std::stringstream ss;
@@ -98,11 +96,9 @@ private:
         {
             std::string id = params["id"].get<std::string>();
             
-            
             if (id.find(';') != std::string::npos) {
                 return id;
             }
-            
             
             if (id.find('(') != std::string::npos)
             {
@@ -125,7 +121,6 @@ private:
         }
         
         std::string id = params["id"].get<std::string>();
-        
         
         if (id.find('(') != std::string::npos || 
             id.find(';') != std::string::npos ||
@@ -196,7 +191,6 @@ private:
 
         for (const auto& cmd : plan["commands"]) 
         {
-            
             if (cmd.contains("loop") && cmd.contains("do"))
             {
                 std::string loop_xml = build_loop(cmd);
@@ -205,7 +199,6 @@ private:
                 }
                 continue;
             }
-            
             
             auto skill_opt = extract_skill(cmd);
 
@@ -244,7 +237,7 @@ private:
         const json& loop_def = cmd["loop"];
         const json& actions = cmd["do"];
         
-        
+        // Expande items
         std::vector<std::string> items;
         if (loop_def.contains("item")) 
         {
@@ -267,7 +260,7 @@ private:
             return "";
         }
         
-        
+        // Expande destinos
         std::vector<std::string> dests;
         if (loop_def.contains("dest")) 
         {
@@ -284,23 +277,23 @@ private:
             }
         }
         
-        
+        // Constrói ForEach
         ss << "      <ForEach items=\"" << join_list(items) << "\" ";
         
         if (!dests.empty()) {
             ss << "dests=\"" << join_list(dests) << "\" ";
         }
         
-        
+        // Output ports
         ss << "item=\"{loop_item}\" pose=\"{loop_pose}\" size=\"{loop_size}\" ";
         if (!dests.empty()) {
-            ss << "dest=\"{loop_dest}\" dest_pose=\"{loop_dest_pose}\" ";
+            ss << "dest=\"{loop_dest}\" ";
         }
         ss << ">\n";
         
         ss << "        <Sequence>\n";
         
-        
+        // Processa ações do loop
         for (const auto& action : actions)
         {
             auto skill_opt = extract_skill(action);
@@ -315,7 +308,6 @@ private:
             
             if (skill_lower == "pick")
             {
-                
                 ss << "          <SubTree ID=\"Pick\" target_id=\"{loop_item}\" "
                    << "target_pose=\"{loop_pose}\" target_size=\"{loop_size}\" />\n";
             }
@@ -323,13 +315,15 @@ private:
             {
                 if (id_str == "$dest") 
                 {
+                    
                     ss << "          <SubTree ID=\"Place\" storage_id=\"{loop_dest}\" "
-                       << "final_placement_pose=\"{loop_dest_pose}\" />\n";
+                       << "object_id=\"{loop_item}\" />\n";
                 } 
                 else 
                 {
-                    
-                    ss << "          <SubTree ID=\"Place\" storage_id=\"" << id_str << "\" />\n";
+                   
+                    ss << "          <SubTree ID=\"Place\" storage_id=\"" << id_str << "\" "
+                       << "object_id=\"{loop_item}\" />\n";
                 }
             }
             else if (skill_lower == "goto_location" || skill_lower == "goto")

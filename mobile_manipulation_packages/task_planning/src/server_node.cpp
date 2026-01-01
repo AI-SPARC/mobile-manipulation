@@ -971,7 +971,6 @@ private:
                     geometry_msgs::msg::Pose target = object_pose.value();
                     geometry_msgs::msg::Vector3 target_size = object_size.value();
 
-                    // Armazena em cache
                     cached_object_.id = id.value();
                     cached_object_.pose = target;
                     cached_object_.size = target_size;
