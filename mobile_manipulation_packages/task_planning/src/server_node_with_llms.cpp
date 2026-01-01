@@ -153,6 +153,7 @@ enum class TaskState
 };
 
 
+
 class ForEach : public BT::DecoratorNode
 {
 public:
@@ -162,13 +163,14 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<std::string>("items"),      
-            BT::InputPort<std::string>("dests"),      
-            BT::OutputPort<std::string>("item"),      
-            BT::OutputPort<std::string>("pose"),      
-            BT::OutputPort<std::string>("size"),      
-            BT::OutputPort<std::string>("dest"),      
-            BT::OutputPort<std::string>("dest_pose")  
+            BT::InputPort<std::string>("items"),
+            BT::InputPort<std::string>("dests"),
+            BT::OutputPort<std::string>("item"),
+            BT::OutputPort<std::string>("pose"),
+            BT::OutputPort<std::string>("size"),
+            BT::OutputPort<std::string>("dest"),
+            BT::OutputPort<std::string>("dest_pose"),
+            BT::OutputPort<std::string>("dest_size")  
         };
     }
 
@@ -187,26 +189,23 @@ public:
             
             items_ = split(items_str.value(), '|');
             
-            
             auto dests_str = getInput<std::string>("dests");
-
             if (dests_str) 
             {
                 dests_ = split(dests_str.value(), '|');
             }
             
-            std::cout << "[ForEach] Iniciando loop com " << items_.size() << " items" << std::endl;
         }
         
-       
+        
         if (current_index_ >= items_.size())
         {
-            std::cout << "[ForEach] Loop completo!" << std::endl;
+            
             reset();
             return BT::NodeStatus::SUCCESS;
         }
         
-       
+        
         std::string current_item = items_[current_index_];
         setOutput("item", current_item);
         
@@ -222,7 +221,7 @@ public:
             } 
             else 
             {
-                
+                std::cerr << "[ForEach] DB FALHOU - item '" << current_item << "' não encontrado!" << std::endl;
                 setOutput("pose", "");
                 setOutput("size", "");
             }
@@ -238,11 +237,11 @@ public:
             size_t dest_idx;
             if (dests_.size() == 1) 
             {
-                dest_idx = 0;
+                dest_idx = 0;  
             } 
             else 
             {
-                dest_idx = current_index_;
+                dest_idx = current_index_;  
             }
             
             if (dest_idx < dests_.size())
@@ -254,29 +253,29 @@ public:
                 if (g_db_handler) 
                 {
                     auto props = g_db_handler->get_object_data(current_dest);
-
                     if (props) 
                     {
                         
                         setOutput("dest_pose", props->pose_str);
+                        setOutput("dest_size", props->size_str);
                     } 
                     else 
                     {
-                        
+                        std::cerr << "[ForEach] DB FALHOU - dest '" << current_dest << "' não encontrado!" << std::endl;
                         setOutput("dest_pose", "");
+                        setOutput("dest_size", "");
                     }
                 }
             }
         }
         
-      
         
         BT::NodeStatus child_status = child_node_->executeTick();
         
         if (child_status == BT::NodeStatus::SUCCESS)
         {
             current_index_++;
-            haltChild();  
+            haltChild();
             return BT::NodeStatus::RUNNING;  
         }
         else if (child_status == BT::NodeStatus::FAILURE)

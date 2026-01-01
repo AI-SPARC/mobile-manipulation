@@ -2,13 +2,6 @@
   <BehaviorTree ID="Place">
     <Sequence name="PlaceSequence">
         
-        
-        <GetStorageInfo object_id="{object_id}"
-                        indexes="{indexes}" 
-                        storage_pose="{storage_pose}" 
-                        storage_size="{storage_size}"
-                        storage_id="{resolved_storage_id}"/>
-        
         <ComputePoseToStore storage_pose="{storage_pose}" 
                             storage_size="{storage_size}"
                             z_lift_offset="0.05"            
@@ -19,7 +12,7 @@
                 <RetryUntilSuccessful num_attempts="3">
                     <Fallback name="EnsureProximityStorage">
                         <IsReachable target_pose="{final_placement_pose}"
-                                object_id="{resolved_storage_id}" 
+                                object_id="{storage_id}" 
                                 robot_base_z="0.11" 
                                 max_reach_3d="0.9" 
                                 adjustment_pose="{nav_target}"/>
@@ -41,7 +34,7 @@
             </Sequence>
 
             <Sequence name="FailureRecovery">                      
-                <DecrementStorageCount storage_id="{resolved_storage_id}"/>
+                <DecrementStorageCount storage_id="{storage_id}"/>
                 <AlwaysFailure/>
             </Sequence>
         </Fallback>
@@ -51,8 +44,9 @@
 
   <TreeNodesModel>
     <SubTree ID="Place">
-      <input_port name="storage_id" description="ID do storage (opcional)"/>
-      <input_port name="object_id" description="ID do objeto sendo armazenado"/>
+      <input_port name="storage_id" description="ID do storage"/>
+      <input_port name="storage_pose" description="Pose do storage (x;y;z)"/>
+      <input_port name="storage_size" description="Tamanho do storage (w;h;d)"/>
     </SubTree>
   </TreeNodesModel>
 </root>

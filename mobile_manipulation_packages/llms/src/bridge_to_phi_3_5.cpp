@@ -1,3 +1,7 @@
+// ============================================================================
+// brain_node.cpp
+// ============================================================================
+
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/string.hpp"
 #include <nlohmann/json.hpp>
@@ -58,7 +62,6 @@ private:
         RCLCPP_INFO(this->get_logger(), "BT XML publicado:\n%s", xml.c_str());
     }
 
- 
     std::optional<std::string> extract_skill(const json& cmd)
     {
         if (cmd.contains("skill") && cmd["skill"].is_string()) 
@@ -132,7 +135,6 @@ private:
         return id;
     }
 
-   
     std::vector<std::string> expand_range(const std::string& range_str)
     {
         std::vector<std::string> result;
@@ -181,7 +183,6 @@ private:
         return result;
     }
 
-   
     std::string build_bt_xml(const json& plan) 
     {
         std::stringstream ss;
@@ -277,17 +278,19 @@ private:
             }
         }
         
-        // Constrói ForEach
+        // Constrói ForEach com output ports
         ss << "      <ForEach items=\"" << join_list(items) << "\" ";
         
         if (!dests.empty()) {
             ss << "dests=\"" << join_list(dests) << "\" ";
         }
         
-        // Output ports
+        // Output ports para item
         ss << "item=\"{loop_item}\" pose=\"{loop_pose}\" size=\"{loop_size}\" ";
+        
+        // Output ports para destino
         if (!dests.empty()) {
-            ss << "dest=\"{loop_dest}\" ";
+            ss << "dest=\"{loop_dest}\" dest_pose=\"{loop_dest_pose}\" dest_size=\"{loop_dest_size}\" ";
         }
         ss << ">\n";
         
@@ -315,15 +318,14 @@ private:
             {
                 if (id_str == "$dest") 
                 {
-                    
+                    // Destino variável do loop - usa pose e size do DB
                     ss << "          <SubTree ID=\"Place\" storage_id=\"{loop_dest}\" "
-                       << "object_id=\"{loop_item}\" />\n";
+                       << "storage_pose=\"{loop_dest_pose}\" storage_size=\"{loop_dest_size}\" />\n";
                 } 
                 else 
                 {
-                   
-                    ss << "          <SubTree ID=\"Place\" storage_id=\"" << id_str << "\" "
-                       << "object_id=\"{loop_item}\" />\n";
+                    // Destino fixo - server_node vai expandir via XML preprocessing
+                    ss << "          <SubTree ID=\"Place\" storage_id=\"" << id_str << "\" />\n";
                 }
             }
             else if (skill_lower == "goto_location" || skill_lower == "goto")
@@ -371,12 +373,12 @@ private:
             
             if (coords) 
             {
-                
+                // Coordenadas diretas
                 ss << "      <SubTree ID=\"Place\" target=\"" << coords.value() << "\" />\n";
             }
             else if (obj_id) 
             {
-                
+                // ID do storage - server_node vai expandir via XML preprocessing
                 ss << "      <SubTree ID=\"Place\" storage_id=\"" << obj_id.value() << "\" />\n";
             }
             else 
