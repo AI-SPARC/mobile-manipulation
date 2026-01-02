@@ -12,6 +12,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/FleetPaths.msg"
   "srv/MobileObjectCollision.srv"
   "srv/GetStorageInfo.srv"
   "action/PickObject.action"
