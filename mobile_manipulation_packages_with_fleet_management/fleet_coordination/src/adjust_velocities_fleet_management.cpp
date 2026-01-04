@@ -17,7 +17,8 @@
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "geometry_msgs/msg/point.hpp"
 #include "std_msgs/msg/color_rgba.hpp"
-
+#include "std_msgs/msg/empty.hpp"
+#include "std_srvs/srv/trigger.hpp"
 // --- ESTRUTURAS AUXILIARES ---
 
 struct GridKey {
@@ -77,7 +78,7 @@ class FleetManager : public rclcpp::Node {
 public:
     FleetManager() : Node("cbs_fleet_manager") 
     {
-
+        // 1. CONFIGURAÇÃO E PARÂMETROS
         this->declare_parameter<double>("path_resolution", 0.05);       
         this->declare_parameter<double>("simulation_base_speed", 2.0);  
         this->declare_parameter<double>("min_robot_gap", 0.5);          
@@ -99,23 +100,23 @@ public:
 
         decimals = count_decimals(config_.resolution);
 
-        // Publishers / Subscribers
         sub_fleet_ = this->create_subscription<mobile_manipulation_interfaces::msg::FleetPaths>(
             "/fleet/all_robot_plans", 
             10, 
             std::bind(&FleetManager::fleet_callback, this, std::placeholders::_1));
             
         pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/fleet/simulation_markers", 10);
-        
-        // Publishers específicos para as novas visualizações estáticas
         pub_zone_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/fleet/viz_zones", 10);
         pub_path_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/fleet/viz_static_paths", 10);
+        
+        scenario_client_ = this->create_client<std_srvs::srv::Trigger>("/fleet/generate_scenario");
         
         timer_ = this->create_wall_timer(
             std::chrono::milliseconds(config_.animation_rate_ms), 
             std::bind(&FleetManager::animation_loop, this));
 
-        RCLCPP_INFO(this->get_logger(), "Fleet Manager Iniciado (Solver Priorizado + Visualizacao Completa).");
+        RCLCPP_INFO(this->get_logger(), "Fleet Manager: Modo Lookahead (Retorno automatico a velocidade maxima).");
+        request_new_scenario();
     }
 
 private:
@@ -137,6 +138,8 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_path_markers_;
     rclcpp::TimerBase::SharedPtr timer_;
 
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr scenario_client_;
+
     std::unordered_map<GridKey, std::vector<RobotVisit>, GridKey::Hash> global_occupancy_map;
     std::map<int, std::vector<std::pair<float, float>>> original_paths_;
     std::map<int, std::vector<TrajectoryPoint>> animated_trajectories_;
@@ -145,12 +148,31 @@ private:
     float max_sim_time_ = 0.0f;
     bool is_simulating_ = false;
 
-    struct IntervalRef { 
-        int robot_id; 
-        float start; 
-        float end; 
-        float original_start; 
-    };
+    struct IntervalRef { int robot_id; float start; float end; float original_start; };
+
+    void request_new_scenario() {
+        if (!scenario_client_->wait_for_service(std::chrono::seconds(1))) {
+            RCLCPP_WARN(this->get_logger(), "Gerador de cenarios nao disponivel.");
+            return;
+        }
+        
+        auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+        
+        // Chama assincronamente para não bloquear o spin do nó
+        auto future_result = scenario_client_->async_send_request(request, 
+            [this](rclcpp::Client<std_srvs::srv::Trigger>::SharedFuture future) {
+                try {
+                    auto response = future.get();
+                    if(response->success) {
+                        RCLCPP_INFO(this->get_logger(), "Novo cenario solicitado com sucesso!");
+                    } else {
+                        RCLCPP_WARN(this->get_logger(), "Gerador recusou: %s", response->message.c_str());
+                    }
+                } catch (const std::exception &e) {
+                    RCLCPP_ERROR(this->get_logger(), "Falha na chamada do servico: %s", e.what());
+                }
+            });
+    }
 
     // --- UTILS ---
     GridKey to_key(float x, float y) {
@@ -165,23 +187,13 @@ private:
         return robots;
     }
 
-    // Helper de Cores (HSV to RGB)
     std_msgs::msg::ColorRGBA get_color_for_id(int id, float alpha = 1.0) {
         std_msgs::msg::ColorRGBA color;
         color.a = alpha;
-        
-        // Golden Angle approximation para cores distintas
-        float golden_ratio_conjugate = 0.618033988749895;
-        float h = std::fmod((id * golden_ratio_conjugate), 1.0f);
-        float s = 0.8;
-        float v = 0.95;
-
-        int i = (int)(h * 6);
-        float f = h * 6 - i;
-        float p = v * (1 - s);
-        float q = v * (1 - f * s);
-        float t = v * (1 - (1 - f) * s);
-
+        float h = std::fmod((id * 0.618033988749895), 1.0f);
+        float s = 0.8; float v = 0.95;
+        int i = (int)(h * 6); float f = h * 6 - i;
+        float p = v * (1 - s); float q = v * (1 - f * s); float t = v * (1 - (1 - f) * s);
         switch (i % 6) {
             case 0: color.r = v; color.g = t; color.b = p; break;
             case 1: color.r = q; color.g = v; color.b = p; break;
@@ -217,154 +229,155 @@ private:
         }
 
         std::vector<CollisionZone> zones_vector = detect_and_cluster_collisions();
-        
-        // Resolve conflitos
         auto result = analyze_and_resolve_conflicts(zones_vector);
         
         print_super_detailed_report(zones_vector, result.first, result.second);
-        generate_visualization_trajectories(result.first);
+        
+        // Geração de trajetória usando o controlador Lookahead
+        generate_visualization_trajectories_lookahead(result.first);
 
-        // --- NOVAS VISUALIZAÇÕES ESTÁTICAS ---
         publish_zone_visuals(zones_vector);
         publish_robot_footprints();
+        // request_new_scenario();
     }
 
-    // --- PUBLISHERS DE VISUALIZAÇÃO ---
-
+    // --- VISUALIZACAO ESTATICA ---
     void publish_zone_visuals(const std::vector<CollisionZone>& zones) {
         if (!config_.show_zones) return;
-
         visualization_msgs::msg::MarkerArray markers;
-        visualization_msgs::msg::Marker del;
-        del.action = visualization_msgs::msg::Marker::DELETEALL;
-        markers.markers.push_back(del);
+        visualization_msgs::msg::Marker del; del.action = 3; markers.markers.push_back(del);
 
         for (const auto& zone : zones) {
             visualization_msgs::msg::Marker mk;
-            mk.header.frame_id = "world";
-            mk.header.stamp = this->now();
-            mk.ns = "zones";
-            mk.id = zone.id;
-            mk.type = visualization_msgs::msg::Marker::CUBE_LIST;
-            mk.action = visualization_msgs::msg::Marker::ADD;
-            mk.scale.x = config_.resolution;
-            mk.scale.y = config_.resolution;
-            mk.scale.z = config_.resolution; // Altura da zona
-            
-            // Cor única para a zona
-            mk.color = get_color_for_id(zone.id * 10, 0.6); // Multiplica ID para variar cor, alpha 0.6
+            mk.header.frame_id = "world"; mk.header.stamp = this->now();
+            mk.ns = "zones"; mk.id = zone.id; mk.type = 6; mk.action = 0;
+            mk.scale.x = config_.resolution; mk.scale.y = config_.resolution; mk.scale.z = config_.resolution;
+            mk.color = get_color_for_id(zone.id * 10, 0.6);
 
             for (const auto& pt : zone.points) {
                 geometry_msgs::msg::Point p;
-                p.x = pt.x * config_.resolution;
-                p.y = pt.y * config_.resolution;
-                p.z = 0.05; // Levemente elevado
+                p.x = pt.x * config_.resolution; p.y = pt.y * config_.resolution; p.z = 0.05;
                 mk.points.push_back(p);
             }
             markers.markers.push_back(mk);
-            
-            // Texto com ID da zona
-            if (!zone.points.empty()) {
-                visualization_msgs::msg::Marker txt;
-                txt.header = mk.header;
-                txt.ns = "zone_ids";
-                txt.id = zone.id;
-                txt.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-                txt.action = visualization_msgs::msg::Marker::ADD;
-                txt.pose.position.x = zone.points[0].x * config_.resolution;
-                txt.pose.position.y = zone.points[0].y * config_.resolution;
-                txt.pose.position.z = 0.5;
-                txt.scale.z = 0.3;
-                txt.color.r = 1.0; txt.color.g = 1.0; txt.color.b = 1.0; txt.color.a = 1.0;
-                txt.text = "Z" + std::to_string(zone.id);
-                markers.markers.push_back(txt);
-            }
         }
         pub_zone_markers_->publish(markers);
     }
 
     void publish_robot_footprints() {
         if (!config_.show_paths) return;
-
         visualization_msgs::msg::MarkerArray markers;
-        visualization_msgs::msg::Marker del;
-        del.action = visualization_msgs::msg::Marker::DELETEALL;
-        markers.markers.push_back(del);
+        visualization_msgs::msg::Marker del; del.action = 3; markers.markers.push_back(del);
 
-        // Agrupa pontos por Robot ID varrendo o mapa global
-        // Isso recupera o caminho inflado completo
         std::map<int, std::vector<geometry_msgs::msg::Point>> robot_points;
-
         for (const auto& entry : global_occupancy_map) {
             for (const auto& visit : entry.second) {
                 geometry_msgs::msg::Point p;
                 p.x = entry.first.x * config_.resolution;
                 p.y = entry.first.y * config_.resolution;
-                p.z = -0.05; // Levemente abaixo do chão (chão = 0)
+                p.z = -0.05; 
                 robot_points[visit.robot_id].push_back(p);
             }
         }
 
         for (const auto& [rid, points] : robot_points) {
             visualization_msgs::msg::Marker mk;
-            mk.header.frame_id = "world";
-            mk.header.stamp = this->now();
-            mk.ns = "static_paths";
-            mk.id = rid;
-            mk.type = visualization_msgs::msg::Marker::CUBE_LIST;
-            mk.action = visualization_msgs::msg::Marker::ADD;
-            mk.scale.x = config_.resolution;
-            mk.scale.y = config_.resolution;
-            mk.scale.z = 0.02; // Bem fino, como um tapete
-            
-            // Cor única por Robô
-            mk.color = get_color_for_id(rid, 0.4); // Mais transparente
-
+            mk.header.frame_id = "world"; mk.header.stamp = this->now();
+            mk.ns = "static_paths"; mk.id = rid; mk.type = 6; mk.action = 0;
+            mk.scale.x = config_.resolution; mk.scale.y = config_.resolution; mk.scale.z = 0.02;
+            mk.color = get_color_for_id(rid, 0.4);
             mk.points = points;
             markers.markers.push_back(mk);
         }
         pub_path_markers_->publish(markers);
     }
 
-    // --- ANIMAÇÃO ---
-    void generate_visualization_trajectories(const std::vector<ResolutionLog>& logs) {
+    // --- NOVA ANIMAÇÃO: CONTROLADOR LOOKAHEAD ---
+    // Verifica a cada instante: "Tenho algum compromisso de horario na minha frente?"
+    // Se não, volta a base_speed.
+    void generate_visualization_trajectories_lookahead(const std::vector<ResolutionLog>& logs) 
+    {
         animated_trajectories_.clear();
         sim_time_ = 0.0f;
         max_sim_time_ = 0.0f;
 
-        // Mapa de velocidades
-        std::map<int, float> robot_speeds;
-        for(auto const& [rid, path] : original_paths_) {
-            robot_speeds[rid] = config_.base_speed;
-        }
-
+        // 1. Organiza os checkpoints (constraints) para cada robô
+        std::map<int, std::vector<std::pair<float, float>>> robot_checkpoints;
         for(const auto& log : logs) {
-            if(robot_speeds.count(log.r_victim)) {
-                robot_speeds[log.r_victim] = std::min(robot_speeds[log.r_victim], log.required_speed);
-            } else {
-                robot_speeds[log.r_victim] = log.required_speed;
-            }
+            robot_checkpoints[log.r_victim].push_back({log.dist_traveled, log.victim_final_start});
+        }
+        for(auto& [rid, checkpoints] : robot_checkpoints) {
+            std::sort(checkpoints.begin(), checkpoints.end());
         }
 
+        // 2. Simula o robô andando no caminho
         for(const auto& [rid, path] : original_paths_) {
             if(path.empty()) continue;
             
-            float current_t = 0.0f;
-            float speed = robot_speeds[rid];
-            if(speed < 0.01f) speed = 0.01f;
-
+            float current_sim_time = 0.0f;
+            float current_dist_traveled = 0.0f;
+            
+            // Ponto inicial
             animated_trajectories_[rid].push_back({0.0f, path[0].first, path[0].second});
 
             for(size_t i = 0; i < path.size() - 1; ++i) {
                 float dx = path[i+1].first - path[i].first;
                 float dy = path[i+1].second - path[i].second;
-                float dist = std::hypot(dx, dy);
-                float dt = dist / speed;
-                current_t += dt;
-                animated_trajectories_[rid].push_back({current_t, path[i+1].first, path[i+1].second});
+                float segment_total_dist = std::hypot(dx, dy);
+                
+                // Vamos simular pequenos passos dentro deste segmento para detectar mudanças de velocidade
+                float dist_in_segment = 0.0f;
+                float sim_step = 0.05f; // Resolução da simulação de movimento (metros)
+
+                while(dist_in_segment < segment_total_dist) {
+                    float step = std::min(sim_step, segment_total_dist - dist_in_segment);
+                    
+                    // --- LÓGICA LOOKAHEAD ---
+                    float target_speed = config_.base_speed;
+                    
+                    // Verifica se existe alguma restrição futura
+                    if (robot_checkpoints.count(rid)) {
+                        for (const auto& cp : robot_checkpoints[rid]) {
+                            float target_dist = cp.first;
+                            float target_time = cp.second;
+
+                            // Se a restrição está à frente
+                            if (target_dist > current_dist_traveled) {
+                                float dist_to_go = target_dist - current_dist_traveled;
+                                float time_to_go = target_time - current_sim_time;
+
+                                if (time_to_go > 0.001f) {
+                                    float req_speed = dist_to_go / time_to_go;
+                                    // Se precisarmos andar mais devagar que o maximo para cumprir horario, obedecemos
+                                    if (req_speed < target_speed) {
+                                        target_speed = req_speed;
+                                    }
+                                }
+                                // Encontramos a primeira restrição ativa, paramos de procurar (as outras estao depois)
+                                break; 
+                            }
+                        }
+                    }
+
+                    // Aplica velocidade (com mínimo de segurança para não travar divisão por zero)
+                    if(target_speed < 0.01f) target_speed = 0.01f;
+
+                    float dt = step / target_speed;
+                    current_sim_time += dt;
+                    current_dist_traveled += step;
+                    dist_in_segment += step;
+
+                    // Interpolação da posição
+                    float ratio = dist_in_segment / segment_total_dist;
+                    float px = path[i].first + ratio * dx;
+                    float py = path[i].second + ratio * dy;
+
+                    animated_trajectories_[rid].push_back({current_sim_time, px, py});
+                }
             }
-            if(current_t > max_sim_time_) max_sim_time_ = current_t;
+            if(current_sim_time > max_sim_time_) max_sim_time_ = current_sim_time;
         }
+        
         max_sim_time_ += 2.0f; 
         is_simulating_ = true;
     }
@@ -399,8 +412,6 @@ private:
             robot_mk.type = 3; robot_mk.action = 0;
             robot_mk.pose.position.x = x; robot_mk.pose.position.y = y; robot_mk.pose.position.z = 0.2;
             robot_mk.scale.x = 0.4; robot_mk.scale.y = 0.4; robot_mk.scale.z = 0.4;
-            
-            // Cor do robô = Cor do caminho (alpha sólido)
             robot_mk.color = get_color_for_id(rid, 1.0); 
             markers.markers.push_back(robot_mk);
 
@@ -534,7 +545,7 @@ private:
     {
         std::cout << "\n\n";
         std::cout << "================================================================================\n";
-        std::cout << "||   RELATÓRIO DE TRÁFEGO (VELOCIDADE VARIÁVEL REAL)   ||\n";
+        std::cout << "||   RELATÓRIO DE TRÁFEGO (VELOCIDADE DINÂMICA)   ||\n";
         std::cout << "================================================================================\n";
         
         std::cout << ">>> LOG DE RESOLUÇÃO:\n";
@@ -547,6 +558,7 @@ private:
             std::cout << "    | [SOLUÇÃO]    Reduzir velocidade para chegar em " 
                       << std::fixed << std::setprecision(2) << log.victim_final_start << "s.\n";
             std::cout << "    |              - VELOCIDADE NECESSARIA: >>> " << log.required_speed << " m/s <<<\n";
+            std::cout << "    |              - (Apos passar, retoma velocidade maxima)\n";
             std::cout << "    +--------------------------------------------------------------------------+\n";
         }
         std::cout << "================================================================================\n\n";

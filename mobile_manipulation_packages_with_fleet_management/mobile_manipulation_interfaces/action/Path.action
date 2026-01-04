@@ -1,0 +1,7 @@
+# Request
+geometry_msgs/Pose pose
+---
+nav_msgs/Path path
+nav_msgs/Path path_without_filter
+bool success
+---

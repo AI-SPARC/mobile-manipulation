@@ -13,10 +13,12 @@ def generate_launch_description():
     parameters = [{
         "path_resolution": 0.05,
         "simulation_base_speed": 2.0,
-        "min_robot_gap": 0.5,
+        "min_robot_gap": 2.0,
         "robot_radius": 0.3,
-        "time_gap_tolerance": 1.0,
-        "animation_rate_ms": 20
+        "time_gap_tolerance": 2.0,
+        "animation_rate_ms": 20,
+        "min_robot_count": 10,
+        "max_robot_count": 50
     }]
 
       
@@ -26,10 +28,17 @@ def generate_launch_description():
 
         Node(
             package='fleet_coordination',
-            executable='fleet_management',
+            executable='adjust_velocities_fleet_management',
             output='screen',
             parameters=parameters,
         ),
+
+        Node(
+            package='fleet_coordination',
+            executable='generate_tests',
+            output='screen',
+            parameters=parameters,
+        )
 
         
 

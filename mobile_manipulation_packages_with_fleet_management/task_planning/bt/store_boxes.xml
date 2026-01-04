@@ -1,0 +1,100 @@
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="AcquireObject">
+    <RetryUntilSuccessful num_attempts="-1">
+      <Sequence name="AcquireSequence">
+      
+        <DetectObject output_pose="{target_pose}" output_size="{target_size}" output_id="{target_id}"/>
+        
+        <RetryUntilSuccessful num_attempts="-1">
+            <Fallback name="EnsureProximity">
+                 
+                 <IsReachable target_pose="{target_pose}"
+                          object_id="{target_id}" 
+                          robot_base_z="0.11" 
+                          max_reach_3d="0.9" 
+                          adjustment_pose="{nav_target}"/>
+                 
+                 <Sequence name="PlanAndExecute">
+                    <ComputePath planner="a_star" target="{nav_target}"/>
+                    
+                    <ReactiveSequence name="MonitorAndMove">
+                        <IsStillReachable/>
+                        <IsPathClear/>  
+                        <FollowPath/>   
+                    </ReactiveSequence>
+                  </Sequence>
+    
+            </Fallback>
+        </RetryUntilSuccessful>
+          
+        <PickObject object_pose="{target_pose}" object_size="{target_size}" id="{target_id}"/>
+      </Sequence>
+    </RetryUntilSuccessful>
+  </BehaviorTree>
+
+  <BehaviorTree ID="PlaceRoutine">
+    <Fallback name="PlaceOrCleanup">
+        
+        <Sequence name="ApproachAndPlace">
+            <RetryUntilSuccessful num_attempts="-1">
+            <Fallback name="EnsureProximityStorage">
+                <IsReachable target_pose="{final_placement_pose}"
+                          object_id="{storage_id}" 
+                          robot_base_z="0.11" 
+                          max_reach_3d="0.9" 
+                          adjustment_pose="{nav_target}"/>
+                
+                
+                    <Sequence name="PlanAndExecuteDelivery">                        
+                        <ComputePath planner="a_star" target="{nav_target}"/>
+                        
+                        <ReactiveSequence name="MonitorMoveAndCargo">
+                            <IsStillReachable/>
+                            <IsGripperHoldingObject/> 
+                            <IsPathClear/> 
+                            <FollowPath/> 
+                          </ReactiveSequence>
+                    </Sequence>
+            
+            </Fallback>
+             </RetryUntilSuccessful>
+            <Sequence name="OrganizeSequence">
+                <PlaceObject pose="{final_placement_pose}"/>
+            </Sequence>
+            <ClearTarget/> 
+        </Sequence>
+
+        <Sequence name="FailureRecovery">
+            <DecrementStorageCount storage_id="{storage_id}"/>
+            <AlwaysFailure/>
+        </Sequence>
+
+    </Fallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MainTree">
+    <RetryUntilSuccessful num_attempts="-1">
+      <Sequence name="FullMission">
+        
+        <SubTree ID="AcquireObject" target_id="{target_id}" target_pose="{target_pose}"/>
+        
+        <GetStorageInfo object_id="{target_id}"
+                        indexes="{indexes}" 
+                        storage_pose="{storage_pose}" 
+                        storage_size="{storage_size}"
+                        storage_id="{storage_id}"/>
+        
+        <ComputePoseToStore storage_pose="{storage_pose}" 
+                            storage_size="{storage_size}"
+                            z_lift_offset="0.05"            
+                            output_final_pose="{final_placement_pose}"/> 
+
+        <SubTree ID="PlaceRoutine" 
+                 storage_id="{storage_id}"
+                 final_placement_pose="{final_placement_pose}"/> 
+      </Sequence>
+    </RetryUntilSuccessful>
+  </BehaviorTree>
+
+</root>

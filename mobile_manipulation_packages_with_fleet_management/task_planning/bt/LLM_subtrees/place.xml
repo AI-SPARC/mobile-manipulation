@@ -1,0 +1,52 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="Place">
+    <Sequence name="PlaceSequence">
+        
+        <ComputePoseToStore storage_pose="{storage_pose}" 
+                            storage_size="{storage_size}"
+                            z_lift_offset="0.05"            
+                            output_final_pose="{final_placement_pose}"/> 
+
+        <Fallback name="PlaceOrCleanup">
+            <Sequence name="ApproachAndPlace">
+                <RetryUntilSuccessful num_attempts="3">
+                    <Fallback name="EnsureProximityStorage">
+                        <IsReachable target_pose="{final_placement_pose}"
+                                object_id="{storage_id}" 
+                                robot_base_z="0.11" 
+                                max_reach_3d="0.9" 
+                                adjustment_pose="{nav_target}"/>
+                        
+                        <Sequence name="PlanAndExecuteDelivery">                        
+                            <ComputePath planner="a_star" target="{nav_target}"/>
+                            <ReactiveSequence name="MonitorMoveAndCargo">
+                                <IsStillReachable/>
+                                <IsGripperHoldingObject/> 
+                                <IsPathClear/> 
+                                <FollowPath/> 
+                            </ReactiveSequence>
+                        </Sequence>
+                    </Fallback>
+                </RetryUntilSuccessful>
+
+                <PlaceObject pose="{final_placement_pose}"/>
+                <ClearTarget/> 
+            </Sequence>
+
+            <Sequence name="FailureRecovery">                      
+                <DecrementStorageCount storage_id="{storage_id}"/>
+                <AlwaysFailure/>
+            </Sequence>
+        </Fallback>
+        
+    </Sequence>
+  </BehaviorTree>
+
+  <TreeNodesModel>
+    <SubTree ID="Place">
+      <input_port name="storage_id" description="ID do storage"/>
+      <input_port name="storage_pose" description="Pose do storage (x;y;z)"/>
+      <input_port name="storage_size" description="Tamanho do storage (w;h;d)"/>
+    </SubTree>
+  </TreeNodesModel>
+</root>

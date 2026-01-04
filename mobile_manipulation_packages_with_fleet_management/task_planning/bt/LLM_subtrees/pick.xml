@@ -1,0 +1,42 @@
+<root BTCPP_format="4">
+
+  <BehaviorTree ID="Pick">
+    <RetryUntilSuccessful num_attempts="3">
+      <Sequence name="AcquireSequence">
+        
+        <Fallback name="EnsureProximity">
+             
+             <IsReachable target_pose="{target_pose}"
+                          object_id="{target_id}" 
+                          robot_base_z="0.11" 
+                          max_reach_3d="0.9" 
+                          adjustment_pose="{nav_target}"/>
+             
+             <Sequence name="PlanAndExecute">
+                <ComputePath planner="a_star" target="{nav_target}"/>
+                
+                <ReactiveSequence name="MonitorAndMove">
+                    <IsPathClear/>  
+                    <FollowPath/>   
+                </ReactiveSequence>
+              </Sequence>
+
+        </Fallback>
+          
+        <PickObject object_pose="{target_pose}" 
+                    object_size="{target_size}" 
+                    id="{target_id}"/>
+
+      </Sequence>
+    </RetryUntilSuccessful>
+  </BehaviorTree>
+
+  <TreeNodesModel>
+    <SubTree ID="Pick">
+      <input_port name="target_id" description="ID do objeto a ser pego"/>
+      <input_port name="target_pose" description="Pose do objeto (x;y;z)"/>
+      <input_port name="target_size" description="Tamanho do objeto (w;h;d)"/>
+    </SubTree>
+  </TreeNodesModel>
+
+</root>

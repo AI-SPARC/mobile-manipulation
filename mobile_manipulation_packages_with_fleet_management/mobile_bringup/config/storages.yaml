@@ -1,0 +1,24 @@
+storage_01:
+  - position: [-2.05, 8.44263, 0.3]
+    orientation: [0.0, 0.0, 0.0]
+    size: [0.48, 0.267, 0.3]
+    max_objects: 30
+
+storage_02:
+  - position: [-1.33, 8.44263, 0.3]
+    orientation: [0.0, 0.0, 0.0]
+    size: [0.48, 0.267, 0.3]
+    max_objects: 30 
+
+storage_03:
+  - position: [-0.03063, 8.44263, 0.3]
+    orientation: [0.0, 0.0, 0.0]
+    size: [0.48, 0.267, 0.3]
+    max_objects: 30 
+  
+storage_04:
+  - position: [0.68322, 8.44263, 0.3]
+    orientation: [0.0, 0.0, 0.0]
+    size: [0.48, 0.267, 0.3] 
+    max_objects: 30
+
