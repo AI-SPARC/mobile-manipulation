@@ -1,670 +1,688 @@
-// Inclusão de bibliotecas padrão
 #include <memory>
 #include <vector>
-#include <string>
-#include <cmath>
-#include <limits>
-#include <sstream>
-#include <iomanip>
-#include <unordered_map>
+#include <map>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <cmath>
 #include <algorithm>
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+#include <limits>
 
-// ROS 2
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/path.hpp"
-#include "geometry_msgs/msg/point.hpp"
-#include "visualization_msgs/msg/marker.hpp"
-#include "visualization_msgs/msg/marker_array.hpp"
-#include "sensor_msgs/msg/point_cloud2.hpp"
-#include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "mobile_manipulation_interfaces/msg/fleet_paths.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
+#include "geometry_msgs/msg/point.hpp"
+#include "std_msgs/msg/color_rgba.hpp"
 
-// TF2
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2/LinearMath/Matrix3x3.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+// --- ESTRUTURAS AUXILIARES ---
 
-using std::placeholders::_1;
-using Point2D = std::pair<float, float>;
-
-// --- CONFIGURAÇÕES ---
-constexpr double ROBOT_WIDTH = 0.60;
-constexpr double LONGITUDINAL_PAD = 0.30;
-constexpr double TIME_STEP = 0.02;
-constexpr double ANIMATION_FREQ = 0.05;
-constexpr double CLOUD_RES = 0.05;
-constexpr double SIM_LIMIT = 40.0;
-constexpr float SECURITY_DISTANCE = 0.3f;
-
-// Parâmetros Híbridos (Ajustados para Robustez)
-constexpr double APPROACH_DISTANCE = 0.5; // Distância curta de teste
-constexpr double SAFETY_TIME_MARGIN = 0.2; 
-constexpr double SAFETY_DIST_MARGIN = 0.2; 
-constexpr double MIN_CRAWL_SPEED = 0.1;
-
-// --- ESTRUTURAS ---
-struct Vec2 {
-    double x, y;
-    Vec2 operator-(const Vec2& o) const { return {x - o.x, y - o.y}; }
-    double dot(const Vec2& o) const { return x * o.x + y * o.y; }
-    double length() const { return std::hypot(x, y); }
-};
-using Rectangle = std::vector<Vec2>;
-
-struct RobotState {
-    geometry_msgs::msg::Pose pose;
-    int segment_idx = -1;
-    double yaw = 0.0;
+struct GridKey {
+    int x, y;
+    bool operator==(const GridKey& other) const { return x == other.x && y == other.y; }
+    struct Hash {
+        std::size_t operator()(const GridKey& k) const {
+            return std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1);
+        }
+    };
 };
 
-struct MitigationData {
-    bool active = false;
-    bool stop_required = false;
-    double target_speed = 0.0;
-    double trigger_dist = 0.0;
-    double stop_line = 0.0;
-    int partner_id = -1; 
-    double partner_exit_dist = 0.0;
+struct RobotVisit {
+    int robot_id;
+    float timestamp;
 };
 
-struct SegmentTime {
-    double start_t;
-    double end_t;
+struct ResolutionLog {
+    int zone_id;
+    int step_number;
+    int r_priority;
+    int r_victim;
+    float priority_end;
+    float victim_shifted_start;   
+    float victim_final_start;     
+    float victim_total_delay;     
+    float dist_traveled;
+    float required_speed;
+    bool is_physical_violation;
 };
 
-struct RobotData {
+struct CollisionZone {
     int id;
-    std::string frame_id;
-    double base_speed = 0.5;
-    double current_dist = 0.0;
-    double current_speed = 0.0;
-    nav_msgs::msg::Path path;
-    std::vector<Rectangle> static_rects;
-    std::vector<SegmentTime> segment_times; 
-    std::vector<double> accumulated_dists;  
-    double total_length = 0.0;
-    MitigationData mitigation;
+    std::set<int> involved_robots; 
+    std::vector<GridKey> points;
+    std::unordered_set<GridKey, GridKey::Hash> points_set; 
+    std::map<int, std::vector<std::pair<float, float>>> robot_intervals; 
+    
+    float get_earliest_entry() const {
+        float min_t = std::numeric_limits<float>::max();
+        for(const auto& [rid, intervals] : robot_intervals) {
+            if(!intervals.empty()) min_t = std::min(min_t, intervals[0].first);
+        }
+        return min_t;
+    }
 };
 
-struct RobotCollisionInfo {
-    std::vector<int> colliding_with;
-    std::vector<Rectangle> overlap_areas;
-    double conflict_entry_dist = std::numeric_limits<double>::infinity();
-    double conflict_exit_dist = -std::numeric_limits<double>::infinity();
-    double max_other_exit_time = 0.0;
-    std::unordered_map<int, double> specific_partner_exit_dists;
+struct TrajectoryPoint {
+    float time;
+    float x;
+    float y;
 };
 
-struct RGB { uint8_t r, g, b; };
+// --- CLASSE PRINCIPAL ---
 
-class FleetManagement : public rclcpp::Node {
+class FleetManager : public rclcpp::Node {
 public:
-    FleetManagement() : Node("fleet_traffic_manager") {
-        sub_paths_ = create_subscription<mobile_manipulation_interfaces::msg::FleetPaths>(
-            "/fleet/all_robot_plans", 10, std::bind(&FleetManagement::on_paths, this, _1));
+    FleetManager() : Node("cbs_fleet_manager") 
+    {
+
+        this->declare_parameter<double>("path_resolution", 0.05);       
+        this->declare_parameter<double>("simulation_base_speed", 2.0);  
+        this->declare_parameter<double>("min_robot_gap", 0.5);          
+        this->declare_parameter<double>("robot_radius", 0.3);           
+        this->declare_parameter<double>("time_gap_tolerance", 2.0);     
+        this->declare_parameter<int>("animation_rate_ms", 20);          
+        this->declare_parameter<bool>("viz_show_zones", true);
+        this->declare_parameter<bool>("viz_show_paths", true);
+
+        config_.resolution = static_cast<float>(this->get_parameter("path_resolution").as_double());
+        config_.base_speed = static_cast<float>(this->get_parameter("simulation_base_speed").as_double());
+        config_.min_robot_gap = static_cast<float>(this->get_parameter("min_robot_gap").as_double());
+        config_.robot_radius = static_cast<float>(this->get_parameter("robot_radius").as_double());
+        config_.time_gap_tolerance = static_cast<float>(this->get_parameter("time_gap_tolerance").as_double());
+        config_.animation_rate_ms = this->get_parameter("animation_rate_ms").as_int();
         
-        pub_markers_ = create_publisher<visualization_msgs::msg::MarkerArray>("/fleet/debug_markers", 10);
+        config_.show_zones = this->get_parameter("viz_show_zones").as_bool();
+        config_.show_paths = this->get_parameter("viz_show_paths").as_bool();
+
+        decimals = count_decimals(config_.resolution);
+
+        // Publishers / Subscribers
+        sub_fleet_ = this->create_subscription<mobile_manipulation_interfaces::msg::FleetPaths>(
+            "/fleet/all_robot_plans", 
+            10, 
+            std::bind(&FleetManager::fleet_callback, this, std::placeholders::_1));
+            
+        pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/fleet/simulation_markers", 10);
         
-        timer_ = create_wall_timer(
-            std::chrono::duration<double>(ANIMATION_FREQ),
-            std::bind(&FleetManagement::animate, this));
+        // Publishers específicos para as novas visualizações estáticas
+        pub_zone_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/fleet/viz_zones", 10);
+        pub_path_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/fleet/viz_static_paths", 10);
         
-        RCLCPP_INFO(get_logger(), "Fleet Manager: Lógica de Parada Conservadora Ativa.");
+        timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(config_.animation_rate_ms), 
+            std::bind(&FleetManager::animation_loop, this));
+
+        RCLCPP_INFO(this->get_logger(), "Fleet Manager Iniciado (Solver Priorizado + Visualizacao Completa).");
     }
 
 private:
-    std::vector<RobotData> fleet_;
-    std::unordered_map<int, RobotCollisionInfo> collision_data_;
-    std::unordered_map<int, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr> cloud_publishers_;
-    std::unordered_map<int, RGB> robot_colors_;
-    
-    rclcpp::Subscription<mobile_manipulation_interfaces::msg::FleetPaths>::SharedPtr sub_paths_;
+    struct FleetConfig {
+        float resolution;
+        float base_speed;
+        float min_robot_gap;
+        float robot_radius;
+        float time_gap_tolerance;
+        int animation_rate_ms;
+        bool show_zones;
+        bool show_paths;
+    } config_;
+
+    int decimals;
+    rclcpp::Subscription<mobile_manipulation_interfaces::msg::FleetPaths>::SharedPtr sub_fleet_; 
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_zone_markers_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_path_markers_;
     rclcpp::TimerBase::SharedPtr timer_;
 
-    // --- HELPERS ---
-    RobotData* get_robot_by_id(int id) {
-        for (auto& r : fleet_) if (r.id == id) return &r;
-        return nullptr;
-    }
+    std::unordered_map<GridKey, std::vector<RobotVisit>, GridKey::Hash> global_occupancy_map;
+    std::map<int, std::vector<std::pair<float, float>>> original_paths_;
+    std::map<int, std::vector<TrajectoryPoint>> animated_trajectories_;
+    
+    float sim_time_ = 0.0f;
+    float max_sim_time_ = 0.0f;
+    bool is_simulating_ = false;
 
-    RGB get_robot_color(int id) {
-        static const std::vector<RGB> palette = {
-            {255, 0, 0}, {0, 0, 255}, {0, 255, 0}, {255, 165, 0},
-            {128, 0, 128}, {0, 255, 255}, {255, 0, 255}, {255, 255, 0}
-        };
-        return palette[std::abs(id) % palette.size()];
-    }
+    struct IntervalRef { 
+        int robot_id; 
+        float start; 
+        float end; 
+        float original_start; 
+    };
 
-    inline float round_to_multiple(float value, float multiple, int decimals) {
-        if (multiple == 0.0f) return value; 
-        float result = std::round(value / multiple) * multiple;
-        float factor = std::pow(10.0f, decimals);
-        return std::round(result * factor) / factor;
+    // --- UTILS ---
+    GridKey to_key(float x, float y) {
+        return { static_cast<int>(std::round(x / config_.resolution)), static_cast<int>(std::round(y / config_.resolution)) };
     }
-
-    void ensure_publisher(int robot_id) {
-        if (cloud_publishers_.find(robot_id) == cloud_publishers_.end()) {
-            std::string topic = "/fleet/collision_cloud/robot_" + std::to_string(robot_id);
-            cloud_publishers_[robot_id] = create_publisher<sensor_msgs::msg::PointCloud2>(topic, 10);
+    
+    std::set<int> get_robots_at_point(const GridKey& key) {
+        std::set<int> robots;
+        if (global_occupancy_map.find(key) != global_occupancy_map.end()) {
+            for (const auto& visit : global_occupancy_map.at(key)) robots.insert(visit.robot_id);
         }
+        return robots;
     }
 
-    // --- MATEMÁTICA ---
-    Rectangle make_static_rect(const geometry_msgs::msg::Point& p1, const geometry_msgs::msg::Point& p2) {
-        double dx = p2.x - p1.x, dy = p2.y - p1.y;
-        double len = std::hypot(dx, dy);
-        if (len < 0.001) return {};
-        Vec2 u = {dx/len, dy/len}, n = {u.y, -u.x};
-        Vec2 s = {p1.x - u.x*LONGITUDINAL_PAD, p1.y - u.y*LONGITUDINAL_PAD};
-        Vec2 e = {p2.x + u.x*LONGITUDINAL_PAD, p2.y + u.y*LONGITUDINAL_PAD};
-        double hw = ROBOT_WIDTH / 2.0;
-        return {{e.x+n.x*hw, e.y+n.y*hw}, {e.x-n.x*hw, e.y-n.y*hw}, {s.x-n.x*hw, s.y-n.y*hw}, {s.x+n.x*hw, s.y+n.y*hw}};
-    }
-
-    bool check_sat_intersection(const Rectangle& r1, const Rectangle& r2) {
-        auto project = [](const Vec2& ax, const Rectangle& p, double& mn, double& mx) {
-            mn = std::numeric_limits<double>::infinity(); mx = -std::numeric_limits<double>::infinity();
-            for (auto& v : p) { double d = v.dot(ax); mn = std::min(mn, d); mx = std::max(mx, d); }
-        };
-        for (auto* poly : {&r1, &r2}) {
-            for (size_t i = 0; i < poly->size(); ++i) {
-                Vec2 edge = (*poly)[(i+1)%poly->size()] - (*poly)[i];
-                Vec2 normal = {-edge.y, edge.x};
-                double min1, max1, min2, max2;
-                project(normal, r1, min1, max1);
-                project(normal, r2, min2, max2);
-                if (max1 < min2 || max2 < min1) return false;
-            }
-        }
-        return true;
-    }
-
-    Rectangle get_intersection_polygon(const Rectangle& subjectPoly, const Rectangle& clipPoly) {
-        Rectangle outputList = subjectPoly;
-        for (size_t i = 0; i < clipPoly.size(); ++i) {
-            Vec2 clipEdgeStart = clipPoly[i];
-            Vec2 clipEdgeEnd = clipPoly[(i + 1) % clipPoly.size()];
-            Rectangle inputList = outputList;
-            outputList.clear();
-            if (inputList.empty()) break;
-            Vec2 edgeVec = clipEdgeEnd - clipEdgeStart;
-            auto is_inside = [&](const Vec2& p) { return (edgeVec.x * (p.y - clipEdgeStart.y) - edgeVec.y * (p.x - clipEdgeStart.x)) >= 0; };
-            auto intersection = [&](const Vec2& s, const Vec2& e) {
-                double num = (clipEdgeStart.x - s.x) * (clipEdgeStart.y - clipEdgeEnd.y) - (clipEdgeStart.y - s.y) * (clipEdgeStart.x - clipEdgeEnd.x);
-                double den = (clipEdgeStart.x - clipEdgeEnd.x) * (s.y - e.y) - (clipEdgeStart.y - clipEdgeEnd.y) * (s.x - e.x);
-                double t = num / den;
-                return Vec2{s.x + t * (e.x - s.x), s.y + t * (e.y - s.y)};
-            };
-            Vec2 S = inputList.back();
-            for (const auto& E : inputList) {
-                if (is_inside(E)) {
-                    if (!is_inside(S)) outputList.push_back(intersection(S, E));
-                    outputList.push_back(E);
-                } else if (is_inside(S)) {
-                    outputList.push_back(intersection(S, E));
-                }
-                S = E;
-            }
-        }
-        return outputList;
-    }
-
-    double get_precise_exit_dist(const Rectangle& overlap, const RobotData& r, int seg_idx) {
-        if (overlap.empty()) return r.accumulated_dists[seg_idx+1];
-        auto p_start = r.path.poses[seg_idx].pose.position;
-        auto p_end = r.path.poses[seg_idx+1].pose.position;
-        Vec2 start = {p_start.x, p_start.y};
-        Vec2 end = {p_end.x, p_end.y};
-        Vec2 dir = end - start;
-        double len = dir.length();
-        if (len < 0.001) return r.accumulated_dists[seg_idx+1];
-        Vec2 u = {dir.x / len, dir.y / len};
-        double max_proj = -std::numeric_limits<double>::infinity();
-        for (const auto& pt : overlap) {
-            Vec2 v = pt - start;
-            double proj = v.dot(u);
-            if (proj > max_proj) max_proj = proj;
-        }
-        double segment_start_dist = r.accumulated_dists[seg_idx];
-        return segment_start_dist + max_proj;
-    }
-
-    double get_precise_entry_dist(const Rectangle& overlap, const RobotData& r, int seg_idx) {
-        if (overlap.empty()) return r.accumulated_dists[seg_idx];
-        auto p_start = r.path.poses[seg_idx].pose.position;
-        auto p_end = r.path.poses[seg_idx+1].pose.position;
-        Vec2 start = {p_start.x, p_start.y};
-        Vec2 end = {p_end.x, p_end.y};
-        Vec2 dir = end - start;
-        double len = dir.length();
-        if (len < 0.001) return r.accumulated_dists[seg_idx];
-        Vec2 u = {dir.x / len, dir.y / len};
-        double min_proj = std::numeric_limits<double>::infinity();
-        for (const auto& pt : overlap) {
-            Vec2 v = pt - start;
-            double proj = v.dot(u);
-            if (proj < min_proj) min_proj = proj;
-        }
-        if (min_proj < 0) min_proj = 0; 
-        double segment_start_dist = r.accumulated_dists[seg_idx];
-        return segment_start_dist + min_proj;
-    }
-
-    // --- LÓGICA PRINCIPAL ---
-
-    void on_paths(const mobile_manipulation_interfaces::msg::FleetPaths::SharedPtr msg) {
-        fleet_.clear();
-        collision_data_.clear();
-        robot_colors_.clear();
+    // Helper de Cores (HSV to RGB)
+    std_msgs::msg::ColorRGBA get_color_for_id(int id, float alpha = 1.0) {
+        std_msgs::msg::ColorRGBA color;
+        color.a = alpha;
         
+        // Golden Angle approximation para cores distintas
+        float golden_ratio_conjugate = 0.618033988749895;
+        float h = std::fmod((id * golden_ratio_conjugate), 1.0f);
+        float s = 0.8;
+        float v = 0.95;
+
+        int i = (int)(h * 6);
+        float f = h * 6 - i;
+        float p = v * (1 - s);
+        float q = v * (1 - f * s);
+        float t = v * (1 - (1 - f) * s);
+
+        switch (i % 6) {
+            case 0: color.r = v; color.g = t; color.b = p; break;
+            case 1: color.r = q; color.g = v; color.b = p; break;
+            case 2: color.r = p; color.g = v; color.b = t; break;
+            case 3: color.r = p; color.g = q; color.b = v; break;
+            case 4: color.r = t; color.g = p; color.b = v; break;
+            case 5: color.r = v; color.g = p; color.b = q; break;
+        }
+        return color;
+    }
+
+    // --- CALLBACK PRINCIPAL ---
+    void fleet_callback(const mobile_manipulation_interfaces::msg::FleetPaths::SharedPtr msg)
+    {
+        global_occupancy_map.clear();
+        original_paths_.clear();
+
         for (size_t i = 0; i < msg->paths.size(); ++i) {
-            RobotData data;
-            data.id = static_cast<int>(msg->robot_ids[i]);
-            data.frame_id = msg->paths[i].header.frame_id;
-            data.path = msg->paths[i];
-            data.base_speed = (i < msg->robot_speeds.size()) ? msg->robot_speeds[i] : 0.5;
-            data.current_dist = 0.0;
-            data.current_speed = data.base_speed;
-            
-            if (data.path.poses.size() < 2) continue;
-            robot_colors_[data.id] = get_robot_color(data.id);
-            ensure_publisher(data.id);
-            
-            double current_t = 0.0;
-            double current_d = 0.0;
-            data.accumulated_dists.push_back(0.0);
+            int r_id = (i < msg->robot_ids.size()) ? msg->robot_ids[i] : (int)i;
+            float speed_sim = config_.base_speed; 
+            const auto& nav_path = msg->paths[i];
+            if (nav_path.poses.empty()) continue;
 
-            for (size_t j = 0; j < data.path.poses.size() - 1; ++j) {
-                auto& p1 = data.path.poses[j].pose.position;
-                auto& p2 = data.path.poses[j+1].pose.position;
-                data.static_rects.push_back(make_static_rect(p1, p2));
-                
-                double seg_len = std::hypot(p2.x - p1.x, p2.y - p1.y);
-                double seg_time = seg_len / data.base_speed;
-                SegmentTime st; st.start_t = current_t; st.end_t = current_t + seg_time;
-                data.segment_times.push_back(st);
-                
-                current_t += seg_time;
-                current_d += seg_len;
-                data.accumulated_dists.push_back(current_d);
+            std::vector<std::pair<float, float>> raw_points;
+            for (const auto& pose_stamped : nav_path.poses) {
+                raw_points.push_back({
+                    static_cast<float>(pose_stamped.pose.position.x),
+                    static_cast<float>(pose_stamped.pose.position.y)
+                });
             }
-            data.total_length = current_d;
-            fleet_.push_back(std::move(data));
+            original_paths_[r_id] = raw_points;
+            process_robot_volume(r_id, raw_points, speed_sim);
         }
+
+        std::vector<CollisionZone> zones_vector = detect_and_cluster_collisions();
         
-        check_conflicts();
-        solve_conflicts_hybrid();
-        publish_collision_clouds();
+        // Resolve conflitos
+        auto result = analyze_and_resolve_conflicts(zones_vector);
+        
+        print_super_detailed_report(zones_vector, result.first, result.second);
+        generate_visualization_trajectories(result.first);
+
+        // --- NOVAS VISUALIZAÇÕES ESTÁTICAS ---
+        publish_zone_visuals(zones_vector);
+        publish_robot_footprints();
     }
 
-    void check_conflicts() {
-        for (size_t i = 0; i < fleet_.size(); ++i) {
-            for (size_t k = i + 1; k < fleet_.size(); ++k) {
-                RobotData& r1 = fleet_[i];
-                RobotData& r2 = fleet_[k];
+    // --- PUBLISHERS DE VISUALIZAÇÃO ---
 
-                for (size_t s1 = 0; s1 < r1.static_rects.size(); ++s1) {
-                    for (size_t s2 = 0; s2 < r2.static_rects.size(); ++s2) {
-                        
-                        if (check_sat_intersection(r1.static_rects[s1], r2.static_rects[s2])) {
-                            double start1 = r1.segment_times[s1].start_t;
-                            double end1   = r1.segment_times[s1].end_t;
-                            double start2 = r2.segment_times[s2].start_t;
-                            double end2   = r2.segment_times[s2].end_t;
+    void publish_zone_visuals(const std::vector<CollisionZone>& zones) {
+        if (!config_.show_zones) return;
 
-                            if (std::max(start1, start2) < std::min(end1, end2)) {
-                                int id1 = r1.id; int id2 = r2.id;
-                                
-                                Rectangle overlap = get_intersection_polygon(r1.static_rects[s1], r2.static_rects[s2]);
-                                
-                                double precise_entry_r1 = get_precise_entry_dist(overlap, r1, s1);
-                                double precise_exit_r1  = get_precise_exit_dist(overlap, r1, s1);
-                                double precise_entry_r2 = get_precise_entry_dist(overlap, r2, s2);
-                                double precise_exit_r2  = get_precise_exit_dist(overlap, r2, s2);
+        visualization_msgs::msg::MarkerArray markers;
+        visualization_msgs::msg::Marker del;
+        del.action = visualization_msgs::msg::Marker::DELETEALL;
+        markers.markers.push_back(del);
 
-                                // R1
-                                auto& info1 = collision_data_[id1];
-                                info1.colliding_with.push_back(id2);
-                                if (!overlap.empty()) info1.overlap_areas.push_back(overlap);
+        for (const auto& zone : zones) {
+            visualization_msgs::msg::Marker mk;
+            mk.header.frame_id = "world";
+            mk.header.stamp = this->now();
+            mk.ns = "zones";
+            mk.id = zone.id;
+            mk.type = visualization_msgs::msg::Marker::CUBE_LIST;
+            mk.action = visualization_msgs::msg::Marker::ADD;
+            mk.scale.x = config_.resolution;
+            mk.scale.y = config_.resolution;
+            mk.scale.z = config_.resolution; // Altura da zona
+            
+            // Cor única para a zona
+            mk.color = get_color_for_id(zone.id * 10, 0.6); // Multiplica ID para variar cor, alpha 0.6
 
-                                if (precise_entry_r1 < info1.conflict_entry_dist) info1.conflict_entry_dist = precise_entry_r1;
-                                if (precise_exit_r1 > info1.conflict_exit_dist) info1.conflict_exit_dist = precise_exit_r1;
-                                if (end2 > info1.max_other_exit_time) info1.max_other_exit_time = end2;
-                                
-                                if (info1.specific_partner_exit_dists.find(id2) == info1.specific_partner_exit_dists.end() || precise_exit_r2 > info1.specific_partner_exit_dists[id2]) {
-                                    info1.specific_partner_exit_dists[id2] = precise_exit_r2;
-                                }
+            for (const auto& pt : zone.points) {
+                geometry_msgs::msg::Point p;
+                p.x = pt.x * config_.resolution;
+                p.y = pt.y * config_.resolution;
+                p.z = 0.05; // Levemente elevado
+                mk.points.push_back(p);
+            }
+            markers.markers.push_back(mk);
+            
+            // Texto com ID da zona
+            if (!zone.points.empty()) {
+                visualization_msgs::msg::Marker txt;
+                txt.header = mk.header;
+                txt.ns = "zone_ids";
+                txt.id = zone.id;
+                txt.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+                txt.action = visualization_msgs::msg::Marker::ADD;
+                txt.pose.position.x = zone.points[0].x * config_.resolution;
+                txt.pose.position.y = zone.points[0].y * config_.resolution;
+                txt.pose.position.z = 0.5;
+                txt.scale.z = 0.3;
+                txt.color.r = 1.0; txt.color.g = 1.0; txt.color.b = 1.0; txt.color.a = 1.0;
+                txt.text = "Z" + std::to_string(zone.id);
+                markers.markers.push_back(txt);
+            }
+        }
+        pub_zone_markers_->publish(markers);
+    }
 
-                                // R2
-                                auto& info2 = collision_data_[id2];
-                                info2.colliding_with.push_back(id1);
-                                if (!overlap.empty()) info2.overlap_areas.push_back(overlap);
+    void publish_robot_footprints() {
+        if (!config_.show_paths) return;
 
-                                if (precise_entry_r2 < info2.conflict_entry_dist) info2.conflict_entry_dist = precise_entry_r2;
-                                if (precise_exit_r2 > info2.conflict_exit_dist) info2.conflict_exit_dist = precise_exit_r2;
-                                if (end1 > info2.max_other_exit_time) info2.max_other_exit_time = end1;
-                                
-                                if (info2.specific_partner_exit_dists.find(id1) == info2.specific_partner_exit_dists.end() || precise_exit_r1 > info2.specific_partner_exit_dists[id1]) {
-                                    info2.specific_partner_exit_dists[id1] = precise_exit_r1;
+        visualization_msgs::msg::MarkerArray markers;
+        visualization_msgs::msg::Marker del;
+        del.action = visualization_msgs::msg::Marker::DELETEALL;
+        markers.markers.push_back(del);
+
+        // Agrupa pontos por Robot ID varrendo o mapa global
+        // Isso recupera o caminho inflado completo
+        std::map<int, std::vector<geometry_msgs::msg::Point>> robot_points;
+
+        for (const auto& entry : global_occupancy_map) {
+            for (const auto& visit : entry.second) {
+                geometry_msgs::msg::Point p;
+                p.x = entry.first.x * config_.resolution;
+                p.y = entry.first.y * config_.resolution;
+                p.z = -0.05; // Levemente abaixo do chão (chão = 0)
+                robot_points[visit.robot_id].push_back(p);
+            }
+        }
+
+        for (const auto& [rid, points] : robot_points) {
+            visualization_msgs::msg::Marker mk;
+            mk.header.frame_id = "world";
+            mk.header.stamp = this->now();
+            mk.ns = "static_paths";
+            mk.id = rid;
+            mk.type = visualization_msgs::msg::Marker::CUBE_LIST;
+            mk.action = visualization_msgs::msg::Marker::ADD;
+            mk.scale.x = config_.resolution;
+            mk.scale.y = config_.resolution;
+            mk.scale.z = 0.02; // Bem fino, como um tapete
+            
+            // Cor única por Robô
+            mk.color = get_color_for_id(rid, 0.4); // Mais transparente
+
+            mk.points = points;
+            markers.markers.push_back(mk);
+        }
+        pub_path_markers_->publish(markers);
+    }
+
+    // --- ANIMAÇÃO ---
+    void generate_visualization_trajectories(const std::vector<ResolutionLog>& logs) {
+        animated_trajectories_.clear();
+        sim_time_ = 0.0f;
+        max_sim_time_ = 0.0f;
+
+        // Mapa de velocidades
+        std::map<int, float> robot_speeds;
+        for(auto const& [rid, path] : original_paths_) {
+            robot_speeds[rid] = config_.base_speed;
+        }
+
+        for(const auto& log : logs) {
+            if(robot_speeds.count(log.r_victim)) {
+                robot_speeds[log.r_victim] = std::min(robot_speeds[log.r_victim], log.required_speed);
+            } else {
+                robot_speeds[log.r_victim] = log.required_speed;
+            }
+        }
+
+        for(const auto& [rid, path] : original_paths_) {
+            if(path.empty()) continue;
+            
+            float current_t = 0.0f;
+            float speed = robot_speeds[rid];
+            if(speed < 0.01f) speed = 0.01f;
+
+            animated_trajectories_[rid].push_back({0.0f, path[0].first, path[0].second});
+
+            for(size_t i = 0; i < path.size() - 1; ++i) {
+                float dx = path[i+1].first - path[i].first;
+                float dy = path[i+1].second - path[i].second;
+                float dist = std::hypot(dx, dy);
+                float dt = dist / speed;
+                current_t += dt;
+                animated_trajectories_[rid].push_back({current_t, path[i+1].first, path[i+1].second});
+            }
+            if(current_t > max_sim_time_) max_sim_time_ = current_t;
+        }
+        max_sim_time_ += 2.0f; 
+        is_simulating_ = true;
+    }
+
+    void animation_loop() {
+        if(!is_simulating_ || animated_trajectories_.empty()) return;
+        visualization_msgs::msg::MarkerArray markers;
+        visualization_msgs::msg::Marker del_mk; del_mk.action = 3; markers.markers.push_back(del_mk);
+
+        sim_time_ += (config_.animation_rate_ms / 1000.0f) * 2.0f; 
+        if(sim_time_ > max_sim_time_) sim_time_ = 0.0f; 
+
+        for(const auto& [rid, traj] : animated_trajectories_) {
+            if(traj.empty()) continue;
+            float x = traj.back().x; float y = traj.back().y;
+            
+            for(size_t i = 0; i < traj.size() - 1; ++i) {
+                if(sim_time_ >= traj[i].time && sim_time_ <= traj[i+1].time) {
+                    float total_dt = traj[i+1].time - traj[i].time;
+                    if(total_dt > 0.0001) {
+                        float ratio = (sim_time_ - traj[i].time) / total_dt;
+                        x = traj[i].x + ratio * (traj[i+1].x - traj[i].x);
+                        y = traj[i].y + ratio * (traj[i+1].y - traj[i].y);
+                    }
+                    break;
+                }
+            }
+            
+            visualization_msgs::msg::Marker robot_mk;
+            robot_mk.header.frame_id = "world"; robot_mk.header.stamp = this->now();
+            robot_mk.ns = "simulated_robots"; robot_mk.id = rid;
+            robot_mk.type = 3; robot_mk.action = 0;
+            robot_mk.pose.position.x = x; robot_mk.pose.position.y = y; robot_mk.pose.position.z = 0.2;
+            robot_mk.scale.x = 0.4; robot_mk.scale.y = 0.4; robot_mk.scale.z = 0.4;
+            
+            // Cor do robô = Cor do caminho (alpha sólido)
+            robot_mk.color = get_color_for_id(rid, 1.0); 
+            markers.markers.push_back(robot_mk);
+
+            visualization_msgs::msg::Marker text_mk = robot_mk;
+            text_mk.type = 9; text_mk.ns = "ids"; text_mk.id = rid+100;
+            text_mk.pose.position.z = 0.6; text_mk.scale.z = 0.3;
+            text_mk.color.r=1; text_mk.color.g=1; text_mk.color.b=1;
+            std::stringstream ss; ss << "R" << rid; text_mk.text = ss.str();
+            markers.markers.push_back(text_mk);
+        }
+        pub_markers_->publish(markers);
+    }
+
+    std::pair<float, std::pair<float, float>> calculate_approach_metrics(int robot_id, const CollisionZone& zone) 
+    {
+        if (original_paths_.find(robot_id) == original_paths_.end()) return {0.0f, {0,0}};
+        const auto& path = original_paths_[robot_id];
+        if (path.empty()) return {0.0f, {0,0}};
+        GridKey start_k = to_key(path[0].first, path[0].second);
+        if (zone.points_set.count(start_k)) return {0.0f, path[0]}; 
+        float total_dist_traveled = 0.0f;
+        for (size_t i = 0; i < path.size() - 1; ++i) {
+            float ax = path[i].first; float ay = path[i].second;
+            float bx = path[i+1].first; float by = path[i+1].second;
+            float dist = std::hypot(bx - ax, by - ay);
+            if (dist < 1e-6) continue;
+            float t_dist = config_.resolution;
+            float ux = (bx - ax) / dist; float uy = (by - ay) / dist;
+            while (t_dist < dist) {
+                float cur_x = ax + t_dist * ux;
+                float cur_y = ay + t_dist * uy;
+                GridKey k = to_key(cur_x, cur_y);
+                if (zone.points_set.count(k)) return {total_dist_traveled + t_dist, {cur_x, cur_y}};
+                t_dist += config_.resolution;
+            }
+            total_dist_traveled += dist;
+        }
+        return {total_dist_traveled, path.back()}; 
+    }
+
+    // --- SOLVER PRIORIZADO ---
+    std::pair<std::vector<ResolutionLog>, std::map<int, float>> analyze_and_resolve_conflicts(std::vector<CollisionZone>& zones)
+    {
+        std::vector<ResolutionLog> logs;
+        std::map<int, float> global_delays; 
+        int log_step = 1;
+
+        std::set<int> all_robot_ids;
+        for(const auto& zone : zones) for(int rid : zone.involved_robots) all_robot_ids.insert(rid);
+
+        struct ReservedSlot { float start; float end; int owner_id; };
+        std::map<int, std::vector<ReservedSlot>> reservation_table;
+
+        for(int current_robot : all_robot_ids) {
+            float speed_factor = 1.0f; 
+            bool factor_changed = true;
+
+            while(factor_changed) {
+                factor_changed = false;
+                for(const auto& zone : zones) {
+                    if(zone.robot_intervals.find(current_robot) == zone.robot_intervals.end()) continue;
+
+                    for(const auto& my_interval : zone.robot_intervals.at(current_robot)) {
+                        float original_duration = my_interval.second - my_interval.first;
+                        float new_duration = original_duration / speed_factor;
+                        float my_start = my_interval.first / speed_factor;
+                        float my_end = my_start + new_duration;
+
+                        if(reservation_table.count(zone.id)) {
+                            auto& reserved = reservation_table[zone.id];
+                            std::sort(reserved.begin(), reserved.end(), [](auto& a, auto& b){ return a.start < b.start; });
+
+                            for(const auto& slot : reserved) {
+                                float overlap_start = std::max(my_start, slot.start);
+                                float overlap_end = std::min(my_end, slot.end);
+                                bool collision = (overlap_start < overlap_end + config_.min_robot_gap);
+
+                                if(collision) {
+                                    float required_arrival = slot.end + config_.min_robot_gap;
+                                    float new_factor = my_interval.first / required_arrival;
+
+                                    if(new_factor < speed_factor - 0.001) {
+                                        auto metrics = calculate_approach_metrics(current_robot, zone);
+                                        float dist = metrics.first;
+                                        float req_speed = config_.base_speed * new_factor;
+
+                                        ResolutionLog log;
+                                        log.zone_id = zone.id;
+                                        log.step_number = log_step++;
+                                        log.r_priority = slot.owner_id;
+                                        log.r_victim = current_robot;
+                                        log.priority_end = slot.end;
+                                        log.victim_final_start = required_arrival;
+                                        log.dist_traveled = dist;
+                                        log.required_speed = req_speed;
+                                        log.is_physical_violation = false; 
+
+                                        logs.push_back(log);
+
+                                        speed_factor = new_factor;
+                                        factor_changed = true;
+                                        goto restart_checks;
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                restart_checks:;
             }
-        }
-    }
 
-    void solve_conflicts_hybrid() {
-        for (auto& [robot_id, info] : collision_data_) {
-            if (info.colliding_with.empty()) continue;
-
-            int my_id = robot_id;
-            int partner_id = info.colliding_with[0]; 
-            
-            if (my_id < partner_id) {
-                RobotData* myself = get_robot_by_id(my_id);
-                
-                double collision_start = info.conflict_entry_dist;
-                
-                // Onde começa a desaceleração
-                double trigger_dist = collision_start - APPROACH_DISTANCE;
-                if (trigger_dist < 0) trigger_dist = 0;
-
-                // --- CÁLCULO DE TEMPO NECESSÁRIO (DELAY) ---
-                
-                // 1. Tempo que levaria pra chegar no conflito naturalmente (sem parar)
-                double time_arrival_natural = collision_start / myself->base_speed;
-                
-                // 2. Tempo que o outro sai + Margem
-                double time_other_clears = info.max_other_exit_time + SAFETY_TIME_MARGIN;
-                
-                // 3. Atraso necessário (segundos)
-                double delay_needed = time_other_clears - time_arrival_natural;
-
-                bool is_deadlock = false;
-                double safe_speed = myself->base_speed;
-
-                if (delay_needed > 0) {
-                    // Preciso "queimar" delay_needed segundos enquanto percorro APPROACH_DISTANCE
-                    // Tempo normal para percorrer APPROACH_DISTANCE:
-                    double time_to_cross_approach_normal = APPROACH_DISTANCE / myself->base_speed;
-                    
-                    // Novo tempo total para cruzar = Normal + Delay
-                    double total_time_available = time_to_cross_approach_normal + delay_needed;
-                    
-                    safe_speed = APPROACH_DISTANCE / total_time_available;
-                    
-                    // Se a velocidade for muito baixa OU se a distância for curta demais para ser seguro
-                    if (safe_speed < MIN_CRAWL_SPEED || APPROACH_DISTANCE < 1.0) {
-                        is_deadlock = true; // Para e espera
-                        safe_speed = 0.0;
-                    }
-                }
-
-                myself->mitigation.active = true;
-                myself->mitigation.stop_required = is_deadlock;
-                myself->mitigation.target_speed = safe_speed;
-                myself->mitigation.trigger_dist = trigger_dist;
-                myself->mitigation.stop_line = trigger_dist; // Para no inicio da zona se for deadlock
-                myself->mitigation.partner_id = partner_id;
-                myself->mitigation.partner_exit_dist = info.specific_partner_exit_dists[partner_id];
-                
-                if (is_deadlock) {
-                    RCLCPP_WARN(get_logger(), "DEADLOCK: R%d para em %.2fm (Wait %.2fs).", my_id, trigger_dist, delay_needed);
-                } else if (delay_needed > 0) {
-                    RCLCPP_WARN(get_logger(), "SLOW: R%d reduz para %.2f m/s (Delay %.2fs).", my_id, safe_speed, delay_needed);
-                }
-            }
-        }
-    }
-
-    // --- VISUALIZAÇÃO ---
-
-    void expand_with_security_zone(std::vector<Point2D>& points) {
-        if (points.empty()) return;
-        std::set<Point2D> unique_points;
-        float obstacle_dist = static_cast<float>(CLOUD_RES); 
-        float maxSecurityDistance_ = SECURITY_DISTANCE;
-        int decimals = 2;
-
-        for (const auto& p : points) unique_points.insert(p);
-        for (const auto& point : points) {
-            float toma = 0.0f; int opa = 0;
-            while (toma <= maxSecurityDistance_) {
-                for (int eita = 0; eita <= opa * 2; eita++) {
-                    unique_points.insert({round_to_multiple((point.first + toma) - (obstacle_dist * eita), obstacle_dist, decimals), round_to_multiple((point.second + toma), obstacle_dist, decimals)});
-                    unique_points.insert({round_to_multiple((point.first + toma), obstacle_dist, decimals), round_to_multiple((point.second + toma) - (obstacle_dist * eita), obstacle_dist, decimals)});
-                    unique_points.insert({round_to_multiple((point.first - toma), obstacle_dist, decimals), round_to_multiple((point.second - toma) + (obstacle_dist * eita), obstacle_dist, decimals)});
-                    unique_points.insert({round_to_multiple((point.first - toma) + (obstacle_dist * eita), obstacle_dist, decimals), round_to_multiple((point.second - toma), obstacle_dist, decimals)});
-                }
-                opa++; toma += obstacle_dist;
-            }
-        }
-        points.assign(unique_points.begin(), unique_points.end());
-    }
-
-    sensor_msgs::msg::PointCloud2 to_pointcloud2(const std::vector<Point2D>& points, const std::string& frame_id, const RGB& color, float z = 0.05f) {
-        sensor_msgs::msg::PointCloud2 cloud;
-        cloud.header.frame_id = frame_id;
-        cloud.header.stamp = now();
-        cloud.height = 1; cloud.width = points.size();
-        cloud.is_dense = true; cloud.is_bigendian = false;
-        sensor_msgs::PointCloud2Modifier modifier(cloud);
-        modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
-        modifier.resize(points.size());
-        sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x"), iter_y(cloud, "y"), iter_z(cloud, "z");
-        sensor_msgs::PointCloud2Iterator<uint8_t> iter_rgb(cloud, "rgb");
-        for (size_t i = 0; i < points.size(); ++i, ++iter_x, ++iter_y, ++iter_z, ++iter_rgb) {
-            *iter_x = points[i].first; *iter_y = points[i].second; *iter_z = z;
-            iter_rgb[0] = color.r; iter_rgb[1] = color.g; iter_rgb[2] = color.b;
-        }
-        return cloud;
-    }
-
-    void publish_collision_clouds() {
-        for (auto& [robot_id, info] : collision_data_) {
-            std::vector<Point2D> pts;
-            for(const auto& poly : info.overlap_areas) {
-                double cx=0, cy=0; 
-                for(auto& v:poly){ cx+=v.x; cy+=v.y; } 
-                cx/=poly.size(); cy/=poly.size();
-                for(double x=cx-0.2; x<=cx+0.2; x+=CLOUD_RES)
-                    for(double y=cy-0.2; y<=cy+0.2; y+=CLOUD_RES) pts.emplace_back(x,y);
-            }
-            if (!pts.empty()) {
-                expand_with_security_zone(pts);
-                if (cloud_publishers_.count(robot_id)) {
-                    const std::string& frame_id = fleet_[0].frame_id;
-                    auto& color = robot_colors_[robot_id];
-                    auto cloud_msg = to_pointcloud2(pts, frame_id, color, 0.05f);
-                    cloud_publishers_[robot_id]->publish(cloud_msg);
-                }
-            }
-        }
-    }
-
-    RobotState get_state_at_distance(const RobotData& robot, double dist) {
-        RobotState state;
-        if (dist >= robot.total_length) {
-            if(!robot.path.poses.empty()) {
-                state.pose = robot.path.poses.back().pose;
-                state.pose.position.z = 0.15;
-            }
-            return state;
-        }
-        for (size_t i = 0; i < robot.accumulated_dists.size(); ++i) {
-            if (i == 0) continue; 
-            double d_end = robot.accumulated_dists[i];
-            double d_start = robot.accumulated_dists[i-1];
-            if (dist >= d_start && dist <= d_end) {
-                double len = d_end - d_start;
-                double ratio = (len > 0.001) ? (dist - d_start) / len : 0.0;
-                auto& p1 = robot.path.poses[i-1].pose.position; 
-                auto& p2 = robot.path.poses[i].pose.position;
-                state.pose.position.x = p1.x + (p2.x - p1.x) * ratio;
-                state.pose.position.y = p1.y + (p2.y - p1.y) * ratio;
-                state.pose.position.z = 0.15;
-                state.yaw = std::atan2(p2.y - p1.y, p2.x - p1.x);
-                tf2::Quaternion q; q.setRPY(0, 0, state.yaw);
-                state.pose.orientation = tf2::toMsg(q);
-                return state;
-            }
-        }
-        if(!robot.path.poses.empty()) { state.pose = robot.path.poses[0].pose; state.pose.position.z = 0.15; }
-        return state;
-    }
-
-    void animate() {
-        if (fleet_.empty()) return;
-        
-        visualization_msgs::msg::MarkerArray markers;
-        visualization_msgs::msg::Marker del;
-        del.action = visualization_msgs::msg::Marker::DELETEALL;
-        markers.markers.push_back(del);
-        int marker_id = 0;
-        
-        bool all_finished = true;
-        for(const auto& r : fleet_) {
-            if (r.current_dist < r.total_length) all_finished = false;
-        }
-        
-        if (all_finished) {
-            for(auto& r : fleet_) r.current_dist = 0.0;
-        }
-
-        for (auto& robot : fleet_) {
-            double target_speed = robot.base_speed;
-            bool stop_visual = false;
-            
-            if (robot.mitigation.active) {
-                bool partner_cleared = false;
-                RobotData* partner = get_robot_by_id(robot.mitigation.partner_id);
-                if (partner && partner->current_dist > robot.mitigation.partner_exit_dist + SAFETY_DIST_MARGIN) {
-                    partner_cleared = true;
-                }
-
-                if (partner_cleared) {
-                    target_speed = robot.base_speed; 
-                }
-                else if (robot.current_dist >= robot.mitigation.trigger_dist) {
-                    if (robot.mitigation.stop_required) {
-                        target_speed = 0.0;
-                        if (robot.current_dist > robot.mitigation.stop_line) robot.current_dist = robot.mitigation.stop_line; 
-                        stop_visual = true;
-                    } else {
-                        target_speed = robot.mitigation.target_speed;
+            for(const auto& zone : zones) {
+                if(zone.robot_intervals.count(current_robot)) {
+                    for(const auto& interval : zone.robot_intervals.at(current_robot)) {
+                        float original_duration = interval.second - interval.first;
+                        float new_duration = original_duration / speed_factor;
+                        float my_start = interval.first / speed_factor;
+                        
+                        reservation_table[zone.id].push_back({my_start, my_start + new_duration, current_robot});
                     }
                 }
             }
+        }
+        return {logs, {}}; 
+    }
 
-            robot.current_speed = target_speed;
-            if (robot.current_dist < robot.total_length) {
-                double step = robot.current_speed * ANIMATION_FREQ;
-                robot.current_dist += step;
+    void print_super_detailed_report(
+        const std::vector<CollisionZone>& zones, 
+        const std::vector<ResolutionLog>& logs,
+        const std::map<int, float>& final_delays) 
+    {
+        std::cout << "\n\n";
+        std::cout << "================================================================================\n";
+        std::cout << "||   RELATÓRIO DE TRÁFEGO (VELOCIDADE VARIÁVEL REAL)   ||\n";
+        std::cout << "================================================================================\n";
+        
+        std::cout << ">>> LOG DE RESOLUÇÃO:\n";
+        if(logs.empty()) std::cout << "    [Fluxo livre.]\n";
+        
+        for(const auto& log : logs) {
+            std::cout << "    +--------------------------------------------------------------------------+\n";
+            std::cout << "    | ZONA " << log.zone_id << " (Evento #" << log.step_number << ")\n";
+            std::cout << "    | [CONFLITO]   Robo " << log.r_victim << " bateria no Robo " << log.r_priority << ".\n";
+            std::cout << "    | [SOLUÇÃO]    Reduzir velocidade para chegar em " 
+                      << std::fixed << std::setprecision(2) << log.victim_final_start << "s.\n";
+            std::cout << "    |              - VELOCIDADE NECESSARIA: >>> " << log.required_speed << " m/s <<<\n";
+            std::cout << "    +--------------------------------------------------------------------------+\n";
+        }
+        std::cout << "================================================================================\n\n";
+    }
+
+    void process_robot_volume(int robot_id, const std::vector<std::pair<float, float>>& waypoints, float speed) {
+        if(waypoints.empty()) return;
+        float current_time = 0.0f; 
+        expand_point_to_map(robot_id, waypoints[0], current_time);
+        for(size_t i = 0; i < waypoints.size() - 1; i++) {
+            float ax = waypoints[i].first; float ay = waypoints[i].second;
+            float bx = waypoints[i+1].first; float by = waypoints[i+1].second;
+            float dist = std::hypot(bx - ax, by - ay);
+            if (dist < 1e-6) continue;
+            float t_dist = config_.resolution;
+            float ux = (bx - ax) / dist; float uy = (by - ay) / dist;
+            while (t_dist < dist) {
+                float rx = ax + t_dist * ux; float ry = ay + t_dist * uy;
+                float px = round_to_multiple(rx, config_.resolution, decimals);
+                float py = round_to_multiple(ry, config_.resolution, decimals);
+                float time_at_point = current_time + (t_dist / speed);
+                expand_point_to_map(robot_id, {px, py}, time_at_point);
+                t_dist += config_.resolution;
             }
+            current_time += (dist / speed);
+            expand_point_to_map(robot_id, {bx, by}, current_time);
+        }
+    }
 
-            auto state = get_state_at_distance(robot, robot.current_dist);
-            auto& color = robot_colors_[robot.id];
-            std::string id_str = std::to_string(robot.id);
-            
-            // Marker Robô
-            visualization_msgs::msg::Marker bot;
-            bot.header.frame_id = robot.frame_id;
-            bot.header.stamp = now();
-            bot.ns = "bot_" + id_str;
-            bot.id = 0;
-            bot.type = visualization_msgs::msg::Marker::CUBE;
-            bot.action = visualization_msgs::msg::Marker::ADD;
-            bot.pose = state.pose;
-            bot.scale.x = bot.scale.y = ROBOT_WIDTH; bot.scale.z = 0.3;
-            
-            if (stop_visual) {
-                bot.color.r = 1.0; bot.color.g = 0.0; bot.color.b = 0.0; bot.color.a = 1.0;
-            } else if (robot.current_speed < robot.base_speed - 0.01) {
-                bot.color.r = 1.0; bot.color.g = 0.5; bot.color.b = 0.0; bot.color.a = 1.0;
-            } else {
-                bot.color.r = color.r/255.0; bot.color.g = color.g/255.0; bot.color.b = color.b/255.0; bot.color.a = 0.8;
+    void expand_point_to_map(int robot_id, std::pair<float, float> center, float timestamp) {
+        insert_visit(robot_id, center, timestamp);
+        float toma = 0.0; int opa = 0;
+        while(toma <= config_.robot_radius) {
+            for(int eita = 0; eita <= opa * 2; eita++) {   
+                std::vector<std::pair<float, float>> expansion = {
+                    { (center.first + toma) - (config_.resolution * eita), (center.second + toma) },
+                    { (center.first + toma), (center.second + toma) - (config_.resolution * eita) },
+                    { (center.first - toma), (center.second - toma) + (config_.resolution * eita) },
+                    { (center.first - toma) + (config_.resolution * eita), (center.second - toma) }
+                };
+                for(auto& p : expansion) {
+                    p.first = round_to_multiple(p.first, config_.resolution, decimals);
+                    p.second = round_to_multiple(p.second, config_.resolution, decimals);
+                    insert_visit(robot_id, p, timestamp);
+                }
             }
-            markers.markers.push_back(bot);
-            
-            // Texto Info
-            visualization_msgs::msg::Marker txt;
-            txt.header.frame_id = robot.frame_id;
-            txt.header.stamp = now();
-            txt.ns = "spd_" + id_str;
-            txt.id = 0;
-            txt.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-            txt.action = visualization_msgs::msg::Marker::ADD;
-            txt.pose = state.pose; txt.pose.position.z += 0.5;
-            txt.scale.z = 0.2; txt.color.r=1.0; txt.color.g=1.0; txt.color.b=1.0; txt.color.a=1.0;
-            std::stringstream ss;
-            if (stop_visual) ss << "WAIT (R" << robot.mitigation.partner_id << ")";
-            else ss << std::fixed << std::setprecision(2) << robot.current_speed << " m/s";
-            txt.text = ss.str();
-            markers.markers.push_back(txt);
+            opa++; toma += config_.resolution;
+        }
+    }
 
-            // Parede de Parada
-            if (robot.mitigation.active && robot.mitigation.stop_required && !stop_visual && robot.current_dist < robot.mitigation.stop_line) {
-                visualization_msgs::msg::Marker wall;
-                wall.header.frame_id = robot.frame_id;
-                wall.header.stamp = now();
-                wall.ns = "wall_" + id_str;
-                wall.id = 0;
-                wall.type = visualization_msgs::msg::Marker::CUBE;
-                wall.action = visualization_msgs::msg::Marker::ADD;
-                wall.pose = get_state_at_distance(robot, robot.mitigation.stop_line).pose;
-                wall.scale.x = 0.1; wall.scale.y = 1.0; wall.scale.z = 1.0;
-                wall.color.r = 1.0; wall.color.a = 0.5;
-                markers.markers.push_back(wall);
-            }
+    void insert_visit(int robot_id, std::pair<float, float> p, float time) {
+        GridKey k = to_key(p.first, p.second);
+        global_occupancy_map[k].push_back({robot_id, time});
+    }
 
-            // --- CAMINHO VISUAL (Retângulos) ---
-            for (size_t r = 0; r < robot.static_rects.size(); ++r) {
-                visualization_msgs::msg::Marker rect;
-                rect.header.frame_id = robot.frame_id;
-                rect.header.stamp = now();
-                rect.ns = "path_" + id_str;
-                rect.id = marker_id++;
-                rect.type = visualization_msgs::msg::Marker::LINE_STRIP;
-                rect.action = visualization_msgs::msg::Marker::ADD;
-                rect.scale.x = 0.02;
-                
-                // Determina se este segmento é parte da zona de perigo
-                bool is_conflict_segment = false;
-                if (collision_data_.count(robot.id)) {
-                    auto& info = collision_data_[robot.id];
-                    double d_start = (r==0) ? 0.0 : robot.accumulated_dists[r];
-                    double d_end = robot.accumulated_dists[r+1];
-                    // Se o segmento está dentro do intervalo global de conflito
-                    if (d_end > info.conflict_entry_dist && d_start < info.conflict_exit_dist) {
-                        is_conflict_segment = true;
+    std::vector<CollisionZone> detect_and_cluster_collisions() {
+        std::vector<CollisionZone> zones;
+        std::unordered_set<GridKey, GridKey::Hash> visited_keys; 
+        std::vector<GridKey> collision_candidates;
+        for(const auto& entry : global_occupancy_map) {
+            std::set<int> unique_robots;
+            for(const auto& visit : entry.second) unique_robots.insert(visit.robot_id);
+            if(unique_robots.size() > 1) collision_candidates.push_back(entry.first);
+        }
+        std::unordered_set<GridKey, GridKey::Hash> candidate_set(collision_candidates.begin(), collision_candidates.end());
+        int zone_counter = 0;
+        for(const auto& start_key : collision_candidates) {
+            if(visited_keys.count(start_key)) continue;
+            std::set<int> zone_signature = get_robots_at_point(start_key);
+            CollisionZone current_zone;
+            current_zone.id = zone_counter++;
+            current_zone.involved_robots = zone_signature;
+            std::vector<GridKey> queue;
+            queue.push_back(start_key);
+            visited_keys.insert(start_key);
+            while(!queue.empty()) {
+                GridKey curr = queue.back(); queue.pop_back();
+                current_zone.points.push_back(curr);
+                current_zone.points_set.insert(curr); 
+                int dx[] = {1, -1, 0, 0}; int dy[] = {0, 0, 1, -1};
+                for(int i=0; i<4; i++) {
+                    GridKey neighbor = {curr.x + dx[i], curr.y + dy[i]};
+                    if(candidate_set.count(neighbor) && visited_keys.find(neighbor) == visited_keys.end()) {
+                        if(get_robots_at_point(neighbor) == zone_signature) {
+                            visited_keys.insert(neighbor); queue.push_back(neighbor);
+                        }
                     }
                 }
-
-                if (is_conflict_segment) {
-                    rect.color.r = 1.0; rect.color.g = 0.0; rect.color.b = 0.0; rect.color.a = 0.3; // Vermelho Translúcido
-                    rect.scale.x = 0.04;
-                } else {
-                    rect.color.r = color.r/255.0; rect.color.g = color.g/255.0; rect.color.b = color.b/255.0; rect.color.a = 0.1; 
-                }
-                
-                for (auto& v : robot.static_rects[r]) {
-                    geometry_msgs::msg::Point p; p.x=v.x; p.y=v.y; rect.points.push_back(p);
-                }
-                rect.points.push_back(rect.points[0]);
-                markers.markers.push_back(rect);
             }
+            std::map<int, std::vector<float>> raw_times;
+            for(const auto& pt : current_zone.points) {
+                for(const auto& v : global_occupancy_map[pt]) {
+                    if(current_zone.involved_robots.count(v.robot_id)) raw_times[v.robot_id].push_back(v.timestamp);
+                }
+            }
+            for(auto& [rid, times] : raw_times) {
+                if(times.empty()) continue;
+                std::sort(times.begin(), times.end());
+                float start_t = times[0]; float end_t = times[0];
+                for(size_t i = 1; i < times.size(); i++) {
+                    if((times[i] - end_t) > config_.time_gap_tolerance) {
+                        current_zone.robot_intervals[rid].push_back({start_t, end_t});
+                        start_t = times[i]; 
+                    }
+                    end_t = times[i]; 
+                }
+                current_zone.robot_intervals[rid].push_back({start_t, end_t});
+            }
+            zones.push_back(current_zone);
         }
-        pub_markers_->publish(markers);
+        return zones;
+    }
+
+    inline float round_to_multiple(float value, float multiple, int decimals) {
+        if (multiple == 0.0) return value; 
+        float result = std::round(value / multiple) * multiple;
+        float factor = std::pow(10.0, decimals);
+        result = std::round(result * factor) / factor;
+        return result;
+    }
+    
+    int count_decimals(float number) {
+        float fractional = std::fabs(number - std::floor(number));
+        int decimals = 0;
+        const float epsilon = 1e-9; 
+        while (fractional > epsilon && decimals < 20) {
+            fractional *= 10; fractional -= std::floor(fractional); decimals++;
+        }
+        return decimals;
     }
 };
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) 
+{
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<FleetManagement>());
+    rclcpp::spin(std::make_shared<FleetManager>());
     rclcpp::shutdown();
     return 0;
 }
