@@ -38,12 +38,25 @@ ament_target_dependencies(fleet_management
   tf2_geometry_msgs
 )
 
+add_executable(adjust_velocities_fleet_management src/adjust_velocities_fleet_management.cpp)
+ament_target_dependencies(adjust_velocities_fleet_management
+  rclcpp
+  nav_msgs
+  geometry_msgs
+  visualization_msgs
+  mobile_manipulation_interfaces
+  tf2
+  tf2_geometry_msgs
+)
+
 target_include_directories(fleet_management PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 target_compile_features(fleet_management PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
-install(TARGETS fleet_management
+install(TARGETS 
+  fleet_management
+  adjust_velocities_fleet_management
   DESTINATION lib/${PROJECT_NAME})
 
 install(
