@@ -68,7 +68,6 @@ ament_target_dependencies(navigation_lib
   PCL
   vision_msgs
   std_msgs
-  moveit_ros_planning_interface 
   Eigen3
   mobile_manipulation_interfaces
 )

@@ -19,7 +19,7 @@ namespace navigation {
 
 using namespace std::chrono_literals;
 
-AStar::AStar(const rclcpp::NodeOptions & options)
+FleetManagementAStar::FleetManagementAStar(const rclcpp::NodeOptions & options)
 : Node("a_star", "navigation", options)
 {
     // Parâmetros
@@ -33,7 +33,7 @@ AStar::AStar(const rclcpp::NodeOptions & options)
     maxSecurityDistance_ = static_cast<float>(this->get_parameter("max_security_distance").as_double());
     num_robots = this->get_parameter("num_robots").as_int();
 
-    RCLCPP_INFO(this->get_logger(), "AStar initialized. Res: %.3f | SecDist: %.2f", distanceToObstacle_, maxSecurityDistance_);
+    RCLCPP_INFO(this->get_logger(), "FleetManagementAStar initialized. Res: %.3f | SecDist: %.2f", distanceToObstacle_, maxSecurityDistance_);
 
     decimals = count_decimals(distanceToObstacle_);
 
@@ -59,12 +59,12 @@ AStar::AStar(const rclcpp::NodeOptions & options)
     subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/obstacle_graph",
         qos,
-        std::bind(&AStar::topic_callback, this, std::placeholders::_1)
+        std::bind(&FleetManagementAStar::topic_callback, this, std::placeholders::_1)
     );
 }
 
 
-void AStar::callback_odom(const nav_msgs::msg::Odometry::SharedPtr msg, int robot_id)
+void FleetManagementAStar::callback_odom(const nav_msgs::msg::Odometry::SharedPtr msg, int robot_id)
 {
     std::lock_guard<std::mutex> lock(odom_mutex);
     robot_states_[robot_id].current = msg->pose.pose;
@@ -72,7 +72,7 @@ void AStar::callback_odom(const nav_msgs::msg::Odometry::SharedPtr msg, int robo
 }
 
 
-void AStar::topic_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+void FleetManagementAStar::topic_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(map_mutex_);
 
@@ -96,7 +96,7 @@ void AStar::topic_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 }
 
 
-std::vector<std::pair<float, float>> AStar::run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
+std::vector<std::pair<float, float>> FleetManagementAStar::run_a_star(std::pair<float, float> start_tuple, std::pair<float, float> goal_tuple) 
 {
     // Verifica Start
     auto start_search = find_nearest_free_point(start_tuple, 500);
@@ -232,7 +232,7 @@ std::vector<std::pair<float, float>> AStar::run_a_star(std::pair<float, float> s
     return {}; // Falha
 }
 
-std::pair<std::pair<float, float>, bool> AStar::find_nearest_free_point(
+std::pair<std::pair<float, float>, bool> FleetManagementAStar::find_nearest_free_point(
     std::pair<float, float> origin, int max_steps) 
 {
     std::pair<float,float> rounded = {
@@ -270,7 +270,7 @@ std::pair<std::pair<float, float>, bool> AStar::find_nearest_free_point(
     return {origin, false};
 }
 
-std::vector<std::pair<float, float>> AStar::straight_line(std::pair<float, float> start, std::pair<float, float> end)
+std::vector<std::pair<float, float>> FleetManagementAStar::straight_line(std::pair<float, float> start, std::pair<float, float> end)
 {
     std::vector<std::pair<float, float>> path;
     float dx = end.first - start.first;
@@ -294,7 +294,7 @@ std::vector<std::pair<float, float>> AStar::straight_line(std::pair<float, float
     return path;
 }
 
-std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> AStar::filter_path(
+std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> FleetManagementAStar::filter_path(
     std::vector<std::pair<float, float>>& path, 
     std::vector<std::pair<float, float>>& path_raw, 
     const geometry_msgs::msg::Pose& goal_pose)
@@ -373,18 +373,18 @@ std::pair<nav_msgs::msg::Path, nav_msgs::msg::Path> AStar::filter_path(
 }
 
 
-std::vector<std::array<float, 3>> AStar::get_offsets(float d) {
+std::vector<std::array<float, 3>> FleetManagementAStar::get_offsets(float d) {
     return {{-d,-d,0},{d,-d,0},{d,d,0},{-d,d,0},{-d,0,0},{d,0,0},{0,d,0},{0,-d,0}};
 }
 
-inline float AStar::round_to_multiple(float value, float multiple, int decimals) {
+inline float FleetManagementAStar::round_to_multiple(float value, float multiple, int decimals) {
     if (multiple == 0.0) return value; 
     float result = std::round(value / multiple) * multiple;
     float factor = std::pow(10.0, decimals);
     return std::round(result * factor) / factor;
 }
 
-int AStar::count_decimals(float number) {
+int FleetManagementAStar::count_decimals(float number) {
     float fractional = std::fabs(number - std::floor(number));
     int d = 0;
     while (fractional > 1e-9 && d < 20) { fractional *= 10; fractional -= std::floor(fractional); d++; }
@@ -394,4 +394,4 @@ int AStar::count_decimals(float number) {
 } // namespace navigation
 
 // REGISTRO DE COMPONENTE
-RCLCPP_COMPONENTS_REGISTER_NODE(navigation::AStar)
+RCLCPP_COMPONENTS_REGISTER_NODE(navigation::FleetManagementAStar)

@@ -19,12 +19,16 @@
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 
-// Dependência Externa (Seu Shared Graph)
-#include "navigation/SharedObstacleGraph.hpp" 
-
 namespace navigation {
 
 
+struct PairHash {
+    std::size_t operator()(const std::pair<float, float>& p) const {
+        auto h1 = std::hash<float>{}(p.first);
+        auto h2 = std::hash<float>{}(p.second);
+        return h1 ^ (h2 << 1);
+    }
+};
 
 struct RobotState {
     geometry_msgs::msg::Pose current;
@@ -33,10 +37,11 @@ struct RobotState {
     bool has_target = false;
 };
 
-class AStar : public rclcpp::Node 
+class FleetManagementAStar : public rclcpp::Node 
 {
 public:
-    explicit AStar(const rclcpp::NodeOptions & options);
+    explicit FleetManagementAStar(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
+    ~FleetManagementAStar() override = default;
 
 private:
     // --- Membros Principais ---
