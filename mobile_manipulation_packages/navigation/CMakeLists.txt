@@ -31,6 +31,7 @@ find_package(OpenCV REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED) 
 find_package(mobile_manipulation_interfaces REQUIRED)
+find_package(mobile_manipulation_interfaces_fleet REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
@@ -42,6 +43,7 @@ find_package(rclcpp_components REQUIRED)
 
 add_library(navigation_lib SHARED
   src/shared_obstacle_graph.cpp 
+  src/fleet_management_a_star.cpp
 )
 
 target_include_directories(navigation_lib PUBLIC
@@ -57,6 +59,18 @@ ament_target_dependencies(navigation_lib
   PCL
   pcl_conversions
   rclcpp_components
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_sensor_msgs 
+  tf2_ros 
+  tf2_eigen 
+  PCL
+  vision_msgs
+  std_msgs
+  moveit_ros_planning_interface 
+  Eigen3
+  mobile_manipulation_interfaces
 )
 
 target_link_libraries(navigation_lib
@@ -137,6 +151,8 @@ ament_target_dependencies(controller
   mobile_manipulation_interfaces
 )
 target_link_libraries(controller ${GLEW_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp)
+
+
 
 target_link_libraries(obstacle_graph_with_occupancy_grid
   ${rclcpp_LIBRARIES}
