@@ -1,6 +1,0 @@
-string object_id
-geometry_msgs/Pose pose
----
-bool success
-geometry_msgs/Pose pose
-float32[] limits
