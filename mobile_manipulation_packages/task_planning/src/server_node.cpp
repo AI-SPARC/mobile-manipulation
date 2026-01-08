@@ -984,7 +984,7 @@ private:
 
                         this->cloud_box_filter_node_->set_bounding_box(target, target_size);
 
-                        rclcpp::sleep_for(std::chrono::milliseconds(2000));
+                        rclcpp::sleep_for(std::chrono::milliseconds(1000));
                         std::vector<geometry_msgs::msg::Pose> result;
 
                         if (this->cloud_box_filter_node_->has_points()) 

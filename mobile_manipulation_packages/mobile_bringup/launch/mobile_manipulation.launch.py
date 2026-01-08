@@ -348,6 +348,18 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
+    combined_semantic_pcl = Node(
+        package="vision",
+        executable="combined_semantic_pcl",
+        name="combined_semantic_pcl",
+        output="screen",
+        parameters=[
+
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
     synchronize_isaac = Node(
         package='isaacsim_moveit',
         executable='synchronize_isaac_sim_labels',
@@ -373,6 +385,7 @@ def generate_launch_description():
             moveit_config.robot_description_kinematics,
             moveit_config.planning_pipelines,
             moveit_config.joint_limits,
+            {"use_sim_time": True}
    
         ],
     )
@@ -386,6 +399,7 @@ def generate_launch_description():
         ros2_control_node,
         joint_state_broadcaster_spawner,
         panda_arm_controller_spawner,
+        combined_semantic_pcl,
         # server_node,           
         synchronize_isaac,
     ]
