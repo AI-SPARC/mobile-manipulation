@@ -1,0 +1,7 @@
+int32[] robot_ids
+geometry_msgs/Point32[] new_obstacles 
+---
+nav_msgs/Path[] path
+nav_msgs/Path[] path_without_filter
+bool[] success
+---
