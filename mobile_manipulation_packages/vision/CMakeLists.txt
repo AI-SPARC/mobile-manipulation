@@ -16,6 +16,8 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
+find_package(vision_msgs REQUIRED)
+find_package(mobile_manipulation_interfaces REQUIRED)
 
 add_executable(combined_semantic_pcl src/combined_semantic_pcl.cpp)
 
@@ -23,10 +25,12 @@ ament_target_dependencies(combined_semantic_pcl
   rclcpp
   sensor_msgs
   std_msgs
+  vision_msgs
   message_filters
   tf2
   tf2_ros
   tf2_geometry_msgs
+  mobile_manipulation_interfaces
 )
 
 target_include_directories(combined_semantic_pcl PUBLIC
