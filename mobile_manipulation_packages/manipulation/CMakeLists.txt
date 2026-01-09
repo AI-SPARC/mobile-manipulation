@@ -47,7 +47,6 @@ add_library(manipulation_lib SHARED
   src/is_gripper_holding_impl.cpp
   src/projected_reachability_analysis.cpp 
   src/ik_validator.cpp
-  src/cloud_box_filter.cpp
   src/scan_object.cpp
 )
 

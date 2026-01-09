@@ -44,7 +44,6 @@
 #include <manipulation/IsGripperHolding.hpp>
 #include <manipulation/ProjectedReachabilityAnalysis.hpp>
 #include <manipulation/IKValidator.hpp>
-#include <manipulation/CloudBoxFilter.hpp>
 #include <storage_manager/GetStorageInfo.hpp>
 #include <storage_manager/Organize.hpp>
 #include <navigation/SharedObstacleGraph.hpp>
@@ -390,7 +389,6 @@ public:
         std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node,
         std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node,
         std::shared_ptr<manipulation::IKValidator> ik_validator_node,
-        std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node,
         std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node,
         std::shared_ptr<llms::WorldStateNode> world_state_node
     )
@@ -401,7 +399,6 @@ public:
     reachability_node_(reachability_node),
     obstacle_graph_node_(obstacle_graph_node),
     ik_validator_node_(ik_validator_node),
-    cloud_box_filter_node_(cloud_box_filter_node),
     bridge_to_inference_node_(bridge_to_inference_node),
     world_state_node_(world_state_node)
     {
@@ -466,7 +463,6 @@ private:
     // --- Injeção de Dependências ---
     std::shared_ptr<llms::WorldStateNode> world_state_node_;
     std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
-    std::shared_ptr<manipulation::CloudBoxFilter> cloud_box_filter_node_;
     std::shared_ptr<manipulation::IKValidator> ik_validator_node_;
     std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node_;
     std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node_;
@@ -1308,46 +1304,45 @@ private:
                     cached_object_.pose = target;
                     cached_object_.size = target_size;
             
-                    if(use_graspnet == true)
-                    {
+                    // if(use_graspnet == true)
+                    // {
                         
 
-                        target_size.x += 0.005;
-                        target_size.y += 0.005;
-                        target_size.z += 0.005;
+                    //     target_size.x += 0.005;
+                    //     target_size.y += 0.005;
+                    //     target_size.z += 0.005;
 
-                        this->cloud_box_filter_node_->set_bounding_box(target, target_size);
+                    //     this->cloud_box_filter_node_->set_bounding_box(target, target_size);
 
-                        rclcpp::sleep_for(std::chrono::milliseconds(2000));
-                        std::vector<geometry_msgs::msg::Pose> result;
+                    //     rclcpp::sleep_for(std::chrono::milliseconds(2000));
+                    //     std::vector<geometry_msgs::msg::Pose> result;
 
-                        if (this->cloud_box_filter_node_->has_points()) 
-                        {
-                            pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
-                            result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
-                            RCLCPP_INFO(get_logger(), "Recebidos %zu grasps", result.size());
-                        }
-                        else
-                        {
-                            RCLCPP_WARN(get_logger(), "Sem pontos para grasp");
-                            return BT::NodeStatus::FAILURE;
-                        }
+                    //     if (this->cloud_box_filter_node_->has_points()) 
+                    //     {
+                    //         pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
+                    //         result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
+                    //         RCLCPP_INFO(get_logger(), "Recebidos %zu grasps", result.size());
+                    //     }
+                    //     else
+                    //     {
+                    //         RCLCPP_WARN(get_logger(), "Sem pontos para grasp");
+                    //         return BT::NodeStatus::FAILURE;
+                    //     }
 
-                        if (result.empty())
-                        {
-                            RCLCPP_ERROR(get_logger(), "Nenhum grasp válido encontrado");
-                            return BT::NodeStatus::FAILURE;
-                        }
+                    //     if (result.empty())
+                    //     {
+                    //         RCLCPP_ERROR(get_logger(), "Nenhum grasp válido encontrado");
+                    //         return BT::NodeStatus::FAILURE;
+                    //     }
 
-                        this->send_goal(id.value(), result[0], true);
-                        manipulation_state_ = TaskState::RUNNING;
+                    //     this->send_goal(id.value(), result[0], true);
+                    //     manipulation_state_ = TaskState::RUNNING;
                         
-                    }
-                    else
-                    {
-                        this->send_goal(id.value(), object_pose.value(), true);
-                        manipulation_state_ = TaskState::RUNNING; 
-                    }
+                    // }
+                    
+                    this->send_goal(id.value(), object_pose.value(), true);
+                    manipulation_state_ = TaskState::RUNNING; 
+                
 
                     return BT::NodeStatus::RUNNING;
                 }
@@ -1789,9 +1784,7 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions ik_validator_opts;
     ik_validator_opts.arguments({"--ros-args", "-r", "__node:=ik_validator_node"});
 
-    rclcpp::NodeOptions cloud_box_filter_opts;
-    cloud_box_filter_opts.arguments({"--ros-args", "-r", "__node:=cloud_box_filter"});
-
+  
     rclcpp::NodeOptions bridge_to_inference_opts;
     bridge_to_inference_opts.arguments({"--ros-args", "-r", "__node:=bridge_to_inference"});
 
@@ -1805,7 +1798,6 @@ int main(int argc, char * argv[])
     auto reachability_node = std::make_shared<manipulation::ProjectedReachabilityAnalysis>(reachability_opts);
     auto obstacle_graph_node = std::make_shared<navigation::SharedObstacleGraph>(obstacle_graph_opts);
     auto ik_validator_node = std::make_shared<manipulation::IKValidator>(ik_validator_opts);
-    auto cloud_box_filter_node = std::make_shared<manipulation::CloudBoxFilter>(cloud_box_filter_opts);
     auto bridge_to_inference_node = std::make_shared<drl_to_pick_cpp::BridgeToInference>(bridge_to_inference_opts);
     auto world_state_node = std::make_shared<llms::WorldStateNode>(world_state_node_opts);
 
@@ -1817,7 +1809,6 @@ int main(int argc, char * argv[])
         reachability_node, 
         obstacle_graph_node, 
         ik_validator_node, 
-        cloud_box_filter_node, 
         bridge_to_inference_node, 
         world_state_node
     );
@@ -1830,7 +1821,6 @@ int main(int argc, char * argv[])
     executor.add_node(reachability_node);
     executor.add_node(obstacle_graph_node);
     executor.add_node(ik_validator_node);
-    executor.add_node(cloud_box_filter_node);
     executor.add_node(bridge_to_inference_node);
     executor.add_node(world_state_node);
     executor.add_node(server_node);
