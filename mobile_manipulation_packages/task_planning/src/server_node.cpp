@@ -982,6 +982,25 @@ private:
                         target_size.y += 0.005;
                         target_size.z += 0.005;
 
+                        std::vector<geometry_msgs::msg::Pose> poses = this->scan_object_node_->getSortedScanPoses(cached_object_.id);
+
+                        // auto duration = rclcpp::Duration(5, 0); 
+
+                        // auto start_time = this->get_clock()->now();
+
+                        // while ((this->get_clock()->now() - start_time) < duration) 
+                        // {
+                        //     if (!rclcpp::ok()) 
+                        //     {
+                        //         break;
+                        //     }
+
+                        //     RCLCPP_INFO(this->get_logger(), "Executando tarefa...");
+                            
+                        //     my_processing_function(); 
+                        // }
+
+
                         // this->cloud_box_filter_node_->set_bounding_box(target, target_size);
 
                         rclcpp::sleep_for(std::chrono::milliseconds(1000));
@@ -999,19 +1018,21 @@ private:
                         //     return BT::NodeStatus::FAILURE;
                         // }
 
-                        if (result.empty())
-                        {
-                            RCLCPP_ERROR(get_logger(), "Nenhum grasp válido encontrado");
-                            return BT::NodeStatus::FAILURE;
-                        }
+                        // if (result.empty())
+                        // {
+                        //     RCLCPP_ERROR(get_logger(), "Nenhum grasp válido encontrado");
+                        //     return BT::NodeStatus::FAILURE;
+                        // }
 
-                        this->send_goal(id.value(), result[0], true);
-                        manipulation_state_ = TaskState::RUNNING;
+                        // this->send_goal(id.value(), result[0], true);
+                        // manipulation_state_ = TaskState::RUNNING;
                         
                     }
                     else
                     {
-                        this->send_goal(id.value(), object_pose.value(), true);
+                        std::vector<geometry_msgs::msg::Pose> poses;
+                        poses.push_back(object_pose.value());
+                        this->send_goal(id.value(), poses, true);
                         manipulation_state_ = TaskState::RUNNING; 
                     }
 
@@ -1044,7 +1065,9 @@ private:
                     if (!pose) return BT::NodeStatus::FAILURE;
 
                     std::string id_dummy = cached_object_.id;
-                    this->send_goal(id_dummy, pose.value(), false); // false = Place
+                    std::vector<geometry_msgs::msg::Pose> poses;
+                    poses.push_back(pose.value());
+                    this->send_goal(id_dummy, poses, false); // false = Place
                     manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
@@ -1396,8 +1419,8 @@ private:
     // DOC-END: controller_result_callback
 
     // DOC-START: send_goal
-    // Envia Action de Manipulação (Pick ou Place).
-    void send_goal(const std::string id, const geometry_msgs::msg::Pose & target_pose, bool pick)
+    // Envia Action de Manipulação (Pick ou Place) com ARRAY de poses.
+    void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick)
     {
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5)))
         {
@@ -1409,9 +1432,11 @@ private:
         auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
         goal_msg.obstacle_id = id;
         goal_msg.pick = pick;
-        goal_msg.pose = target_pose;
+        
+        // Agora atribuímos o vetor de poses
+        goal_msg.poses = target_poses; 
 
-        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal para MANIPULATION...");
+        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal para MANIPULATION com %zu poses...", target_poses.size());
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SendGoalOptions();
         send_goal_options.goal_response_callback = std::bind(&ServerNode::goal_response_callback, this, std::placeholders::_1);
@@ -1422,6 +1447,7 @@ private:
     // DOC-END: send_goal
 
     // DOC-START: goal_response_callback
+    // (Este callback geralmente permanece igual, a menos que a lógica de aceitação mude)
     void goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>> & goal_handle)
     {
         if (!goal_handle)
@@ -1437,6 +1463,7 @@ private:
     // DOC-END: goal_response_callback
 
     // DOC-START: result_callback
+    // (Este callback permanece igual pois o result continua sendo apenas 'bool success')
     void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>::WrappedResult & result)
     {
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result->success)

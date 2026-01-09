@@ -907,11 +907,14 @@ void SimpleManipulation::object_pose_callback(const geometry_msgs::msg::Pose & m
 
 // Action server (pick_object).
 
+// Action server (pick_object).
+
 rclcpp_action::GoalResponse SimpleManipulation::handle_goal(const rclcpp_action::GoalUUID & uuid,
     std::shared_ptr<const mobile_manipulation_interfaces::action::PickObject::Goal> goal)
 {
-    RCLCPP_INFO(this->get_logger(), "Recebido pedido de Action PickObject para pose [x: %.2f, y: %.2f]", 
-        goal->pose.position.x, goal->pose.position.y);
+    // Ajuste no log para mostrar a quantidade de poses recebidas em vez de tentar acessar uma única
+    RCLCPP_INFO(this->get_logger(), "Recebido pedido de Action PickObject com %zu poses candidatas.", 
+        goal->poses.size());
     (void)uuid;
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
@@ -957,17 +960,57 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
 
     if(goal->pick == true)
     {
-
         open_gripper();
     }
 
-    bool action_sucess = calculate_global_pose(goal->obstacle_id, goal->pose, goal->pick);
+    bool any_pose_succeeded = false;
 
+   
+    for (const auto& target_pose : goal->poses)
+    {
+        
+        if (goal_handle->is_canceling()) 
+        {
+            result->success = false;
+            goal_handle->canceled(result);
+            RCLCPP_INFO(this->get_logger(), "Action cancelada pelo usuário.");
+            return;
+        }
+
+        RCLCPP_INFO(this->get_logger(), "Tentando pose [x: %.3f, y: %.3f, z: %.3f]...", 
+            target_pose.position.x, target_pose.position.y, target_pose.position.z);
+
+       
+        bool current_attempt = calculate_global_pose(goal->obstacle_id, target_pose, goal->pick);
+
+        if (current_attempt)
+        {
+            any_pose_succeeded = true;
+            RCLCPP_INFO(this->get_logger(), "Sucesso na pose atual! Interrompendo tentativas.");
+            break; 
+        }
+        else
+        {
+            RCLCPP_WARN(this->get_logger(), "Falha na pose atual. Tentando a próxima (se houver)...");
+        }
+    }
+
+    
     if (rclcpp::ok()) 
     {
-        result->success = action_sucess;
-        goal_handle->succeed(result);
-        RCLCPP_INFO(this->get_logger(), "Action finalizada com sucesso.");
+        result->success = any_pose_succeeded;
+        
+        if (any_pose_succeeded) 
+        {
+            goal_handle->succeed(result);
+            RCLCPP_INFO(this->get_logger(), "Action PickObject finalizada com SUCESSO.");
+        } 
+        else 
+        {
+            
+            goal_handle->abort(result); 
+            RCLCPP_ERROR(this->get_logger(), "Action PickObject FALHOU (Nenhuma pose válida).");
+        }
     }
 }
 

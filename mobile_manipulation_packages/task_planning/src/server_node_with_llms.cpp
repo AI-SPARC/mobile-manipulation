@@ -1340,7 +1340,9 @@ private:
                         
                     // }
                     
-                    this->send_goal(id.value(), object_pose.value(), true);
+                    std::vector<geometry_msgs::msg::Pose> poses;
+                    poses.push_back(object_pose.value());
+                    this->send_goal(id.value(), poses, true);
                     manipulation_state_ = TaskState::RUNNING; 
                 
 
@@ -1370,7 +1372,9 @@ private:
                     if (!pose) return BT::NodeStatus::FAILURE;
 
                     std::string id_dummy = cached_object_.id;
-                    this->send_goal(id_dummy, pose.value(), false);
+                    std::vector<geometry_msgs::msg::Pose> poses;
+                    poses.push_back(pose.value());
+                    this->send_goal(id_dummy, poses, false);
                     manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
@@ -1699,7 +1703,9 @@ private:
         }
     }
 
-    void send_goal(const std::string id, const geometry_msgs::msg::Pose & target_pose, bool pick)
+    // DOC-START: send_goal
+    // Envia Action de Manipulação (Pick ou Place) com ARRAY de poses.
+    void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick)
     {
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5)))
         {
@@ -1711,9 +1717,11 @@ private:
         auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
         goal_msg.obstacle_id = id;
         goal_msg.pick = pick;
-        goal_msg.pose = target_pose;
+        
+        // Agora atribuímos o vetor de poses
+        goal_msg.poses = target_poses; 
 
-        RCLCPP_INFO(this->get_logger(), "Enviando Goal MANIPULATION (%s)...", pick ? "PICK" : "PLACE");
+        RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal para MANIPULATION com %zu poses...", target_poses.size());
 
         auto send_goal_options = rclcpp_action::Client<mobile_manipulation_interfaces::action::PickObject>::SendGoalOptions();
         send_goal_options.goal_response_callback = std::bind(&ServerNode::goal_response_callback, this, std::placeholders::_1);
@@ -1721,33 +1729,41 @@ private:
 
         this->client_ptr_->async_send_goal(goal_msg, send_goal_options);
     }
+    // DOC-END: send_goal
 
+    // DOC-START: goal_response_callback
+    // (Este callback geralmente permanece igual, a menos que a lógica de aceitação mude)
     void goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>> & goal_handle)
     {
         if (!goal_handle)
         {
-            RCLCPP_ERROR(this->get_logger(), "Manipulation REJEITADO");
+            RCLCPP_ERROR(this->get_logger(), "Goal PICK rejeitado");
             manipulation_state_ = TaskState::FAILURE;
         }
         else
         {
-            RCLCPP_INFO(this->get_logger(), "Manipulation aceito.");
+            RCLCPP_INFO(this->get_logger(), "Goal PICK aceito.");
         }
     }
+    // DOC-END: goal_response_callback
 
+    // DOC-START: result_callback
+    // (Este callback permanece igual pois o result continua sendo apenas 'bool success')
     void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>::WrappedResult & result)
     {
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result->success)
         {
             manipulation_state_ = TaskState::SUCCESS;
-            RCLCPP_INFO(this->get_logger(), "MANIPULATION SUCCESS");
+            RCLCPP_INFO(this->get_logger(), "PICK SUCCESS");
         }
         else
         {
             manipulation_state_ = TaskState::FAILURE;
-            RCLCPP_ERROR(this->get_logger(), "MANIPULATION FAILED");
+            RCLCPP_ERROR(this->get_logger(), "PICK FAILED");
         }
     }
+    // DOC-END: result_callback
+
 
     void publish_pose()
     {
