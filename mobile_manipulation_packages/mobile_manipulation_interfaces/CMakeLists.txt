@@ -14,7 +14,7 @@ find_package(sensor_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/FleetPaths.msg"
-  "msg/ObjectData.msg"
+  "msg/SemanticPcl.msg"
   "srv/MobileObjectCollision.srv"
   "srv/GetStorageInfo.srv"
   "action/PickObject.action"

@@ -32,7 +32,7 @@ find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
 find_package(Boost REQUIRED)
 find_package(TBB REQUIRED)
-
+find_package(SQLite3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 
@@ -48,6 +48,7 @@ add_library(manipulation_lib SHARED
   src/projected_reachability_analysis.cpp 
   src/ik_validator.cpp
   src/cloud_box_filter.cpp
+  src/scan_object.cpp
 )
 
 target_include_directories(manipulation_lib
@@ -93,16 +94,17 @@ add_executable(add_collision src/add_collision_main.cpp)
 add_executable(manipulation src/manipulation_main.cpp)
 add_executable(is_gripper_holding src/is_gripper_holding_main.cpp)
 
-
+# --- CORREÇÃO AQUI ---
 foreach(target add_collision manipulation is_gripper_holding)
   target_include_directories(${target}
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
       $<INSTALL_INTERFACE:include>
   )
-  target_link_libraries(${target} PUBLIC manipulation_lib)
+  # REMOVIDO "PUBLIC" PARA EVITAR CONFLITO COM AMENT_TARGET_DEPENDENCIES
+  target_link_libraries(${target} manipulation_lib) 
 endforeach()
-
+# ---------------------
 
 install(DIRECTORY include/
   DESTINATION include
