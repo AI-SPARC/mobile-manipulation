@@ -4,148 +4,318 @@
 #include <array>
 #include <vector>
 #include <string>
-
-#include <tf2/LinearMath/Quaternion.h>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Vector3.h>
+#include <algorithm>
+#include <limits>
+#include <map>
 
 using namespace std::chrono_literals;
 
 namespace manipulation {
 
 ScanObject::ScanObject(const rclcpp::NodeOptions & options)
- : Node("scan_object_visualizer", options)
+ : Node("scan_object_visualizer", options),
+   robot_position_(0.0, 0.0, 0.0),
+   robot_pos_received_(false),
+   current_anim_index_(0),
+   is_animating_(false)
 {
-    // Frame de destino para os markers
-    target_frame_ = "world";
+    this->declare_parameter<std::string>("target_frame", "world");
+    this->declare_parameter<std::string>("odom_topic", "/odom");
+    this->declare_parameter<double>("ray_length", 0.20);
+    this->declare_parameter<double>("grid_resolution", 0.05); 
+    this->declare_parameter<double>("voxel_map_resolution", 0.03); 
+    this->declare_parameter<double>("ray_step_size", 0.015);       
+    this->declare_parameter<std::string>("target_object_id", "redbox_09"); 
+
+    target_frame_ = this->get_parameter("target_frame").as_string();
+    odom_topic_ = this->get_parameter("odom_topic").as_string();
+    ray_length_ = this->get_parameter("ray_length").as_double();
+    grid_resolution_ = this->get_parameter("grid_resolution").as_double();
+    voxel_map_resolution_ = this->get_parameter("voxel_map_resolution").as_double();
+    ray_step_size_ = this->get_parameter("ray_step_size").as_double();
+    target_object_id_ = this->get_parameter("target_object_id").as_string();
 
     sub_detections_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
         "/bbox_3d_with_labels", 10,
         std::bind(&ScanObject::detectionCallback, this, std::placeholders::_1));
 
+    sub_semantic_pcl_ = this->create_subscription<mobile_manipulation_interfaces::msg::SemanticPcl>(
+        "/semantic_pcl_array", 10, 
+        std::bind(&ScanObject::semanticPclCallback, this, std::placeholders::_1));
+
+    sub_odometry_ = this->create_subscription<nav_msgs::msg::Odometry>(
+        odom_topic_, 10,
+        std::bind(&ScanObject::odometryCallback, this, std::placeholders::_1));
+
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "/visualization_marker_array", 10);
 
-    RCLCPP_INFO(this->get_logger(), "ScanObject Visualizer iniciado. Publicando no frame: %s", target_frame_.c_str());
-}   
+    animation_timer_ = this->create_wall_timer(
+        200ms, std::bind(&ScanObject::animationTimerCallback, this));
 
-void ScanObject::detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
-{
-    visualization_msgs::msg::MarkerArray all_markers;
+    RCLCPP_INFO(this->get_logger(), "ScanObject iniciado. Ordenação: Visiveis(Cima->Baixo) -> Face Distante.");
+}
 
-    visualization_msgs::msg::Marker delete_all;
-    delete_all.action = visualization_msgs::msg::Marker::DELETEALL;
-    all_markers.markers.push_back(delete_all);
+// ==================== CALLBACKS ====================
 
-    std_msgs::msg::Header target_header;
-    target_header.stamp = msg->header.stamp;
-    target_header.frame_id = target_frame_;  
+void ScanObject::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+    std::lock_guard<std::mutex> lock(robot_pos_mutex_);
+    robot_position_ = tf2::Vector3(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+    robot_pos_received_ = true;
+}
 
-    int obj_idx = 0;
-    for (const auto& detection : msg->detections)
-    {
-        if (detection.results.empty()) continue;
-
-        std::string label = detection.results[0].hypothesis.class_id;
-        
-        geometry_msgs::msg::Pose pose = detection.bbox.center;
-        geometry_msgs::msg::Vector3 size = detection.bbox.size;
-
-        appendObjectMarkers(label, obj_idx, pose, size, target_header, all_markers);
-        obj_idx++;
-    }
-
-    if (!all_markers.markers.empty()) {
-        marker_pub_->publish(all_markers);
+void ScanObject::semanticPclCallback(const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr msg) {
+    std::lock_guard<std::mutex> lock(voxel_mutex_);
+    voxel_grid_.clear();
+    if (msg->labels.size() != msg->clouds.size()) return;
+    for (size_t i = 0; i < msg->labels.size(); ++i) {
+        std::string label = msg->labels[i];
+        const auto& cloud = msg->clouds[i];
+        sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x"), iter_y(cloud, "y"), iter_z(cloud, "z");
+        for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+            VoxelKey key;
+            key.x = static_cast<int>(std::floor(*iter_x / voxel_map_resolution_));
+            key.y = static_cast<int>(std::floor(*iter_y / voxel_map_resolution_));
+            key.z = static_cast<int>(std::floor(*iter_z / voxel_map_resolution_));
+            voxel_grid_[key] = label;
+        }
     }
 }
 
-void ScanObject::appendObjectMarkers(
-    const std::string& label,
-    int object_index,
-    const geometry_msgs::msg::Pose& pose,
-    const geometry_msgs::msg::Vector3& size,
-    const std_msgs::msg::Header& header,
-    visualization_msgs::msg::MarkerArray& marker_array)
+void ScanObject::detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg) {
+    last_header_.stamp = msg->header.stamp;
+    last_header_.frame_id = target_frame_;
+
+    {
+        std::lock_guard<std::mutex> lock(objects_mutex_);
+        detected_objects_.clear();
+        for (const auto& detection : msg->detections) {
+            if (detection.results.empty()) continue;
+            std::string label = detection.results[0].hypothesis.class_id;
+            ObjectData obj_data;
+            obj_data.label = label;
+            obj_data.detection = detection;
+            obj_data.header = last_header_;
+            
+            if (target_object_id_.empty() || target_object_id_ == label) {
+                obj_data.valid_scan_grid = computeValidScanningGrid(
+                    detection.bbox.center, detection.bbox.size, label);
+            }
+            detected_objects_[label] = obj_data;
+        }
+    }
+
+    std::lock_guard<std::mutex> anim_lock(anim_mutex_);
+    if (!is_animating_) {
+        std::string label_to_viz = target_object_id_;
+        if (label_to_viz.empty() && !msg->detections.empty()) 
+            label_to_viz = msg->detections[0].results[0].hypothesis.class_id;
+
+        if (!label_to_viz.empty()) {
+            auto sorted_points = getSortedScanPoints(label_to_viz);
+            if (!sorted_points.empty()) {
+                points_to_animate_ = sorted_points;
+                current_anim_index_ = 0;
+                
+                std::lock_guard<std::mutex> obj_lock(objects_mutex_);
+                if(detected_objects_.count(label_to_viz)) {
+                    current_anim_bbox_ = detected_objects_[label_to_viz].detection;
+                }
+                is_animating_ = true;
+            }
+        }
+    }
+}
+
+// ==================== VISUALIZAÇÃO ====================
+
+void ScanObject::animationTimerCallback() {
+    std::lock_guard<std::mutex> lock(anim_mutex_);
+    if (points_to_animate_.empty()) {
+        is_animating_ = false; return;
+    }
+
+    if (current_anim_index_ < points_to_animate_.size()) current_anim_index_++;
+    else is_animating_ = false;
+
+    visualization_msgs::msg::MarkerArray markers;
+    visualization_msgs::msg::Marker del; del.action = visualization_msgs::msg::Marker::DELETEALL;
+    markers.markers.push_back(del);
+
+    visualization_msgs::msg::Marker bbox;
+    bbox.header = last_header_; bbox.header.stamp = this->now();
+    bbox.ns = "anim_bbox"; bbox.id = 0; bbox.type = visualization_msgs::msg::Marker::CUBE;
+    bbox.action = visualization_msgs::msg::Marker::ADD;
+    bbox.pose = current_anim_bbox_.bbox.center; bbox.scale = current_anim_bbox_.bbox.size;
+    bbox.color.r = 1.0; bbox.color.g = 1.0; bbox.color.b = 1.0; bbox.color.a = 0.1;
+    markers.markers.push_back(bbox);
+
+    visualization_msgs::msg::Marker hist;
+    hist.header = bbox.header; hist.ns = "anim_hist"; hist.id = 1;
+    hist.type = visualization_msgs::msg::Marker::SPHERE_LIST; hist.action = visualization_msgs::msg::Marker::ADD;
+    hist.scale.x = 0.02; hist.scale.y = 0.02; hist.scale.z = 0.02;
+    hist.color.r = 0.0; hist.color.g = 1.0; hist.color.b = 1.0; hist.color.a = 0.8;
+
+    visualization_msgs::msg::Marker line;
+    line.header = bbox.header; line.ns = "anim_path"; line.id = 2;
+    line.type = visualization_msgs::msg::Marker::LINE_STRIP; line.action = visualization_msgs::msg::Marker::ADD;
+    line.scale.x = 0.005; line.color.r = 1.0; line.color.g = 1.0; line.color.b = 1.0; line.color.a = 0.3;
+
+    for (size_t i = 0; i < current_anim_index_; i++) {
+        hist.points.push_back(points_to_animate_[i]);
+        line.points.push_back(points_to_animate_[i]);
+    }
+    markers.markers.push_back(hist); markers.markers.push_back(line);
+
+    if (current_anim_index_ > 0 && current_anim_index_ <= points_to_animate_.size()) {
+        visualization_msgs::msg::Marker cur;
+        cur.header = bbox.header; cur.ns = "anim_head"; cur.id = 3;
+        cur.type = visualization_msgs::msg::Marker::SPHERE; cur.action = visualization_msgs::msg::Marker::ADD;
+        cur.pose.position = points_to_animate_[current_anim_index_ - 1];
+        cur.pose.orientation.w = 1.0;
+        cur.scale.x = 0.06; cur.scale.y = 0.06; cur.scale.z = 0.06; 
+        cur.color.r = 1.0; cur.color.g = 0.0; cur.color.b = 0.0; cur.color.a = 1.0; 
+        markers.markers.push_back(cur);
+    }
+    marker_pub_->publish(markers);
+}
+
+// ==================== LÓGICA DE ORDENAÇÃO ====================
+
+std::vector<geometry_msgs::msg::Point> ScanObject::getSortedScanPoints(const std::string& label)
 {
-    std::string ns_suffix = "_" + label + "_" + std::to_string(object_index);
+    tf2::Vector3 robot_pos;
+    {
+        std::lock_guard<std::mutex> lock(robot_pos_mutex_);
+        robot_pos = robot_pos_received_ ? robot_position_ : tf2::Vector3(0,0,0);
+    }
 
-    visualization_msgs::msg::Marker bbox_marker;
-    bbox_marker.header = header;
-    bbox_marker.ns = "bbox" + ns_suffix;
-    bbox_marker.id = 0;
-    bbox_marker.type = visualization_msgs::msg::Marker::CUBE;
-    bbox_marker.action = visualization_msgs::msg::Marker::ADD;
-    bbox_marker.pose = pose; 
-    bbox_marker.scale = size;
+    std::lock_guard<std::mutex> lock(objects_mutex_);
+    auto it = detected_objects_.find(label);
+    if (it == detected_objects_.end()) return {};
+
+    const auto& obj_data = it->second;
+    const auto& points = obj_data.valid_scan_grid;
+    double center_z = obj_data.detection.bbox.center.position.z;
+
+    std::map<int, std::vector<ScanPoint>> face_map;
+    for(const auto& p : points) face_map[p.face_id].push_back(p);
+
+    struct FaceInfo { int id; double dist; };
+    std::vector<FaceInfo> faces_by_dist;
+
+    for (const auto& [fid, pts] : face_map) {
+        tf2::Vector3 centroid(0,0,0);
+        for(const auto& p : pts) centroid += p.position;
+        if (!pts.empty()) centroid /= (double)pts.size();
+        
+        double d = (centroid - robot_pos).length();
+        faces_by_dist.push_back({fid, d});
+    }
+
+    std::sort(faces_by_dist.begin(), faces_by_dist.end(), [](const FaceInfo& a, const FaceInfo& b){
+        return a.dist < b.dist;
+    });
+
+    int furthest_face_id = -1;
+    if (!faces_by_dist.empty()) furthest_face_id = faces_by_dist.back().id;
+
+    std::vector<geometry_msgs::msg::Point> visible_above;
+    std::vector<geometry_msgs::msg::Point> visible_below;
+    std::vector<geometry_msgs::msg::Point> hidden_all; 
+
+    for (const auto& f : faces_by_dist) 
+    {
+        int fid = f.id;
+        auto& pts = face_map[fid];
+
+        
+        std::sort(pts.begin(), pts.end(), [&](const ScanPoint& a, const ScanPoint& b){
+            return (a.position - robot_pos).length2() < (b.position - robot_pos).length2();
+        });
+
+        if (fid == furthest_face_id && faces_by_dist.size() > 1) 
+        { 
+            for(const auto& p : pts) 
+            {
+                geometry_msgs::msg::Point gm; 
+                gm.x=p.position.x(); gm.y=p.position.y(); gm.z=p.position.z();
+                hidden_all.push_back(gm);
+            }
+        } 
+        else 
+        {
+            for(const auto& p : pts) 
+            {
+                geometry_msgs::msg::Point gm; 
+                gm.x=p.position.x(); gm.y=p.position.y(); gm.z=p.position.z();
+                if (p.position.z() > center_z) visible_above.push_back(gm);
+                else visible_below.push_back(gm);
+            }
+        }
+    }
+
+    std::vector<geometry_msgs::msg::Point> result;
+    result.insert(result.end(), visible_above.begin(), visible_above.end());
+    result.insert(result.end(), visible_below.begin(), visible_below.end());
+    result.insert(result.end(), hidden_all.begin(), hidden_all.end());
+
+    return result;
+}
+
+
+VoxelKey ScanObject::pointToVoxel(const tf2::Vector3& pt) {
+    VoxelKey key;
+    key.x = static_cast<int>(std::floor(pt.x() / voxel_map_resolution_));
+    key.y = static_cast<int>(std::floor(pt.y() / voxel_map_resolution_));
+    key.z = static_cast<int>(std::floor(pt.z() / voxel_map_resolution_));
+    return key;
+}
+
+bool ScanObject::isRayBlocked(const tf2::Vector3& s, const tf2::Vector3& e, const std::string& l) {
+    std::lock_guard<std::mutex> lock(voxel_mutex_);
+    if (voxel_grid_.empty()) return false;
+    tf2::Vector3 dir = e - s; double len = dir.length();
+    if (len < 1e-4) return false; dir.normalize();
+    for (double d = 0.0; d < (len - 0.05); d += ray_step_size_) {
+        auto it = voxel_grid_.find(pointToVoxel(s + dir * d));
+        if (it != voxel_grid_.end() && it->second != l) return true;
+    }
+    return false;
+}
+
+std::vector<ScanPoint> ScanObject::computeValidScanningGrid(const geometry_msgs::msg::Pose& p, const geometry_msgs::msg::Vector3& s, const std::string& l) {
+    std::vector<ScanPoint> pts;
+    tf2::Vector3 c(p.position.x, p.position.y, p.position.z);
+    tf2::Quaternion q(p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w);
+    tf2::Matrix3x3 m(q);
+    double dx = s.x/2.0 + ray_length_, dy = s.y/2.0 + ray_length_, dz = s.z/2.0 + ray_length_;
     
-    bbox_marker.color.r = 0.0f;
-    bbox_marker.color.g = 1.0f;
-    bbox_marker.color.b = 0.0f;
-    bbox_marker.color.a = 0.3f;
-    bbox_marker.lifetime = rclcpp::Duration(0, 500000000);
-
-    marker_array.markers.push_back(bbox_marker);
-
-    tf2::Vector3 center(pose.position.x, pose.position.y, pose.position.z);
-    tf2::Quaternion q(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
-    tf2::Matrix3x3 rot_matrix(q);
-
-    double dx = size.x / 2.0;
-    double dy = size.y / 2.0;
-    double dz = size.z / 2.0;
-
-    std::vector<std::array<double, 3>> local_corners = {
-        { dx,  dy,  dz}, { dx,  dy, -dz}, { dx, -dy,  dz}, { dx, -dy, -dz},
-        {-dx,  dy,  dz}, {-dx,  dy, -dz}, {-dx, -dy,  dz}, {-dx, -dy, -dz}
+    struct F { tf2::Vector3 o, u, v; double ul, vl; int id; };
+    std::vector<F> fs = {
+        {{dx,-dy,-dz},{0,1,0},{0,0,1},2*dy,2*dz, 0}, 
+        {{-dx,-dy,-dz},{0,1,0},{0,0,1},2*dy,2*dz, 1},
+        {{-dx,dy,-dz},{1,0,0},{0,0,1},2*dx,2*dz, 2}, 
+        {{-dx,-dy,-dz},{1,0,0},{0,0,1},2*dx,2*dz, 3}, 
+        {{-dx,-dy,dz},{1,0,0},{0,1,0},2*dx,2*dy, 4}  
     };
 
-    int ray_id = 1;
-    for (const auto& c : local_corners)
-    {
-        tf2::Vector3 local_corner(c[0], c[1], c[2]);
-        tf2::Vector3 rotated_corner_offset = rot_matrix * local_corner;
-        tf2::Vector3 absolute_corner = center + rotated_corner_offset;
-        tf2::Vector3 direction = (absolute_corner - center).normalize();
-
-        double ray_length = 0.125;
-        tf2::Vector3 ray_end = absolute_corner + (direction * ray_length);
-
-        visualization_msgs::msg::Marker ray_marker;
-        ray_marker.header = header;
-        ray_marker.ns = "rays" + ns_suffix; 
-        ray_marker.id = ray_id++;
-        ray_marker.type = visualization_msgs::msg::Marker::ARROW;
-        ray_marker.action = visualization_msgs::msg::Marker::ADD;
-        
-        geometry_msgs::msg::Point p_start, p_end;
-        p_start.x = absolute_corner.x(); p_start.y = absolute_corner.y(); p_start.z = absolute_corner.z();
-        p_end.x = ray_end.x(); p_end.y = ray_end.y(); p_end.z = ray_end.z();
-        
-        ray_marker.points.push_back(p_start);
-        ray_marker.points.push_back(p_end);
-
-        ray_marker.scale.x = 0.005;
-        ray_marker.scale.y = 0.01;
-        ray_marker.scale.z = 0.0; 
-
-        ray_marker.color.r = 1.0f;
-        ray_marker.color.g = 0.0f;
-        ray_marker.color.b = 0.0f;
-        ray_marker.color.a = 1.0f;
-        ray_marker.lifetime = rclcpp::Duration(0, 500000000);
-
-        marker_array.markers.push_back(ray_marker);
+    for(auto& f : fs) {
+        for(double u=0; u<=f.ul+1e-4; u+=grid_resolution_) {
+            for(double v=0; v<=f.vl+1e-4; v+=grid_resolution_) {
+                tf2::Vector3 pw = c + m * (f.o + f.u*u + f.v*v);
+                if(!isRayBlocked(pw, c, l)) pts.push_back({pw, c, f.id});
+            }
+        }
     }
+    return pts;
 }
 
 } // namespace manipulation
 
-// int main(int argc, char ** argv)
-// {
-//     rclcpp::init(argc, argv);
-//     auto node = std::make_shared<manipulation::ScanObject>();
-//     rclcpp::spin(node);
-//     rclcpp::shutdown();
-//     return 0;
-// }
+int main(int argc, char ** argv) {
+    rclcpp::init(argc, argv);
+    rclcpp::spin(std::make_shared<manipulation::ScanObject>());
+    rclcpp::shutdown();
+    return 0;
+}
