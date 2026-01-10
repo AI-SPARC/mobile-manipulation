@@ -1342,7 +1342,7 @@ private:
                     
                     std::vector<geometry_msgs::msg::Pose> poses;
                     poses.push_back(object_pose.value());
-                    this->send_goal(id.value(), poses, true);
+                    this->send_goal(id.value(), poses, true, false);
                     manipulation_state_ = TaskState::RUNNING; 
                 
 
@@ -1374,7 +1374,7 @@ private:
                     std::string id_dummy = cached_object_.id;
                     std::vector<geometry_msgs::msg::Pose> poses;
                     poses.push_back(pose.value());
-                    this->send_goal(id_dummy, poses, false);
+                    this->send_goal(id_dummy, poses, false, false);
                     manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
@@ -1705,7 +1705,7 @@ private:
 
     // DOC-START: send_goal
     // Envia Action de Manipulação (Pick ou Place) com ARRAY de poses.
-    void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick)
+    void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick, bool follow_path)
     {
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5)))
         {
@@ -1717,6 +1717,7 @@ private:
         auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
         goal_msg.obstacle_id = id;
         goal_msg.pick = pick;
+        goal_msg.follow_path = follow_path;
         
         // Agora atribuímos o vetor de poses
         goal_msg.poses = target_poses; 

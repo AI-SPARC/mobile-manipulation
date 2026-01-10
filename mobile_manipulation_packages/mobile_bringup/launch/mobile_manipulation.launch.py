@@ -400,7 +400,7 @@ def generate_launch_description():
         joint_state_broadcaster_spawner,
         panda_arm_controller_spawner,
         combined_semantic_pcl,
-        # server_node,           
+        server_node,           
         synchronize_isaac,
     ]
 

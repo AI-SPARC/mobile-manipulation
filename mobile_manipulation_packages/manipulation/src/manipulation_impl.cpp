@@ -25,7 +25,11 @@
 #include <shape_msgs/msg/solid_primitive.hpp>
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
+#include <moveit/robot_trajectory/robot_trajectory.h>
 
+#include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
+
+#include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 using namespace std::chrono_literals;
 
 namespace manipulation {
@@ -184,10 +188,30 @@ void SimpleManipulation::initMoveGroup()
 
         move_group_arm->startStateMonitor(); 
 
+        RCLCPP_INFO(this->get_logger(), "Inicializando PlanningSceneMonitor...");
+        
+        // Cria o monitor usando o nó do moveit e o tópico robot_description
+        psm_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(
+            moveit_node_, "robot_description");
+
+        if (psm_->getPlanningScene())
+        {
+            // Inicia os monitores para manter a cena atualizada (colisões, estados das juntas)
+            psm_->startSceneMonitor();
+            psm_->startWorldGeometryMonitor();
+            psm_->startStateMonitor();
+            RCLCPP_INFO(this->get_logger(), "PlanningSceneMonitor iniciado com sucesso.");
+        }
+        else
+        {
+            RCLCPP_ERROR(this->get_logger(), "Falha ao inicializar PlanningSceneMonitor.");
+        }
+        // ============================================================
+
         RCLCPP_INFO(this->get_logger(), "MoveGroup (arm e gripper) inicializados com sucesso.");
 
         moveit_ready_ = true; 
-        init_timer_->cancel();  
+        init_timer_->cancel();
     } 
     catch (const std::exception &e) 
     {
@@ -790,6 +814,151 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
     return true;
 }
 
+bool SimpleManipulation::follow_path_with_consistent_ik(
+    const std::vector<geometry_msgs::msg::Pose>& path_poses,
+    const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>>& goal_handle)
+{
+    if (path_poses.empty()) return false;
+    if (!move_group_arm || !psm_) {
+        RCLCPP_ERROR(this->get_logger(), "MoveGroup ou PSM não inicializados.");
+        return false;
+    }
+
+    // --- 1. Preparação ---
+    psm_->requestPlanningSceneState();
+    planning_scene_monitor::LockedPlanningSceneRO scene(psm_);
+    auto robot_model = move_group_arm->getRobotModel();
+    const moveit::core::JointModelGroup* joint_model_group = robot_model->getJointModelGroup("panda_arm");
+    
+    // Nome do link da ponta para verificação (FK)
+    // Geralmente é o último link do grupo. Ajuste se o seu for diferente (ex: "panda_link8")
+    const std::string& tip_frame = joint_model_group->getLinkModelNames().back();
+
+    moveit::core::RobotStatePtr current_state = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
+    
+    robot_trajectory::RobotTrajectory trajectory(robot_model, joint_model_group);
+    trajectory.addSuffixWayPoint(*current_state, 0.0);
+
+    RCLCPP_INFO(this->get_logger(), "Calculando IK RIGIDO para %zu pontos...", path_poses.size());
+
+    collision_detection::CollisionRequest c_req;
+    collision_detection::CollisionResult c_res;
+    
+    // Definição de rigidez: Tolerância máxima de erro angular (radianos)
+    // 0.005 rad ~= 0.28 graus (Extremamente rígido)
+    const double MAX_ORIENTATION_ERROR = 0.005; 
+
+    int points_added = 0;
+
+    // --- 2. Loop de Cálculo ---
+    for (size_t i = 0; i < path_poses.size(); ++i)
+    {
+        if (goal_handle->is_canceling()) {
+            RCLCPP_WARN(this->get_logger(), "Cancelamento no cálculo.");
+            return false;
+        }
+
+        const auto& target_pose = path_poses[i];
+
+        // Copia estado anterior (Semente para consistência de juntas)
+        moveit::core::RobotState candidate_state = *current_state;
+
+        // Tenta IK com timeout curto
+        bool found_ik = candidate_state.setFromIK(joint_model_group, target_pose, 0.02);
+
+        if (found_ik)
+        {
+            candidate_state.update(); // Recalcula FK para verificar o resultado real
+
+            // --- VALIDAÇÃO DE RIGIDEZ DE ORIENTAÇÃO ---
+            // O solver pode achar uma solução "aproximada". Vamos verificar se ela é exata.
+            
+            // 1. Pega a orientação real que o robô ficaria com essa solução
+            const Eigen::Isometry3d& actual_transform = candidate_state.getGlobalLinkTransform(tip_frame);
+            Eigen::Quaterniond q_actual(actual_transform.rotation());
+            
+            // 2. Pega a orientação desejada
+            Eigen::Quaterniond q_target(
+                target_pose.orientation.w,
+                target_pose.orientation.x,
+                target_pose.orientation.y,
+                target_pose.orientation.z
+            );
+
+            // 3. Calcula a distância angular (menor ângulo entre os dois quaternions)
+            double angle_diff = q_actual.angularDistance(q_target);
+
+            if (angle_diff > MAX_ORIENTATION_ERROR)
+            {
+                // REJEITA: A solução existe, mas o ângulo está "torto" além do permitido
+                RCLCPP_DEBUG(this->get_logger(), 
+                    "Pulo Ponto %zu: IK encontrado, mas erro de orientação (%.4f rad) excede limite rígido.", 
+                    i, angle_diff);
+                continue; // Pula para o próximo ponto
+            }
+            // -------------------------------------------
+
+            c_res.clear();
+            scene->checkCollision(c_req, c_res, candidate_state);
+
+            if (!c_res.collision)
+            {
+                *current_state = candidate_state; // Aceita como nova semente
+                trajectory.addSuffixWayPoint(*current_state, 0.0);
+                points_added++;
+            }
+            else
+            {
+                RCLCPP_DEBUG(this->get_logger(), "Pulo Ponto %zu: Colisão.", i);
+            }
+        }
+        else
+        {
+            RCLCPP_DEBUG(this->get_logger(), "Pulo Ponto %zu: IK Falhou.", i);
+        }
+    }
+
+    if (points_added == 0) {
+        RCLCPP_ERROR(this->get_logger(), "Nenhum ponto atendeu aos critérios de colisão e rigidez.");
+        return false;
+    }
+
+    // --- 3. Parametrização ---
+    trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+    if (!totg.computeTimeStamps(trajectory, 0.5, 0.5)) {
+        RCLCPP_ERROR(this->get_logger(), "Falha no TOTG.");
+        return false;
+    }
+
+    // --- 4. Execução ---
+    moveit_msgs::msg::RobotTrajectory traj_msg;
+    trajectory.getRobotTrajectoryMsg(traj_msg);
+
+    RCLCPP_INFO(this->get_logger(), "Executando %d pontos validados...", points_added);
+    move_group_arm->asyncExecute(traj_msg);
+
+    double estimated_duration = trajectory.getDuration();
+    auto start_time = std::chrono::steady_clock::now();
+    
+    while (rclcpp::ok())
+    {
+        if (goal_handle->is_canceling()) 
+        {
+            move_group_arm->stop();
+            return false;
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        double elapsed = std::chrono::duration<double>(now - start_time).count();
+
+        if (elapsed > (estimated_duration + 0.5)) break; 
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    return true;
+}
+
 void SimpleManipulation::set_collision_allowance(const std::string& id1, const std::string& id2, bool allow_collision)
 {
     auto request = std::make_shared<moveit_msgs::srv::GetPlanningScene::Request>();
@@ -938,6 +1107,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
 {
     RCLCPP_INFO(this->get_logger(), "Aguardando inicialização do MoveIt...");
 
+    // 1. Loop de espera inicial com verificação de cancelamento
     while (!moveit_ready_ && rclcpp::ok()) 
     {
         if (goal_handle->is_canceling()) 
@@ -958,46 +1128,103 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
     const auto goal = goal_handle->get_goal();
     auto result = std::make_shared<mobile_manipulation_interfaces::action::PickObject::Result>();
 
-    if(goal->pick == true)
-    {
-        open_gripper();
-    }
+    // 2. Lógica inicial de gripper
+    
 
     bool any_pose_succeeded = false;
 
-   
-    for (const auto& target_pose : goal->poses)
+    if(goal->follow_path == false)
     {
-        
+        if(goal->pick == true)
+        {
+            // Verifica cancelamento antes de abrir a garra
+            if (goal_handle->is_canceling()) 
+            {
+                result->success = false;
+                goal_handle->canceled(result);
+                RCLCPP_INFO(this->get_logger(), "Action cancelada antes de abrir a garra.");
+                return;
+            }
+            open_gripper();
+        }
+         // 3. Loop sobre as poses candidatas
+        for (const auto& target_pose : goal->poses)
+        {
+            // === VERIFICAÇÃO DE CANCELAMENTO CRÍTICA ===
+            if (goal_handle->is_canceling()) 
+            {
+                // Para qualquer movimento que esteja ocorrendo
+                if (move_group_arm) 
+                {
+                    move_group_arm->stop();
+                }
+
+                if (move_group_gripper) 
+                {
+                    move_group_gripper->stop();
+                }
+
+                result->success = false;
+                goal_handle->canceled(result);
+                RCLCPP_WARN(this->get_logger(), "Action cancelada pelo usuário! Parando o robô.");
+                return;
+            }
+            // ===========================================
+
+            RCLCPP_INFO(this->get_logger(), "Tentando pose [x: %.3f, y: %.3f, z: %.3f]...", 
+                target_pose.position.x, target_pose.position.y, target_pose.position.z);
+
+            // Chama a sua função original
+            bool current_attempt = calculate_global_pose(goal->obstacle_id, target_pose, goal->pick);
+
+            if (current_attempt)
+            {
+                any_pose_succeeded = true;
+                RCLCPP_INFO(this->get_logger(), "Sucesso na pose atual! Interrompendo tentativas.");
+                break; 
+            }
+            else
+            {
+                RCLCPP_WARN(this->get_logger(), "Falha na pose atual. Tentando a próxima (se houver)...");
+            }
+        }
+    }
+    else
+    {
+        bool path_execution_success = follow_path_with_consistent_ik(goal->poses, goal_handle);
+
         if (goal_handle->is_canceling()) 
         {
+            if (move_group_arm) move_group_arm->stop();
             result->success = false;
             goal_handle->canceled(result);
-            RCLCPP_INFO(this->get_logger(), "Action cancelada pelo usuário.");
+            RCLCPP_WARN(this->get_logger(), "Action cancelada durante Follow Path.");
             return;
         }
 
-        RCLCPP_INFO(this->get_logger(), "Tentando pose [x: %.3f, y: %.3f, z: %.3f]...", 
-            target_pose.position.x, target_pose.position.y, target_pose.position.z);
-
-       
-        bool current_attempt = calculate_global_pose(goal->obstacle_id, target_pose, goal->pick);
-
-        if (current_attempt)
+        if (path_execution_success)
         {
             any_pose_succeeded = true;
-            RCLCPP_INFO(this->get_logger(), "Sucesso na pose atual! Interrompendo tentativas.");
-            break; 
         }
         else
         {
-            RCLCPP_WARN(this->get_logger(), "Falha na pose atual. Tentando a próxima (se houver)...");
+            any_pose_succeeded = false;
         }
     }
+   
 
-    
+    // 4. Finalização
     if (rclcpp::ok()) 
     {
+        // Verifica cancelamento uma última vez caso tenha ocorrido no último milissegundo
+        if (goal_handle->is_canceling()) 
+        {
+            if (move_group_arm) move_group_arm->stop();
+            result->success = false;
+            goal_handle->canceled(result);
+            return;
+        }
+
         result->success = any_pose_succeeded;
         
         if (any_pose_succeeded) 
@@ -1007,7 +1234,6 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
         } 
         else 
         {
-            
             goal_handle->abort(result); 
             RCLCPP_ERROR(this->get_logger(), "Action PickObject FALHOU (Nenhuma pose válida).");
         }

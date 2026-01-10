@@ -27,7 +27,7 @@ ScanObject::ScanObject(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("grid_resolution", 0.04); 
     this->declare_parameter<double>("voxel_map_resolution", 0.02); 
     this->declare_parameter<double>("ray_step_size", 0.01);       
-    this->declare_parameter<std::string>("target_object_id", "redbox_09");
+    this->declare_parameter<std::string>("target_object_id", "");
     
     // Novo parâmetro solicitado
     this->declare_parameter<bool>("publish_markers", false); 

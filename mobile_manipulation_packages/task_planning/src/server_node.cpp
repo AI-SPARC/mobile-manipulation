@@ -193,7 +193,7 @@ public:
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<std::string>("bt_xml_path", "");
-        this->declare_parameter<bool>("use_graspnet", false);
+        this->declare_parameter<bool>("use_graspnet", true);
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         std::string bt_xml_path = this->get_parameter("bt_xml_path").as_string();
@@ -981,8 +981,44 @@ private:
                         target_size.x += 0.005;
                         target_size.y += 0.005;
                         target_size.z += 0.005;
-
+                        
+                        
                         std::vector<geometry_msgs::msg::Pose> poses = this->scan_object_node_->getSortedScanPoses(cached_object_.id);
+
+                        // === APLICAÇÃO DO OFFSET DA GARRA ===
+                        for (auto & pose : poses)
+                        {
+                            tf2::Quaternion q_scan_result;
+                            tf2::fromMsg(pose.orientation, q_scan_result);
+
+                            // Cria o quaternion de correção da garra
+                            tf2::Quaternion q_gripper_offset;
+                            
+                            // Configura Roll (X), Pitch (Y), Yaw (Z)
+                            // Eixo X: 180 graus (M_PI)
+                            // Eixo Y: 0
+                            // Eixo Z: -45 graus (-M_PI / 4.0)
+                            q_gripper_offset.setRPY(M_PI, 0.0, -M_PI / 4.0);
+
+                            // Multiplicação PELA DIREITA aplica a rotação no eixo LOCAL da pose atual.
+                            // Isso preserva a direção do apontamento (X), mas gira a garra ao redor dele.
+                            tf2::Quaternion q_final = q_scan_result * q_gripper_offset;
+                            
+                            q_final.normalize(); // Sempre normalize após multiplicar quaternions
+
+                            pose.orientation = tf2::toMsg(q_final);
+                        }
+                        // ====================================
+
+                        // Log de debug
+                        for(int i = 0; i < 5; i++) { // Imprime só 5 pra não poluir
+                            if (i < poses.size())
+                                RCLCPP_INFO(this->get_logger(), "Pose %d ajustada enviada.", i);
+                        }
+
+                        // Envia para a action (follow_path=true)
+                        this->send_goal(id.value(), poses, true, true);
+                        manipulation_state_ = TaskState::RUNNING;
 
                         // auto duration = rclcpp::Duration(5, 0); 
 
@@ -1030,9 +1066,10 @@ private:
                     }
                     else
                     {
+                        
                         std::vector<geometry_msgs::msg::Pose> poses;
                         poses.push_back(object_pose.value());
-                        this->send_goal(id.value(), poses, true);
+                        this->send_goal(id.value(), poses, true, false);
                         manipulation_state_ = TaskState::RUNNING; 
                     }
 
@@ -1067,7 +1104,7 @@ private:
                     std::string id_dummy = cached_object_.id;
                     std::vector<geometry_msgs::msg::Pose> poses;
                     poses.push_back(pose.value());
-                    this->send_goal(id_dummy, poses, false); // false = Place
+                    this->send_goal(id_dummy, poses, false, false); // false = Place
                     manipulation_state_ = TaskState::RUNNING;
                     return BT::NodeStatus::RUNNING;
                 }
@@ -1420,7 +1457,7 @@ private:
 
     // DOC-START: send_goal
     // Envia Action de Manipulação (Pick ou Place) com ARRAY de poses.
-    void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick)
+    void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick, bool follow_path)
     {
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5)))
         {
@@ -1432,6 +1469,7 @@ private:
         auto goal_msg = mobile_manipulation_interfaces::action::PickObject::Goal();
         goal_msg.obstacle_id = id;
         goal_msg.pick = pick;
+        goal_msg.follow_path = follow_path;
         
         // Agora atribuímos o vetor de poses
         goal_msg.poses = target_poses; 

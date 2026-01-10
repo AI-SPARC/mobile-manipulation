@@ -30,7 +30,11 @@
 #include <moveit_msgs/srv/get_planning_scene.hpp>
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/srv/mobile_object_collision.hpp"
+#include <moveit/robot_trajectory/robot_trajectory.h>
 
+#include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
+
+#include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 namespace manipulation {
 
 class SimpleManipulation : public rclcpp::Node 
@@ -75,6 +79,7 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
   
    
+    planning_scene_monitor::PlanningSceneMonitorPtr psm_;
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm;
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_gripper;
 
@@ -108,6 +113,9 @@ private:
     bool calculate_global_pose(std::string received_id, geometry_msgs::msg::Pose pose, bool pick);
     void set_collision_allowance(const std::string& id1, const std::string& id2, bool allow_collision);
     bool send_request(std::string received_obstacle_id, bool received_activate_movement);
+    bool follow_path_with_consistent_ik(const std::vector<geometry_msgs::msg::Pose>& path_poses, 
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>>& goal_handle);
+
 
     rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
         std::shared_ptr<const mobile_manipulation_interfaces::action::PickObject::Goal> goal);

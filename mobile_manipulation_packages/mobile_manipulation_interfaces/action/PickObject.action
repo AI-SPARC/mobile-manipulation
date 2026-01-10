@@ -1,5 +1,6 @@
 string obstacle_id
 bool pick
+bool follow_path
 geometry_msgs/Pose[] poses
 ---
 bool success
