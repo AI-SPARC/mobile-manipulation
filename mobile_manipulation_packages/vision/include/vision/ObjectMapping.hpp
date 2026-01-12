@@ -26,11 +26,12 @@ public:
     explicit ObjectMapping(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
     virtual ~ObjectMapping() = default;
 
+    void ObjectToMap(std::string id);
 private:
   
     void semanticPclCallback(const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr msg);
     void jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
-
+    
     
     void publishAccumulatedCloud();
 
@@ -47,7 +48,7 @@ private:
 
     bool is_robot_stopped_;
     rclcpp::Time last_motion_time_;
-    
+    std::string object_to_map_;
     
     double velocity_threshold_;     
     double settlement_duration_;    

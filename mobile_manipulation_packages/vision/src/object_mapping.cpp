@@ -1,6 +1,6 @@
 #include "vision/ObjectMapping.hpp"
 #include <cmath>
-
+#include <rclcpp_components/register_node_macro.hpp>
 namespace vision {
 
 ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
@@ -77,23 +77,36 @@ void ObjectMapping::jointStatesCallback(const sensor_msgs::msg::JointState::Shar
     }
 }
 
+void ObjectMapping::ObjectToMap(std::string id)
+{
+    std::lock_guard<std::mutex> lock(data_mutex_);
+
+    object_to_map_ = id;
+}
+
 void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr msg) 
 {
-   
+    
     if (!is_robot_stopped_) 
     {
-
-        
         return;
     }
 
-    std::lock_guard<std::mutex> lock(data_mutex_);
-    bool map_updated = false;
+    {
+        std::lock_guard<std::mutex> lock(data_mutex_);
 
+   
+        if (object_to_map_.empty()) 
+        {
+            return; 
+        }
+    }
+    
+
+    bool map_updated = false;
     
     pcl::VoxelGrid<pcl::PointXYZ> sor;
     sor.setLeafSize((float)voxel_leaf_size_, (float)voxel_leaf_size_, (float)voxel_leaf_size_);
-
     
     if (msg->labels.size() != msg->clouds.size()) return;
 
@@ -101,12 +114,15 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
     {
         std::string label = msg->labels[i];
         
-        
+        if (label != object_to_map_) 
+        {
+            continue;
+        }
+
         pcl::PointCloud<pcl::PointXYZ> incoming_cloud;
         pcl::fromROSMsg(msg->clouds[i], incoming_cloud);
 
         if (incoming_cloud.empty()) continue;
-
         
         if (object_points_.find(label) == object_points_.end()) 
         {
@@ -114,23 +130,19 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         } 
         else 
         {
-            
             *object_points_[label] += incoming_cloud;
         }
 
-       
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZ>());
         sor.setInputCloud(object_points_[label]);
         sor.filter(*cloud_filtered);
         
-       
         object_points_[label] = cloud_filtered;
         map_updated = true;
     }
 
-    
-    if (map_updated) {
-
+    if (map_updated) 
+    {
         publishAccumulatedCloud();
     }
 }
@@ -177,9 +189,4 @@ void ObjectMapping::publishAccumulatedCloud()
 
 } // namespace vision
 
-int main(int argc, char ** argv) {
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<vision::ObjectMapping>());
-    rclcpp::shutdown();
-    return 0;
-}
+RCLCPP_COMPONENTS_REGISTER_NODE(vision::ObjectMapping)

@@ -18,18 +18,18 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
     : Node("combined_semantic_pcl", options),
       frame_count_(0)
 {
-    // Declaração de Parâmetros
+    
     this->declare_parameter<std::string>("target_frame", "world"); 
     this->declare_parameter<std::string>("topic_segmentation", "/semantic_segmentation");
     this->declare_parameter<std::string>("topic_pointcloud", "/depth_pcl");
     this->declare_parameter<std::string>("topic_labels", "/semantic_labels");
     this->declare_parameter<std::string>("topic_output_semantic", "/semantic_pcl");
     this->declare_parameter<std::string>("topic_output_colored", "/semantic_pcl_colored");
-    this->declare_parameter<std::string>("topic_custom_msg", "/semantic_pcl_array"); // Novo tópico
+    this->declare_parameter<std::string>("topic_custom_msg", "/semantic_pcl_array"); 
     
     this->declare_parameter<int>("downsample_step", 4); 
 
-    // Obtenção de Parâmetros
+    
     target_frame_ = this->get_parameter("target_frame").as_string();
     topic_segmentation_ = this->get_parameter("topic_segmentation").as_string();
     topic_pointcloud_ = this->get_parameter("topic_pointcloud").as_string();
@@ -41,58 +41,50 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
     downsample_step_ = this->get_parameter("downsample_step").as_int();
     if (downsample_step_ < 1) downsample_step_ = 1;
 
-    RCLCPP_INFO(this->get_logger(), "=== SEMANTIC PCL NODE ===");
-    RCLCPP_INFO(this->get_logger(), "Transformando nuvem para frame: %s", target_frame_.c_str());
-    RCLCPP_INFO(this->get_logger(), "Downsample Step: %d", downsample_step_);
-    RCLCPP_INFO(this->get_logger(), "Publicando Array Customizado em: %s", topic_custom_msg_.c_str());
+    RCLCPP_INFO(this->get_logger(), "=== SEMANTIC PCL NODE (SMART SYNC) ===");
+    RCLCPP_INFO(this->get_logger(), "Target Frame: %s", target_frame_.c_str());
 
-    // TF Setup
+  
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-    // Subscriber de Labels (JSON)
+   
     labels_sub_ = this->create_subscription<std_msgs::msg::String>(
         topic_labels_,
         10,
         std::bind(&CombinedSemanticPCL::labelsCallback, this, std::placeholders::_1)
     );
 
-    // Configuração QoS para sensores (Best Effort para Isaac Sim)
     auto sensor_qos = rclcpp::SensorDataQoS(); 
     auto rmw_qos = sensor_qos.get_rmw_qos_profile();
 
-    // Subscribers Sincronizados
+    
     seg_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
         this, topic_segmentation_, rmw_qos);
     
     pcl_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(
         this, topic_pointcloud_, rmw_qos);
 
-    // Sincronizador
+    
     sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
         SyncPolicy(10), *seg_sub_, *pcl_sub_);
     
     sync_->registerCallback(std::bind(&CombinedSemanticPCL::syncedCallback, this, std::placeholders::_1, std::placeholders::_2));
 
-    // Publishers
+    
     pub_semantic_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_semantic_, 10);
     pub_colored_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_colored_, 10);
-    
-    // Publisher Customizado
     pub_custom_msg_ = this->create_publisher<mobile_manipulation_interfaces::msg::SemanticPcl>(topic_custom_msg_, 10);
 }
 
 void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr msg)
 {
     parseLabelsJson(msg->data);
-    RCLCPP_DEBUG(this->get_logger(), "Labels atualizadas. Total: %zu", id_to_label_.size());
 }
 
 void CombinedSemanticPCL::parseLabelsJson(const std::string & json_str)
 {
-    // Parser JSON simples manual para extrair {"id": {"class": "label"}}
     id_to_label_.clear();
-
     size_t pos = 0;
     while ((pos = json_str.find("\"", pos)) != std::string::npos)
     {
@@ -103,32 +95,36 @@ void CombinedSemanticPCL::parseLabelsJson(const std::string & json_str)
 
         std::string id_str = json_str.substr(id_start, id_end - id_start);
 
-        bool is_number = !id_str.empty() && 
-            std::all_of(id_str.begin(), id_str.end(), ::isdigit);
+        bool is_number = !id_str.empty() && std::all_of(id_str.begin(), id_str.end(), ::isdigit);
 
         if (is_number)
         {
             int32_t sem_id = std::stoi(id_str);
-
             size_t brace_pos = json_str.find("{", id_end);
-            if (brace_pos != std::string::npos)
+
+            if (brace_pos != std::string::npos) 
             {
                 size_t label_key_start = json_str.find("\"", brace_pos + 1);
-                if (label_key_start != std::string::npos)
+
+                if (label_key_start != std::string::npos) 
                 {
                     label_key_start++;
                     size_t label_key_end = json_str.find("\"", label_key_start);
-                    if (label_key_end != std::string::npos)
+
+                    if (label_key_end != std::string::npos) 
                     {
                         size_t colon_pos = json_str.find(":", label_key_end);
-                        if (colon_pos != std::string::npos)
+
+                        if (colon_pos != std::string::npos) 
                         {
                             size_t val_start = json_str.find("\"", colon_pos);
-                            if (val_start != std::string::npos)
+
+                            if (val_start != std::string::npos) 
                             {
                                 val_start++;
                                 size_t val_end = json_str.find("\"", val_start);
-                                if (val_end != std::string::npos)
+
+                                if (val_end != std::string::npos) 
                                 {
                                     std::string label = json_str.substr(val_start, val_end - val_start);
                                     id_to_label_[sem_id] = label;
@@ -139,32 +135,26 @@ void CombinedSemanticPCL::parseLabelsJson(const std::string & json_str)
                 }
             }
         }
+        
         pos = id_end + 1;
     }
 }
 
 std::tuple<uint8_t, uint8_t, uint8_t> CombinedSemanticPCL::getColorForId(int32_t obj_id)
 {
-    if (obj_id == 0) return std::make_tuple(50, 50, 50); // Background cinza
-
+    if (obj_id == 0) return std::make_tuple(50, 50, 50); 
     auto it = color_map_.find(obj_id);
     if (it != color_map_.end()) return it->second;
-
-    // Gera cor determinística
     std::mt19937 gen(obj_id * 137);
     std::uniform_int_distribution<> dis(60, 255);
-
     uint8_t r = static_cast<uint8_t>(dis(gen));
     uint8_t g = static_cast<uint8_t>(dis(gen));
     uint8_t b = static_cast<uint8_t>(dis(gen));
-
     auto color = std::make_tuple(r, g, b);
     color_map_[obj_id] = color;
-
     return color;
 }
 
-// Função auxiliar para criar PointCloud2 a partir de vetor de pontos
 sensor_msgs::msg::PointCloud2 CombinedSemanticPCL::createPCLMsg(
     const std::vector<std::array<float, 3>>& points, 
     const std_msgs::msg::Header& header)
@@ -175,18 +165,13 @@ sensor_msgs::msg::PointCloud2 CombinedSemanticPCL::createPCLMsg(
     msg.width = static_cast<uint32_t>(points.size());
     msg.is_dense = true;
     msg.is_bigendian = false;
-    
-    // Campos: x, y, z
     msg.fields.resize(3);
     msg.fields[0].name = "x"; msg.fields[0].offset = 0; msg.fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32; msg.fields[0].count = 1;
     msg.fields[1].name = "y"; msg.fields[1].offset = 4; msg.fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32; msg.fields[1].count = 1;
     msg.fields[2].name = "z"; msg.fields[2].offset = 8; msg.fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32; msg.fields[2].count = 1;
-
-    msg.point_step = 12; // 3 floats * 4 bytes
+    msg.point_step = 12; 
     msg.row_step = msg.point_step * msg.width;
     msg.data.resize(msg.row_step);
-
-    // Cópia rápida de memória
     uint8_t* ptr = msg.data.data();
     for(const auto& p : points) {
         std::memcpy(ptr, &p[0], 12);
@@ -195,35 +180,80 @@ sensor_msgs::msg::PointCloud2 CombinedSemanticPCL::createPCLMsg(
     return msg;
 }
 
+
 void CombinedSemanticPCL::syncedCallback(
     const sensor_msgs::msg::Image::ConstSharedPtr & seg_msg,
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr & pcl_msg)
 {
     frame_count_++;
 
-    try
+    geometry_msgs::msg::TransformStamped t_stamped;
+    bool has_transform = false;
+
+    rclcpp::Time sensor_time = pcl_msg->header.stamp;
+
+    
+    try {
+        t_stamped = tf_buffer_->lookupTransform(
+            target_frame_,
+            pcl_msg->header.frame_id,
+            sensor_time,
+            rclcpp::Duration::from_seconds(0.1) 
+        );
+        has_transform = true;
+    } 
+    catch (const tf2::TransformException & ex) 
     {
-        // 1. Obter Transformação
-        geometry_msgs::msg::TransformStamped t_stamped;
+        return;
+    }
+
+   
+    if (!has_transform)
+    {
         try {
             t_stamped = tf_buffer_->lookupTransform(
-                target_frame_,              
-                pcl_msg->header.frame_id,   
-                tf2::TimePointZero
+                target_frame_,
+                pcl_msg->header.frame_id,
+                tf2::TimePointZero 
             );
+
+            
+            rclcpp::Time tf_time = t_stamped.header.stamp;
+            double time_diff = std::abs((sensor_time - tf_time).seconds());
+
+            
+            if (time_diff > 0.15) 
+            {
+                if (frame_count_ % 30 == 0) {
+                    RCLCPP_WARN(this->get_logger(), 
+                        "TF Lag alto (%.3fs). Descartando frame para evitar ghosting.", time_diff);
+                }
+                return; 
+            }
+            
+            
+            has_transform = true;
+            if (frame_count_ % 60 == 0) {
+                 RCLCPP_INFO(this->get_logger(), "Usando TF aproximado (Diff: %.3fs)", time_diff);
+            }
+
         } catch (const tf2::TransformException & ex) 
         {
-            if (frame_count_ % 60 == 0) {
-                RCLCPP_WARN(this->get_logger(), "TF Falhou (%s -> %s): %s", 
-                    pcl_msg->header.frame_id.c_str(), target_frame_.c_str(), ex.what());
+            if (frame_count_ % 60 == 0) 
+            {
+                RCLCPP_ERROR(this->get_logger(), "TF Crítico: Não foi possível obter transform: %s", ex.what());
             }
             return;
         }
+    }
 
+    
+    try
+    {
         tf2::Transform transform;
         tf2::fromMsg(t_stamped.transform, transform);
 
-        // 2. Setup dos dados brutos
+       
         uint32_t img_height = seg_msg->height;
         uint32_t img_width = seg_msg->width;
         size_t total_pixels = static_cast<size_t>(img_height) * img_width;
@@ -233,9 +263,11 @@ void CombinedSemanticPCL::syncedCallback(
         uint32_t pcl_width = pcl_msg->width;
         size_t num_points = static_cast<size_t>(pcl_height) * pcl_width;
 
-        // Offsets
+        
         int x_off = -1, y_off = -1, z_off = -1;
-        for (const auto & f : pcl_msg->fields) {
+
+        for (const auto & f : pcl_msg->fields) 
+        {
             if (f.name == "x") x_off = f.offset;
             else if (f.name == "y") y_off = f.offset;
             else if (f.name == "z") z_off = f.offset;
@@ -243,7 +275,6 @@ void CombinedSemanticPCL::syncedCallback(
 
         if (x_off < 0 || y_off < 0 || z_off < 0) return;
 
-        // Vetores principais de dados
         std::vector<std::array<float, 3>> world_points;
         std::vector<int32_t> valid_ids;
         
@@ -254,7 +285,6 @@ void CombinedSemanticPCL::syncedCallback(
         const uint8_t * pcl_data = pcl_msg->data.data();
         uint32_t point_step = pcl_msg->point_step;
 
-        // 3. Loop de processamento
         for (size_t i = 0; i < num_points; i += downsample_step_)
         {
             const uint8_t * ptr = pcl_data + (i * point_step);
@@ -265,13 +295,13 @@ void CombinedSemanticPCL::syncedCallback(
             std::memcpy(&z_cam, ptr + z_off, sizeof(float));
 
             if (!std::isfinite(x_cam) || !std::isfinite(y_cam) || !std::isfinite(z_cam)) continue;
-            if (z_cam < 0.05f) continue; 
+            
+            
+            if (z_cam < 0.1f) continue; 
 
-            // Transformar para World
             tf2::Vector3 point_camera(x_cam, y_cam, z_cam);
             tf2::Vector3 point_world = transform * point_camera;
 
-            // Obter ID
             int32_t sem_id = 0;
             if (num_points == total_pixels) 
             {
@@ -294,70 +324,59 @@ void CombinedSemanticPCL::syncedCallback(
 
         if (world_points.empty()) return;
 
-        // Header para saída
+        
         std_msgs::msg::Header output_header = pcl_msg->header;
         output_header.frame_id = target_frame_; 
         
-        // 4. Publicar Mensagens Originais
         publishSemanticPCL(world_points, valid_ids, output_header);
         publishColoredPCL(world_points, valid_ids, output_header);
-
-        // 5. Publicar Mensagem Customizada (Arrays Separados)
         publishSplitSemanticPCL(world_points, valid_ids, output_header);
 
-        if (frame_count_ % 30 == 0) {
-            RCLCPP_INFO(this->get_logger(), "Processado: %zu pontos no frame %s", 
-                world_points.size(), target_frame_.c_str());
+        if (frame_count_ % 30 == 0) 
+        {
+            
+            RCLCPP_INFO(this->get_logger(), "Frame publicado (%zu pontos)", world_points.size());
         }
     }
     catch (const std::exception & e)
     {
-        RCLCPP_ERROR(this->get_logger(), "Erro no loop principal: %s", e.what());
+        RCLCPP_ERROR(this->get_logger(), "Erro de processamento: %s", e.what());
     }
 }
 
-// NOVA FUNÇÃO: Separa os pontos por ID e publica a mensagem customizada
 void CombinedSemanticPCL::publishSplitSemanticPCL(
     const std::vector<std::array<float, 3>> & points,
     const std::vector<int32_t> & semantic_ids,
     const std_msgs::msg::Header & header)
 {
-    // Mapa temporário: ID -> Vetor de Pontos
     std::map<int32_t, std::vector<std::array<float, 3>>> grouped_points;
 
-    // Agrupa os pontos
     for (size_t i = 0; i < points.size(); ++i)
     {
         int32_t id = semantic_ids[i];
-        if (id == 0) continue; // Ignora background/sem label
+        if (id == 0) continue; 
         grouped_points[id].push_back(points[i]);
     }
 
-    // Prepara a mensagem customizada
     mobile_manipulation_interfaces::msg::SemanticPcl custom_msg;
     custom_msg.header = header;
 
     for (const auto & [id, pts] : grouped_points)
     {
-        // Só adiciona se houver pontos suficientes (ruído mínimo)
         if (pts.size() < 10) continue;
 
-        // Busca o nome da label
         std::string label_str = "unknown_" + std::to_string(id);
+
         if (id_to_label_.count(id))
         {
             label_str = id_to_label_.at(id);
         }
 
-        // Cria a PointCloud2 para este objeto
         sensor_msgs::msg::PointCloud2 obj_cloud = createPCLMsg(pts, header);
-
-        // Adiciona aos arrays da mensagem
         custom_msg.labels.push_back(label_str);
         custom_msg.clouds.push_back(obj_cloud);
     }
 
-    // Publica se houver objetos
     if (!custom_msg.labels.empty())
     {
         pub_custom_msg_->publish(custom_msg);
@@ -372,7 +391,6 @@ void CombinedSemanticPCL::publishSemanticPCL(
     auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
     msg->header = header; 
 
-    // Campos: x, y, z, semantic_id
     msg->fields.resize(4);
     msg->fields[0].name = "x"; msg->fields[0].offset = 0; msg->fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32; msg->fields[0].count = 1;
     msg->fields[1].name = "y"; msg->fields[1].offset = 4; msg->fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32; msg->fields[1].count = 1;
@@ -407,7 +425,6 @@ void CombinedSemanticPCL::publishColoredPCL(
     auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
     msg->header = header; 
 
-    // Campos: x, y, z, rgb
     msg->fields.resize(4);
     msg->fields[0].name = "x"; msg->fields[0].offset = 0; msg->fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32; msg->fields[0].count = 1;
     msg->fields[1].name = "y"; msg->fields[1].offset = 4; msg->fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32; msg->fields[1].count = 1;
@@ -432,7 +449,6 @@ void CombinedSemanticPCL::publishColoredPCL(
         
         auto [r, g, b] = getColorForId(semantic_ids[i]);
         
-        // Empacota RGB para float (formato RViz)
         uint32_t rgb = (static_cast<uint32_t>(255) << 24) | 
                        (static_cast<uint32_t>(r) << 16) | 
                        (static_cast<uint32_t>(g) << 8) | 
