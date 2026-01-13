@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <sstream>
 #include <random>
+#include <cctype>
 
 // Includes de Transformação e Geometria
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -18,7 +19,6 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
     : Node("combined_semantic_pcl", options),
       frame_count_(0)
 {
-    
     this->declare_parameter<std::string>("target_frame", "world"); 
     this->declare_parameter<std::string>("topic_segmentation", "/semantic_segmentation");
     this->declare_parameter<std::string>("topic_pointcloud", "/depth_pcl");
@@ -29,7 +29,6 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
     
     this->declare_parameter<int>("downsample_step", 4); 
 
-    
     target_frame_ = this->get_parameter("target_frame").as_string();
     topic_segmentation_ = this->get_parameter("topic_segmentation").as_string();
     topic_pointcloud_ = this->get_parameter("topic_pointcloud").as_string();
@@ -41,14 +40,12 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
     downsample_step_ = this->get_parameter("downsample_step").as_int();
     if (downsample_step_ < 1) downsample_step_ = 1;
 
-    RCLCPP_INFO(this->get_logger(), "=== SEMANTIC PCL NODE (SMART SYNC) ===");
+    RCLCPP_INFO(this->get_logger(), "=== SEMANTIC PCL NODE (REGEX HYBRID) ===");
     RCLCPP_INFO(this->get_logger(), "Target Frame: %s", target_frame_.c_str());
 
-  
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-   
     labels_sub_ = this->create_subscription<std_msgs::msg::String>(
         topic_labels_,
         10,
@@ -57,20 +54,17 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
 
     auto sensor_qos = rclcpp::SensorDataQoS(); 
     auto rmw_qos = sensor_qos.get_rmw_qos_profile();
-
     
     seg_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
         this, topic_segmentation_, rmw_qos);
     
     pcl_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(
         this, topic_pointcloud_, rmw_qos);
-
     
     sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
         SyncPolicy(10), *seg_sub_, *pcl_sub_);
     
     sync_->registerCallback(std::bind(&CombinedSemanticPCL::syncedCallback, this, std::placeholders::_1, std::placeholders::_2));
-
     
     pub_semantic_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_semantic_, 10);
     pub_colored_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_colored_, 10);
@@ -82,69 +76,87 @@ void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr 
     parseLabelsJson(msg->data);
 }
 
+// -----------------------------------------------------------------------------
+// LÓGICA DE PARSING COM REGEX (Baseada no TranslatorNode + Fix para Strings)
+// -----------------------------------------------------------------------------
+
+std::string CombinedSemanticPCL::extractCleanLabel(std::string raw_label)
+{
+    // Remove aspas se sobrarem
+    raw_label.erase(std::remove(raw_label.begin(), raw_label.end(), '\"'), raw_label.end());
+
+    // Se vier "box:redbox_10", pega apenas "redbox_10"
+    // Se vier "class:BACKGROUND", pega "BACKGROUND"
+    size_t colon_pos = raw_label.find(':');
+    if (colon_pos != std::string::npos && colon_pos < raw_label.size() - 1)
+    {
+        return raw_label.substr(colon_pos + 1);
+    }
+    return raw_label;
+}
+
 void CombinedSemanticPCL::parseLabelsJson(const std::string & json_str)
 {
-    id_to_label_.clear();
-    size_t pos = 0;
-    while ((pos = json_str.find("\"", pos)) != std::string::npos)
+    if (json_str.empty()) return;
+
+    // Regex 1: Formato Objeto (O que seu TranslatorNode usa)
+    // Exemplo: "2": { "box": "redbox_10" }
+    // Captura 1: ID, Captura 3: Valor
+    std::regex object_regex("\"([0-9]+)\"\\s*:\\s*\\{[^}]*\"([A-Za-z0-9_]+)\"\\s*:\\s*\"([A-Za-z0-9_:.\\-]+)\"");
+
+    // Regex 2: Formato String Direta (O que apareceu no seu log de erro)
+    // Exemplo: "2": "box:redbox_10"
+    // Captura 1: ID, Captura 2: Valor
+    std::regex string_regex("\"([0-9]+)\"\\s*:\\s*\"([A-Za-z0-9_:.\\-]+)\"");
+
+    std::smatch match;
+    std::string::const_iterator search_start(json_str.cbegin());
+
+    // --- PASSADA 1: Busca Objetos JSON (Prioridade) ---
+    while (std::regex_search(search_start, json_str.cend(), match, object_regex))
     {
-        size_t id_start = pos + 1;
-        size_t id_end = json_str.find("\"", id_start);
+        try {
+            int32_t id = std::stoi(match[1].str());
+            std::string val = match[3].str();
+            
+            // Limpa o label (remove box:, class:, etc)
+            id_to_label_[id] = extractCleanLabel(val);
+        } catch (...) {}
 
-        if (id_end == std::string::npos) break;
-
-        std::string id_str = json_str.substr(id_start, id_end - id_start);
-
-        bool is_number = !id_str.empty() && std::all_of(id_str.begin(), id_str.end(), ::isdigit);
-
-        if (is_number)
-        {
-            int32_t sem_id = std::stoi(id_str);
-            size_t brace_pos = json_str.find("{", id_end);
-
-            if (brace_pos != std::string::npos) 
-            {
-                size_t label_key_start = json_str.find("\"", brace_pos + 1);
-
-                if (label_key_start != std::string::npos) 
-                {
-                    label_key_start++;
-                    size_t label_key_end = json_str.find("\"", label_key_start);
-
-                    if (label_key_end != std::string::npos) 
-                    {
-                        size_t colon_pos = json_str.find(":", label_key_end);
-
-                        if (colon_pos != std::string::npos) 
-                        {
-                            size_t val_start = json_str.find("\"", colon_pos);
-
-                            if (val_start != std::string::npos) 
-                            {
-                                val_start++;
-                                size_t val_end = json_str.find("\"", val_start);
-
-                                if (val_end != std::string::npos) 
-                                {
-                                    std::string label = json_str.substr(val_start, val_end - val_start);
-                                    id_to_label_[sem_id] = label;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        pos = id_end + 1;
+        search_start = match.suffix().first;
     }
+
+    // --- PASSADA 2: Busca Strings Diretas (Fallback/Complemento) ---
+    search_start = json_str.cbegin();
+    while (std::regex_search(search_start, json_str.cend(), match, string_regex))
+    {
+        try {
+            int32_t id = std::stoi(match[1].str());
+            // Se já achamos via objeto, preferimos o objeto (geralmente mais detalhado)
+            // mas se o objeto não existia, pegamos daqui.
+            if (id_to_label_.find(id) == id_to_label_.end()) {
+                std::string val = match[2].str();
+                id_to_label_[id] = extractCleanLabel(val);
+            }
+        } catch (...) {}
+        
+        search_start = match.suffix().first;
+    }
+
+    // LOG DEBUG (Opcional: Descomente se precisar ver no terminal)
+    // if (!id_to_label_.empty()) {
+    //     RCLCPP_INFO(this->get_logger(), "Labels parseados: %zu", id_to_label_.size());
+    // }
 }
+
+// -----------------------------------------------------------------------------
 
 std::tuple<uint8_t, uint8_t, uint8_t> CombinedSemanticPCL::getColorForId(int32_t obj_id)
 {
     if (obj_id == 0) return std::make_tuple(50, 50, 50); 
     auto it = color_map_.find(obj_id);
     if (it != color_map_.end()) return it->second;
+    
     std::mt19937 gen(obj_id * 137);
     std::uniform_int_distribution<> dis(60, 255);
     uint8_t r = static_cast<uint8_t>(dis(gen));
@@ -172,6 +184,7 @@ sensor_msgs::msg::PointCloud2 CombinedSemanticPCL::createPCLMsg(
     msg.point_step = 12; 
     msg.row_step = msg.point_step * msg.width;
     msg.data.resize(msg.row_step);
+    
     uint8_t* ptr = msg.data.data();
     for(const auto& p : points) {
         std::memcpy(ptr, &p[0], 12);
@@ -189,71 +202,33 @@ void CombinedSemanticPCL::syncedCallback(
 
     geometry_msgs::msg::TransformStamped t_stamped;
     bool has_transform = false;
-
     rclcpp::Time sensor_time = pcl_msg->header.stamp;
 
-    
     try {
         t_stamped = tf_buffer_->lookupTransform(
-            target_frame_,
-            pcl_msg->header.frame_id,
-            sensor_time,
-            rclcpp::Duration::from_seconds(0.1) 
-        );
+            target_frame_, pcl_msg->header.frame_id, sensor_time,
+            rclcpp::Duration::from_seconds(0.1));
         has_transform = true;
-    } 
-    catch (const tf2::TransformException & ex) 
-    {
-        return;
-    }
+    } catch (const tf2::TransformException & ex) {}
 
-   
     if (!has_transform)
     {
         try {
             t_stamped = tf_buffer_->lookupTransform(
-                target_frame_,
-                pcl_msg->header.frame_id,
-                tf2::TimePointZero 
-            );
-
-            
-            rclcpp::Time tf_time = t_stamped.header.stamp;
-            double time_diff = std::abs((sensor_time - tf_time).seconds());
-
-            
-            if (time_diff > 0.15) 
-            {
-                if (frame_count_ % 30 == 0) {
-                    RCLCPP_WARN(this->get_logger(), 
-                        "TF Lag alto (%.3fs). Descartando frame para evitar ghosting.", time_diff);
-                }
-                return; 
-            }
-            
-            
+                target_frame_, pcl_msg->header.frame_id, tf2::TimePointZero);
             has_transform = true;
-            if (frame_count_ % 60 == 0) {
-                 RCLCPP_INFO(this->get_logger(), "Usando TF aproximado (Diff: %.3fs)", time_diff);
-            }
-
-        } catch (const tf2::TransformException & ex) 
-        {
+        } catch (const tf2::TransformException & ex) {
             if (frame_count_ % 60 == 0) 
-            {
-                RCLCPP_ERROR(this->get_logger(), "TF Crítico: Não foi possível obter transform: %s", ex.what());
-            }
+                RCLCPP_ERROR(this->get_logger(), "TF Error: %s", ex.what());
             return;
         }
     }
 
-    
     try
     {
         tf2::Transform transform;
         tf2::fromMsg(t_stamped.transform, transform);
 
-       
         uint32_t img_height = seg_msg->height;
         uint32_t img_width = seg_msg->width;
         size_t total_pixels = static_cast<size_t>(img_height) * img_width;
@@ -263,21 +238,16 @@ void CombinedSemanticPCL::syncedCallback(
         uint32_t pcl_width = pcl_msg->width;
         size_t num_points = static_cast<size_t>(pcl_height) * pcl_width;
 
-        
         int x_off = -1, y_off = -1, z_off = -1;
-
-        for (const auto & f : pcl_msg->fields) 
-        {
+        for (const auto & f : pcl_msg->fields) {
             if (f.name == "x") x_off = f.offset;
             else if (f.name == "y") y_off = f.offset;
             else if (f.name == "z") z_off = f.offset;
         }
-
         if (x_off < 0 || y_off < 0 || z_off < 0) return;
 
         std::vector<std::array<float, 3>> world_points;
         std::vector<int32_t> valid_ids;
-        
         size_t estimated = (num_points / downsample_step_) + 1;
         world_points.reserve(estimated);
         valid_ids.reserve(estimated);
@@ -288,55 +258,40 @@ void CombinedSemanticPCL::syncedCallback(
         for (size_t i = 0; i < num_points; i += downsample_step_)
         {
             const uint8_t * ptr = pcl_data + (i * point_step);
-            
             float x_cam, y_cam, z_cam;
             std::memcpy(&x_cam, ptr + x_off, sizeof(float));
             std::memcpy(&y_cam, ptr + y_off, sizeof(float));
             std::memcpy(&z_cam, ptr + z_off, sizeof(float));
 
             if (!std::isfinite(x_cam) || !std::isfinite(y_cam) || !std::isfinite(z_cam)) continue;
-            
-            
             if (z_cam < 0.1f) continue; 
 
             tf2::Vector3 point_camera(x_cam, y_cam, z_cam);
             tf2::Vector3 point_world = transform * point_camera;
 
             int32_t sem_id = 0;
-            if (num_points == total_pixels) 
-            {
+            if (num_points == total_pixels) {
                 sem_id = seg_data[i];
-            }
-            else 
-            {
+            } else {
                 size_t idx = static_cast<size_t>((double)i * total_pixels / num_points);
                 if (idx >= total_pixels) idx = total_pixels - 1;
                 sem_id = seg_data[idx];
             }
 
             world_points.push_back({
-                (float)point_world.x(), 
-                (float)point_world.y(), 
-                (float)point_world.z()
+                (float)point_world.x(), (float)point_world.y(), (float)point_world.z()
             });
             valid_ids.push_back(sem_id);
         }
 
         if (world_points.empty()) return;
 
-        
         std_msgs::msg::Header output_header = pcl_msg->header;
         output_header.frame_id = target_frame_; 
         
         publishSemanticPCL(world_points, valid_ids, output_header);
         publishColoredPCL(world_points, valid_ids, output_header);
         publishSplitSemanticPCL(world_points, valid_ids, output_header);
-
-        if (frame_count_ % 30 == 0) 
-        {
-            
-            RCLCPP_INFO(this->get_logger(), "Frame publicado (%zu pontos)", world_points.size());
-        }
     }
     catch (const std::exception & e)
     {
@@ -365,11 +320,14 @@ void CombinedSemanticPCL::publishSplitSemanticPCL(
     {
         if (pts.size() < 10) continue;
 
-        std::string label_str = "unknown_" + std::to_string(id);
-
-        if (id_to_label_.count(id))
+        std::string label_str;
+        if (id_to_label_.count(id)) 
         {
             label_str = id_to_label_.at(id);
+        }
+        else
+        {
+            continue;
         }
 
         sensor_msgs::msg::PointCloud2 obj_cloud = createPCLMsg(pts, header);
@@ -377,8 +335,7 @@ void CombinedSemanticPCL::publishSplitSemanticPCL(
         custom_msg.clouds.push_back(obj_cloud);
     }
 
-    if (!custom_msg.labels.empty())
-    {
+    if (!custom_msg.labels.empty()) {
         pub_custom_msg_->publish(custom_msg);
     }
 }

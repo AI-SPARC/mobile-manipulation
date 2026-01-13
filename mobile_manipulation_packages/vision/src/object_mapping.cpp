@@ -4,12 +4,12 @@
 namespace vision {
 
 ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
- : Node("generate_scan_poses", options),
+ : Node("object_mapping", options),
    is_robot_stopped_(false)
 {
    
     this->declare_parameter<double>("velocity_threshold", 0.2); 
-    this->declare_parameter<double>("settlement_duration", 1.5); 
+    this->declare_parameter<double>("settlement_duration", 0.4); 
     this->declare_parameter<double>("voxel_leaf_size", 0.005);
 
     
@@ -29,14 +29,11 @@ ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
 
     
     sub_semantic_pcl_ = this->create_subscription<mobile_manipulation_interfaces::msg::SemanticPcl>(
-        "/semantic_pcl_array", 
-        10, 
-        std::bind(&ObjectMapping::semanticPclCallback, this, std::placeholders::_1)
-    );
+        "/semantic_pcl_array", 10, std::bind(&ObjectMapping::semanticPclCallback, this, std::placeholders::_1));
 
     
     pub_accumulated_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-        "/accumulated_object_cloud", 10);
+        "/mapped_object", 10);
 
     RCLCPP_INFO(this->get_logger(), "ObjectMapping iniciado. Aguardando estabilização (< %.2f rad/s por %.2fs)", 
         velocity_threshold_, settlement_duration_);
@@ -86,7 +83,6 @@ void ObjectMapping::ObjectToMap(std::string id)
 
 void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr msg) 
 {
-    
     if (!is_robot_stopped_) 
     {
         return;
@@ -102,7 +98,6 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         }
     }
     
-
     bool map_updated = false;
     
     pcl::VoxelGrid<pcl::PointXYZ> sor;
@@ -141,22 +136,20 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         map_updated = true;
     }
 
-    if (map_updated) 
-    {
-        publishAccumulatedCloud();
-    }
+    std::cout << "MERDA" << std::endl;
+   
+    publishAccumulatedCloud();
+    
 }
 
 void ObjectMapping::publishAccumulatedCloud()
 {
-    // Cria uma nuvem colorida para visualização unificada no Rviz
     pcl::PointCloud<pcl::PointXYZRGB> display_cloud;
 
     for (const auto& [label, cloud_ptr] : object_points_) 
     {
         if (cloud_ptr->empty()) continue;
 
-        // Gera cor determinística baseada na string da label (Hash)
         std::size_t hash = std::hash<std::string>{}(label);
         uint8_t r = (hash >> 16) & 0xFF;
         uint8_t g = (hash >> 8)  & 0xFF;
@@ -180,7 +173,6 @@ void ObjectMapping::publishAccumulatedCloud()
     sensor_msgs::msg::PointCloud2 output_msg;
     pcl::toROSMsg(display_cloud, output_msg);
 
-    // Usa frame world (assumindo que o combined_semantic_pcl já manda em world)
     output_msg.header.frame_id = "world"; 
     output_msg.header.stamp = this->now();
 

@@ -48,7 +48,7 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
 {
     this->declare_parameter<std::string>("target_frame", "world");
     this->declare_parameter<std::string>("odom_topic", "/odom");
-    this->declare_parameter<double>("ray_length", 0.35); 
+    this->declare_parameter<double>("ray_length", 0.30); 
     this->declare_parameter<double>("grid_resolution", 0.04); 
     this->declare_parameter<double>("voxel_map_resolution", 0.02); 
     this->declare_parameter<double>("ray_step_size", 0.01);       
@@ -268,7 +268,8 @@ void GenerateScanPoses::detectionCallback(const vision_msgs::msg::Detection3DArr
     
     std::lock_guard<std::mutex> anim_lock(anim_mutex_);
     std::string label = target_object_id_.empty() && !msg->detections.empty() ? msg->detections[0].results[0].hypothesis.class_id : target_object_id_;
-    if(!label.empty()) poses_to_animate_ = getSortedScanPoses(label);
+    
+    // if(!label.empty()) poses_to_animate_ = getSortedScanPoses(label);
 }
 
 void GenerateScanPoses::animationTimerCallback() 
