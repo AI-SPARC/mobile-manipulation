@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <msgpack.hpp>
+#include <pcl_conversions/pcl_conversions.h> 
 
 #include <chrono>
 #include <cstring>
@@ -32,10 +33,60 @@ BridgeToInference::BridgeToInference(const rclcpp::NodeOptions & options)
 
   pub_grasps_ = create_publisher<geometry_msgs::msg::PoseArray>("/grasp_poses", 10);
 
+  sub_cloud_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+    "/mapped_object",
+    10,
+    std::bind(&BridgeToInference::cloud_callback, this, std::placeholders::_1));
+
   RCLCPP_INFO(get_logger(), "BRIDGE TO INFERENCE (C++)");
   RCLCPP_INFO(get_logger(), "Server: %s:%d", server_host_.c_str(), server_port_);
   RCLCPP_INFO(get_logger(), "Score threshold: %.2f", score_threshold_);
-  RCLCPP_INFO(get_logger(), "Max grasps: %d", max_grasps_);
+  RCLCPP_INFO(get_logger(), "Listening on topic: mapped_object");
+}
+
+std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_latest_grasps()
+{
+  std::lock_guard<std::mutex> lock(grasp_mutex_);
+  return latest_grasps_;
+}
+
+void BridgeToInference::cloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+{
+  RCLCPP_INFO(get_logger(), "==================================================");
+  RCLCPP_INFO(get_logger(), "Recebido PointCloud2. Convertendo...");
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::fromROSMsg(*msg, *cloud);
+
+  if (cloud->empty())
+  {
+    RCLCPP_WARN(get_logger(), "Point cloud vazia recebida no callback!");
+    
+    {
+      std::lock_guard<std::mutex> lock(grasp_mutex_);
+      latest_grasps_.clear();
+    }
+    return;
+  }
+
+  
+  std::vector<geometry_msgs::msg::Pose> new_grasps = get_grasps_from_server(cloud);
+
+  
+  {
+    std::lock_guard<std::mutex> lock(grasp_mutex_);
+    latest_grasps_ = new_grasps;
+  }
+
+  
+  if (!new_grasps.empty())
+  {
+    publish_grasps(new_grasps);
+  }
+  else
+  {
+    RCLCPP_WARN(get_logger(), "Nenhum grasp retornado pelo servidor.");
+  }
 }
 
 geometry_msgs::msg::Pose BridgeToInference::matrix_to_pose(const Eigen::Matrix4f & matrix)
@@ -56,31 +107,6 @@ geometry_msgs::msg::Pose BridgeToInference::matrix_to_pose(const Eigen::Matrix4f
   pose.orientation.w = q.w();
 
   return pose;
-}
-
-std::vector<geometry_msgs::msg::Pose> BridgeToInference::process_point_cloud(
-  const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud)
-{
-  RCLCPP_INFO(get_logger(), "==================================================");
-  RCLCPP_INFO(get_logger(), "Processando %zu pontos", cloud->size());
-
-  if (cloud->empty())
-  {
-    RCLCPP_WARN(get_logger(), "Point cloud vazia!");
-    return {};
-  }
-
-  std::vector<geometry_msgs::msg::Pose> grasps = get_grasps_from_server(cloud);
-
-  if (grasps.empty())
-  {
-    RCLCPP_WARN(get_logger(), "Nenhum grasp encontrado");
-    return {};
-  }
-
-  publish_grasps(grasps);
-
-  return grasps;
 }
 
 std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
@@ -152,7 +178,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
     return {};
   }
 
-  
+ 
   size_t total_sent = 0;
   while (total_sent < sbuf.size())
   {
@@ -170,7 +196,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
   uint64_t resp_size_be;
   if (recv(sock, &resp_size_be, 8, MSG_WAITALL) != 8)
   {
-    RCLCPP_ERROR(get_logger(), "Servidor fechou conexão");
+    RCLCPP_ERROR(get_logger(), "Servidor fechou conexão ou erro no recv header");
     close(sock);
     return {};
   }
@@ -184,7 +210,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
     ssize_t received = recv(sock, resp_data.data() + total_recv, resp_size - total_recv, 0);
     if (received <= 0)
     {
-      RCLCPP_ERROR(get_logger(), "Falha ao receber dados");
+      RCLCPP_ERROR(get_logger(), "Falha ao receber dados (payload)");
       close(sock);
       return {};
     }
@@ -229,7 +255,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
 
       size_t num_grasps = grasps_flat.size() / 16;
 
-      // Cria pares (score, pose) para ordenar
+      
       std::vector<std::pair<float, geometry_msgs::msg::Pose>> score_pose_pairs;
       score_pose_pairs.reserve(num_grasps);
 
@@ -249,7 +275,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
           }
         }
 
-        // Adiciona centróide à posição
+        
         mat(0, 3) += centroid.x();
         mat(1, 3) += centroid.y();
         mat(2, 3) += centroid.z();
@@ -257,11 +283,11 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
         score_pose_pairs.emplace_back(scores[i], matrix_to_pose(mat));
       }
 
-      // Ordena por score (maior primeiro)
+      
       std::sort(score_pose_pairs.begin(), score_pose_pairs.end(),
         [](const auto & a, const auto & b) { return a.first > b.first; });
 
-      // Limita quantidade
+      
       size_t count = std::min(score_pose_pairs.size(), static_cast<size_t>(max_grasps_));
 
       grasps.reserve(count);

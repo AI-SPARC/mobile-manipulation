@@ -13,7 +13,8 @@ find_package(geometry_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(msgpack REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common)
-
+find_package(sensor_msgs REQUIRED)
+find_package(pcl_conversions REQUIRED)
 # Library
 add_library(${PROJECT_NAME} SHARED
   src/bridge_to_inference.cpp
@@ -33,6 +34,8 @@ ament_target_dependencies(${PROJECT_NAME}
   rclcpp
   rclcpp_components
   geometry_msgs
+  sensor_msgs
+  pcl_conversions
 )
 
 target_link_libraries(${PROJECT_NAME}

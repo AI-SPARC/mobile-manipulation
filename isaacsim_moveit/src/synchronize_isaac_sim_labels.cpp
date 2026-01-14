@@ -49,7 +49,7 @@ private:
     {
         if (label_map_.empty())
         {
-            RCLCPP_WARN(this->get_logger(), "Mapa de labels vazio. Ignorando detecções.");
+            // RCLCPP_WARN(this->get_logger(), "Mapa de labels vazio. Ignorando detecções.");
             return;
         }
 
