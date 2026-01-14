@@ -104,7 +104,7 @@ std::vector<TargetVoxel> GenerateScanPoses::generateTargetVoxels(const vision_ms
 
     auto fill_face = [&](tf2::Vector3 normal, double offset, double len_u, double len_v) {
         tf2::Vector3 world_normal = rot * normal;
-        // Otimização: Ignora face inferior (Z < -0.5 assumindo normal unitaria apontando pra baixo)
+        
         if (world_normal.z() < -0.5) return; 
 
         for(double u = -len_u/2.0; u <= len_u/2.0; u+=res) {
@@ -125,14 +125,12 @@ std::vector<TargetVoxel> GenerateScanPoses::generateTargetVoxels(const vision_ms
     return targets;
 }
 
-// --------------------------------------------------------
-// FUNÇÃO DE VISIBILIDADE ATUALIZADA E CORRIGIDA
-// --------------------------------------------------------
+
 bool GenerateScanPoses::isVoxelVisible(const geometry_msgs::msg::Pose& pose, const TargetVoxel& voxel) {
     tf2::Transform tf_cam; 
     tf2::fromMsg(pose, tf_cam);
     
-    // Transforma o ponto do mundo para o referencial da câmera
+    
     tf2::Vector3 pt_cam = tf_cam.inverse() * voxel.position;
     
     double depth = pt_cam.x();
@@ -244,19 +242,39 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getSortedScanPoses(cons
     std::vector<int> face_order;
     for(auto const& [fid, _] : face_map) face_order.push_back(fid);
     
-    std::sort(face_order.begin(), face_order.end(), [&](int a, int b){
+    // Ordena as faces pela distância até o robô
+    std::sort(face_order.begin(), face_order.end(), [&](int a, int b)
+    {
         return (face_map[a][0].position - robot_pos).length() < (face_map[b][0].position - robot_pos).length();
     });
 
-    for(int fid : face_order) {
+    // Ordena os pontos dentro de cada face e cria as poses
+    for(int fid : face_order) 
+    {
         auto& pts = face_map[fid];
-        std::sort(pts.begin(), pts.end(), [&](const ScanPoint& a, const ScanPoint& b){
+        std::sort(pts.begin(), pts.end(), [&](const ScanPoint& a, const ScanPoint& b)
+        {
             return (a.position - robot_pos).length2() < (b.position - robot_pos).length2();
         });
-        for(const auto& p : pts) {
+        
+        for(const auto& p : pts) 
+        {
             sorted_candidates.push_back(createPoseLookingAt(p.position, p.target_center));
         }
     }
+
+    return sorted_candidates;
+}
+
+std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getOptimizedScanPoses(
+    const std::vector<geometry_msgs::msg::Pose>& sorted_candidates, 
+    const std::string& label)
+{
+    std::lock_guard<std::mutex> lock(objects_mutex_);
+    auto it = detected_objects_.find(label);
+    if (it == detected_objects_.end()) return {};
+
+    const auto& obj_data = it->second;
 
     std::vector<TargetVoxel> targets = generateTargetVoxels(obj_data.detection);
     std::vector<geometry_msgs::msg::Pose> optimized_poses = filterPosesByCoverage(sorted_candidates, targets);
