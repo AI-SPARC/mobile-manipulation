@@ -54,7 +54,7 @@ public:
     ~GenerateScanPoses() = default;
 
     
-    std::vector<geometry_msgs::msg::Pose> getSortedScanPoses(const std::string& label);
+    std::optional<std::pair<std::vector<geometry_msgs::msg::Pose>, tf2::Vector3>> getSortedScanPoses(const std::string& label);
     std::vector<geometry_msgs::msg::Pose> getOptimizedScanPoses(
         const std::vector<geometry_msgs::msg::Pose>& sorted_candidates, 
         const std::string& label);

@@ -64,6 +64,8 @@ private:
     std::optional<std::tuple<float, float, float>> selected_ik_position;
     std::string last_authorized_collision;
     geometry_msgs::msg::Pose last_target;
+
+    double max_reach_3d;
 };
 
 } // namespace manipulation

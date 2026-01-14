@@ -17,14 +17,17 @@ IKValidator::IKValidator(const rclcpp::NodeOptions & options)
 : Node("ik_validator_node", options)
 {
     this->declare_parameter<std::string>("group_name", "panda_arm");
+    this->declare_parameter<double>("max_reach_3d", 0.9);
+
     group_name_ = this->get_parameter("group_name").as_string();
+    max_reach_3d = this->get_parameter("max_reach_3d").as_double();
 
     init_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(500),
         std::bind(&IKValidator::delayed_init, this)
     );
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     rclcpp::QoS qos(10);
     qos.reliable();
@@ -247,7 +250,7 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
     const std::vector<geometry_msgs::msg::Pose>& target_poses,
     bool seed_mode)
 {
-    
+
     int attempts = 0;
     while (!initialized_.load()) {
         if (attempts++ > 50) return {};
@@ -270,28 +273,12 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
     
     collision_detection::AllowedCollisionMatrix& acm = temp_scene->getAllowedCollisionMatrixNonConst();
     
-    std::vector<std::string> gripper_links = {"panda_link8"}; 
-    if (robot_model_->hasJointModelGroup("hand")) 
-    {
-        const auto& links = robot_model_->getJointModelGroup("hand")->getLinkModelNames();
-        gripper_links.insert(gripper_links.end(), links.begin(), links.end());
-    }
 
-    // if (!authorized_collision.empty()) 
-    // {
-    //     for (const auto& link : gripper_links) 
-    //     {
-    //         if (robot_model_->hasLinkModel(link)) 
-    //         {
-    //             acm.setEntry(link, authorized_collision, true);
-    //         }
-    //     }
-    // }
-    
     
     moveit::core::RobotState& local_state = temp_scene->getCurrentStateNonConst();
     const moveit::core::JointModelGroup* arm_jmg = local_state.getJointModelGroup(group_name_);
 
+    
     moveit::core::GroupStateValidityCallbackFn validity_callback = 
         [&temp_scene, &acm](moveit::core::RobotState* state, const moveit::core::JointModelGroup* group, const double* values) -> bool
         {
@@ -312,22 +299,37 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
     float bz = std::get<2>(robot_position);
 
     std::vector<geometry_msgs::msg::Pose> valid_poses;
+    valid_poses.reserve(target_poses.size()); 
     int valid_count = 0;
+
+    
+    double max_reach_sq = max_reach_3d * max_reach_3d;
+    double min_reach_sq = 0.04; 
 
     
     for (const auto& target_pose : target_poses)
     {
         double dx = target_pose.position.x - bx;
         double dy = target_pose.position.y - by;
-        double yaw_to_target = std::atan2(dy, dx);
+        double dz = target_pose.position.z - bz;
 
+        
+        double dist_sq = (dx*dx) + (dy*dy) + (dz*dz);
+
+        
+        if (dist_sq > max_reach_sq) 
+        {
+            continue; 
+        }
+
+        
+        double yaw_to_target = std::atan2(dy, dx);
         
         if (!virtual_joint_name_.empty()) {
             const auto* vjoint = robot_model_->getJointModel(virtual_joint_name_);
             
             if (vjoint->getType() == moveit::core::JointModel::FLOATING) 
             {
-                
                 Eigen::Quaterniond q_base(Eigen::AngleAxisd(yaw_to_target, Eigen::Vector3d::UnitZ()));
                 std::vector<double> float_vals = { (double)bx, (double)by, (double)bz, q_base.x(), q_base.y(), q_base.z(), q_base.w() };
                 local_state.setJointPositions(virtual_joint_name_, float_vals);
@@ -338,17 +340,16 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
             }
         }
         
-        
         local_state.update(); 
 
-
+        
         if (!seed_mode) 
         {
             local_state.setToDefaultValues(arm_jmg, "ready");
         }
 
-        
-        bool found_ik = local_state.setFromIK(arm_jmg, target_pose, 0.05, validity_callback);
+     
+        bool found_ik = local_state.setFromIK(arm_jmg, target_pose, 0.005, validity_callback);
 
         if (found_ik)
         {

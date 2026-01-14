@@ -1,7 +1,7 @@
 import os
 import xml.etree.ElementTree as ET
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -390,35 +390,50 @@ def generate_launch_description():
         ],
     )
     
-    final_launch_list = [
+    # --- LISTAS DE INICIALIZAÇÃO ---
+
+    # 1. Nós que iniciam imediatamente (Infraestrutura MoveIt / ROS2 Control)
+    immediate_nodes = [
         ros2_control_hardware_type,
-        # rviz_node,
         use_sim_time,
         robot_state_publisher,
         move_group_node,
         ros2_control_node,
         joint_state_broadcaster_spawner,
         panda_arm_controller_spawner,
+        # rviz_node, 
+    ]
+
+    # 2. Nós que vão aguardar 3 segundos (Aplicação / Lógica)
+    delayed_nodes = [
         combined_semantic_pcl,
         server_node,           
         synchronize_isaac,
     ]
 
-
+    # Adiciona os nós condicionais à lista de atrasados
     if 'ComputePath' in bt_actions or 'ComputePathToPose' in bt_actions:
         print(f"[LAUNCH] >> Navegação detectada na BT. Algoritmo escolhido: {planner_choice}")
-        
         if planner_choice == 'a_star':
-            final_launch_list.append(a_star)
-        final_launch_list.append(obstacle_graph_with_occupancy_grid)
+            delayed_nodes.append(a_star)
+        delayed_nodes.append(obstacle_graph_with_occupancy_grid)
 
     if 'PickObject' in bt_actions or 'PlaceObject' in bt_actions or 'DetectObject' in bt_actions:
         print("[LAUNCH] >> Manipulação (Pick/Place/Detect) detectada na BT.")
-        final_launch_list.append(manipulation)
-        final_launch_list.append(add_collision)
+        delayed_nodes.append(manipulation)
+        delayed_nodes.append(add_collision)
 
     if 'NavigateTo' in bt_actions or 'FollowPath' in bt_actions:
         print("[LAUNCH] >> Controlador de caminho (NavigateTo) detectado.")
-        final_launch_list.append(controller)
+        delayed_nodes.append(controller)
 
-    return LaunchDescription(final_launch_list)
+    # 3. Cria a LaunchDescription combinando os dois grupos com um Timer
+    return LaunchDescription(
+        immediate_nodes + 
+        [
+            TimerAction(
+                period=3.0,
+                actions=delayed_nodes
+            )
+        ]
+    )

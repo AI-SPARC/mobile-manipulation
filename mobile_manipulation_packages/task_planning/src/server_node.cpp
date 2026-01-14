@@ -18,7 +18,7 @@
 #include <mutex>
 #include <map>
 #include <chrono>
-
+#include <optional>
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/xml_parsing.h>
 #include <behaviortree_cpp/loggers/groot2_publisher.h>
@@ -1024,8 +1024,48 @@ private:
                     if (current_pick_phase_ == GraspPhase::IDLE)
                     {
                        
+                        std::vector<geometry_msgs::msg::Pose> poses = {};
                         
-                        std::vector<geometry_msgs::msg::Pose> poses = this->scan_object_node_->getSortedScanPoses(cached_object_.id);
+                        auto scan_data_opt = this->scan_object_node_->getSortedScanPoses(cached_object_.id);
+
+                        if (scan_data_opt.has_value())
+                        {
+                            
+                            auto [raw_poses, robot_pos_tf] = scan_data_opt.value();
+
+                            // 3. Converte tf2::Vector3 para std::tuple<float, float, float>
+                            std::tuple<float, float, float> robot_pos_tuple = std::make_tuple(
+                                (float)robot_pos_tf.x(),
+                                (float)robot_pos_tf.y(),
+                                (float)robot_pos_tf.z()
+                            );
+
+                            // 4. Chama o validador de IK
+                            // Nota: 'false' para seed_mode e passamos o ID do objeto para permitir colisão com ele
+                            std::vector<geometry_msgs::msg::Pose> valid_poses = this->ik_validator_node_->find_valid_targets_from_base(
+                                robot_pos_tuple,   // Posição da base convertida
+                                raw_poses,         // Vetor de alvos
+                                true); //seed mode
+
+                            if (!valid_poses.empty())
+                            {
+                            
+                                RCLCPP_INFO(this->get_logger(), "Encontradas %zu poses válidas.", valid_poses.size());
+                                
+                                poses = this->scan_object_node_->getOptimizedScanPoses(valid_poses, cached_object_.id);
+                            }
+                            else
+                            {
+                                RCLCPP_WARN(this->get_logger(), "Nenhuma pose de scan é alcançável (IK falhou ou colisão).");
+                                return BT::NodeStatus::FAILURE;
+                            }
+                        }
+                        else
+                        {
+                            RCLCPP_WARN(this->get_logger(), "Falha ao obter poses: Objeto não encontrado ou posição do robô desconhecida.");
+                            return BT::NodeStatus::FAILURE;
+                        }
+
                         this->object_mapping_node_->ObjectToMap(cached_object_.id);
 
                         if(!poses.empty())
@@ -1068,95 +1108,95 @@ private:
                         
                     }
                     
-                    if (current_pick_phase_ == GraspPhase::GRASPNET_SCAN)
-                    {
+                    // if (current_pick_phase_ == GraspPhase::GRASPNET_SCAN)
+                    // {
                         
-                        auto duration = rclcpp::Duration(2, 0); 
+                    //     auto duration = rclcpp::Duration(2, 0); 
 
-                        auto start_time = this->get_clock()->now();
+                    //     auto start_time = this->get_clock()->now();
 
-                        while ((this->get_clock()->now() - start_time) < duration) 
-                        {
-                            if (!rclcpp::ok()) 
-                            {
-                                break;
-                            }
+                    //     while ((this->get_clock()->now() - start_time) < duration) 
+                    //     {
+                    //         if (!rclcpp::ok()) 
+                    //         {
+                    //             break;
+                    //         }
 
-                            std::vector<geometry_msgs::msg::Pose> result;
+                    //         std::vector<geometry_msgs::msg::Pose> result;
                            
-                            result = this->bridge_to_inference_node_->get_latest_grasps();
+                    //         result = this->bridge_to_inference_node_->get_latest_grasps();
                             
                             
-                            if(result.empty())
-                            {
-                                this->grasp_context_.grasp_poses.clear();
-                                return BT::NodeStatus::RUNNING;
-                            }
-                            else
-                            {
-                                this->grasp_context_.grasp_poses = result;
-                                break;
-                            }
-                        }
+                    //         if(result.empty())
+                    //         {
+                    //             this->grasp_context_.grasp_poses.clear();
+                    //             return BT::NodeStatus::RUNNING;
+                    //         }
+                    //         else
+                    //         {
+                    //             this->grasp_context_.grasp_poses = result;
+                    //             break;
+                    //         }
+                    //     }
                         
 
-                        if (this->active_arm_handle_ != nullptr)
-                        {
-                            RCLCPP_INFO(this->get_logger(), "Enviando solicitação de CANCELAMENTO do goal...");
+                    //     if (this->active_arm_handle_ != nullptr)
+                    //     {
+                    //         RCLCPP_INFO(this->get_logger(), "Enviando solicitação de CANCELAMENTO do goal...");
                             
-                            current_pick_phase_ = GraspPhase::WAITING;
-                            auto future_cancel = this->client_ptr_->async_cancel_goal(this->active_arm_handle_);
+                    //         current_pick_phase_ = GraspPhase::WAITING;
+                    //         auto future_cancel = this->client_ptr_->async_cancel_goal(this->active_arm_handle_);
                             
-                            std::future_status status = future_cancel.wait_for(std::chrono::seconds(5));
+                    //         std::future_status status = future_cancel.wait_for(std::chrono::seconds(5));
 
-                            if (status == std::future_status::ready)
-                            {
-                                try
-                                {
-                                    auto cancel_response = future_cancel.get();
+                    //         if (status == std::future_status::ready)
+                    //         {
+                    //             try
+                    //             {
+                    //                 auto cancel_response = future_cancel.get();
                                     
                                     
-                                    if (cancel_response->return_code == action_msgs::srv::CancelGoal::Response::ERROR_NONE)
-                                    {
-                                        RCLCPP_INFO(this->get_logger(), "Cancelamento ACEITO pelo servidor.");
-                                        current_pick_phase_ = GraspPhase::SEND_GOAL;
-                                    }
-                                    else
-                                    {
-                                        RCLCPP_WARN(this->get_logger(), "Cancelamento REJEITADO/FALHOU. Código: %d", (int)cancel_response->return_code);
-                                    }
+                    //                 if (cancel_response->return_code == action_msgs::srv::CancelGoal::Response::ERROR_NONE)
+                    //                 {
+                    //                     RCLCPP_INFO(this->get_logger(), "Cancelamento ACEITO pelo servidor.");
+                    //                     current_pick_phase_ = GraspPhase::SEND_GOAL;
+                    //                 }
+                    //                 else
+                    //                 {
+                    //                     RCLCPP_WARN(this->get_logger(), "Cancelamento REJEITADO/FALHOU. Código: %d", (int)cancel_response->return_code);
+                    //                 }
                                     
-                                }
-                                catch (const std::exception &e)
-                                {
-                                    RCLCPP_ERROR(this->get_logger(), "Exceção ao ler resposta do cancelamento: %s", e.what());
-                                }
-                            }
-                            else
-                            {
-                                RCLCPP_ERROR(this->get_logger(), "Timeout: O servidor demorou mais de 5s para responder ao cancelamento.");
-                            }
-                        }
+                    //             }
+                    //             catch (const std::exception &e)
+                    //             {
+                    //                 RCLCPP_ERROR(this->get_logger(), "Exceção ao ler resposta do cancelamento: %s", e.what());
+                    //             }
+                    //         }
+                    //         else
+                    //         {
+                    //             RCLCPP_ERROR(this->get_logger(), "Timeout: O servidor demorou mais de 5s para responder ao cancelamento.");
+                    //         }
+                    //     }
                         
 
                         
-                        return BT::NodeStatus::RUNNING;
-                    }
+                    //     return BT::NodeStatus::RUNNING;
+                    // }
 
-                    if (current_pick_phase_ == GraspPhase::SEND_GOAL)
-                    {
+                    // if (current_pick_phase_ == GraspPhase::SEND_GOAL)
+                    // {
                         
-                        this->grasp_context_.graspnet_attempts += 1;
-                        if(!this->grasp_context_.grasp_poses.empty())
-                        {
+                    //     this->grasp_context_.graspnet_attempts += 1;
+                    //     if(!this->grasp_context_.grasp_poses.empty())
+                    //     {
                             
-                            this->send_goal(id.value(), this->grasp_context_.grasp_poses, true, false);
-                            current_pick_phase_ = GraspPhase::WAITING;
-                        }
+                    //         this->send_goal(id.value(), this->grasp_context_.grasp_poses, true, false);
+                    //         current_pick_phase_ = GraspPhase::WAITING;
+                    //     }
                         
                         
-                        return BT::NodeStatus::RUNNING;
-                    }
+                    //     return BT::NodeStatus::RUNNING;
+                    // }
                     
 
                    return BT::NodeStatus::RUNNING;
