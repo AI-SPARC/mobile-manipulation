@@ -242,6 +242,132 @@ std::optional<std::tuple<float, float, float>> IKValidator::find_best_base_posit
     return best_base;
 }
 
+std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
+    const std::tuple<float, float, float>& robot_position,
+    const std::vector<geometry_msgs::msg::Pose>& target_poses,
+    bool seed_mode)
+{
+    
+    int attempts = 0;
+    while (!initialized_.load()) {
+        if (attempts++ > 50) return {};
+        if (!rclcpp::ok()) return {};
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+    if (target_poses.empty()) {
+        return {};
+    }
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    
+    psm_->requestPlanningSceneState();
+    planning_scene_monitor::LockedPlanningSceneRO parent_scene(psm_);
+    if (!parent_scene) return {};
+    planning_scene::PlanningScenePtr temp_scene = parent_scene->diff();
+
+    
+    collision_detection::AllowedCollisionMatrix& acm = temp_scene->getAllowedCollisionMatrixNonConst();
+    
+    std::vector<std::string> gripper_links = {"panda_link8"}; 
+    if (robot_model_->hasJointModelGroup("hand")) 
+    {
+        const auto& links = robot_model_->getJointModelGroup("hand")->getLinkModelNames();
+        gripper_links.insert(gripper_links.end(), links.begin(), links.end());
+    }
+
+    // if (!authorized_collision.empty()) 
+    // {
+    //     for (const auto& link : gripper_links) 
+    //     {
+    //         if (robot_model_->hasLinkModel(link)) 
+    //         {
+    //             acm.setEntry(link, authorized_collision, true);
+    //         }
+    //     }
+    // }
+    
+    
+    moveit::core::RobotState& local_state = temp_scene->getCurrentStateNonConst();
+    const moveit::core::JointModelGroup* arm_jmg = local_state.getJointModelGroup(group_name_);
+
+    moveit::core::GroupStateValidityCallbackFn validity_callback = 
+        [&temp_scene, &acm](moveit::core::RobotState* state, const moveit::core::JointModelGroup* group, const double* values) -> bool
+        {
+            state->setJointGroupPositions(group, values);
+            collision_detection::CollisionRequest req;
+            req.group_name = group->getName();
+            req.verbose = false; 
+            req.contacts = false;
+            
+            collision_detection::CollisionResult res;
+            temp_scene->checkCollision(req, res, *state, acm);
+            return !res.collision;
+        };
+
+    
+    float bx = std::get<0>(robot_position);
+    float by = std::get<1>(robot_position);
+    float bz = std::get<2>(robot_position);
+
+    std::vector<geometry_msgs::msg::Pose> valid_poses;
+    int valid_count = 0;
+
+    
+    for (const auto& target_pose : target_poses)
+    {
+        double dx = target_pose.position.x - bx;
+        double dy = target_pose.position.y - by;
+        double yaw_to_target = std::atan2(dy, dx);
+
+        
+        if (!virtual_joint_name_.empty()) {
+            const auto* vjoint = robot_model_->getJointModel(virtual_joint_name_);
+            
+            if (vjoint->getType() == moveit::core::JointModel::FLOATING) 
+            {
+                
+                Eigen::Quaterniond q_base(Eigen::AngleAxisd(yaw_to_target, Eigen::Vector3d::UnitZ()));
+                std::vector<double> float_vals = { (double)bx, (double)by, (double)bz, q_base.x(), q_base.y(), q_base.z(), q_base.w() };
+                local_state.setJointPositions(virtual_joint_name_, float_vals);
+            } 
+            else 
+            { 
+                local_state.setJointPositions(virtual_joint_name_, {(double)bx, (double)by, yaw_to_target});
+            }
+        }
+        
+        
+        local_state.update(); 
+
+
+        if (!seed_mode) 
+        {
+            local_state.setToDefaultValues(arm_jmg, "ready");
+        }
+
+        
+        bool found_ik = local_state.setFromIK(arm_jmg, target_pose, 0.05, validity_callback);
+
+        if (found_ik)
+        {
+            valid_poses.push_back(target_pose);
+            valid_count++;
+        }
+    }
+
+    auto end_total = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
+    
+    RCLCPP_INFO(this->get_logger(), "IK Validator (Multi-Target): %d válidos de %zu testados (%.2f ms)", 
+        valid_count, target_poses.size(), ms);
+
+    return valid_poses;
+}
+
+
+
 bool IKValidator::is_still_reachable(const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node)
 {
     int attempts = 0;

@@ -37,6 +37,11 @@ public:
         std::string authorized_collision
     );
 
+    std::vector<geometry_msgs::msg::Pose> find_valid_targets_from_base(
+        const std::tuple<float, float, float>& robot_position,
+        const std::vector<geometry_msgs::msg::Pose>& target_poses,
+        bool seed_mode);
+
     bool is_still_reachable(const std::shared_ptr<navigation::SharedObstacleGraph>& graph_provider_node);
 
 private:
