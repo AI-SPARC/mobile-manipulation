@@ -1,33 +1,30 @@
 #include "vision/ObjectMapping.hpp"
 #include <cmath>
 #include <rclcpp_components/register_node_macro.hpp>
+
+
 namespace vision {
 
 ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
  : Node("object_mapping", options),
    is_robot_stopped_(false)
 {
-   
-    this->declare_parameter<double>("velocity_threshold", 0.2); 
-    this->declare_parameter<double>("settlement_duration", 0.4); 
-    this->declare_parameter<double>("voxel_leaf_size", 0.005);
-
+    
+    this->declare_parameter<double>("velocity_threshold", 0.3); 
+    this->declare_parameter<double>("settlement_duration", 0.35); 
     
     velocity_threshold_ = this->get_parameter("velocity_threshold").as_double();
     settlement_duration_ = this->get_parameter("settlement_duration").as_double();
-    voxel_leaf_size_ = this->get_parameter("voxel_leaf_size").as_double();
-
-   
+    
     last_motion_time_ = this->now();
 
- 
+    
     sub_joint_states_ = this->create_subscription<sensor_msgs::msg::JointState>(
         "/isaac_joint_states", 
         rclcpp::SensorDataQoS(), 
         std::bind(&ObjectMapping::jointStatesCallback, this, std::placeholders::_1)
     );
 
-    
     sub_semantic_pcl_ = this->create_subscription<mobile_manipulation_interfaces::msg::SemanticPcl>(
         "/semantic_pcl_array", 10, std::bind(&ObjectMapping::semanticPclCallback, this, std::placeholders::_1));
 
@@ -43,7 +40,6 @@ void ObjectMapping::jointStatesCallback(const sensor_msgs::msg::JointState::Shar
 {
     bool currently_moving = false;
 
-    
     if (msg->velocity.size() == msg->name.size()) 
     {
         for (double vel : msg->velocity) {
@@ -65,7 +61,6 @@ void ObjectMapping::jointStatesCallback(const sensor_msgs::msg::JointState::Shar
     } 
     else 
     {
-        
         auto time_since_stop = this->now() - last_motion_time_;
         if (time_since_stop.seconds() >= settlement_duration_) 
         {
@@ -77,7 +72,6 @@ void ObjectMapping::jointStatesCallback(const sensor_msgs::msg::JointState::Shar
 void ObjectMapping::ObjectToMap(std::string id)
 {
     std::lock_guard<std::mutex> lock(data_mutex_);
-
     object_to_map_ = id;
 }
 
@@ -88,28 +82,26 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         return;
     }
 
+    std::string current_target;
     {
         std::lock_guard<std::mutex> lock(data_mutex_);
-
-   
         if (object_to_map_.empty()) 
         {
             return; 
         }
+        current_target = object_to_map_;
     }
     
-    bool map_updated = false;
-    
-    pcl::VoxelGrid<pcl::PointXYZ> sor;
-    sor.setLeafSize((float)voxel_leaf_size_, (float)voxel_leaf_size_, (float)voxel_leaf_size_);
-    
+ 
     if (msg->labels.size() != msg->clouds.size()) return;
+
+    bool map_updated = false;
 
     for (size_t i = 0; i < msg->labels.size(); ++i) 
     {
         std::string label = msg->labels[i];
         
-        if (label != object_to_map_) 
+        if (label != current_target) 
         {
             continue;
         }
@@ -119,6 +111,7 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
 
         if (incoming_cloud.empty()) continue;
         
+       
         if (object_points_.find(label) == object_points_.end()) 
         {
             object_points_[label] = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>(incoming_cloud);
@@ -128,18 +121,15 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
             *object_points_[label] += incoming_cloud;
         }
 
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZ>());
-        sor.setInputCloud(object_points_[label]);
-        sor.filter(*cloud_filtered);
-        
-        object_points_[label] = cloud_filtered;
+    
         map_updated = true;
     }
 
-    std::cout << "MERDA" << std::endl;
-   
-    publishAccumulatedCloud();
     
+    if (map_updated) 
+    {
+        publishAccumulatedCloud();
+    }
 }
 
 void ObjectMapping::publishAccumulatedCloud()
@@ -150,6 +140,7 @@ void ObjectMapping::publishAccumulatedCloud()
     {
         if (cloud_ptr->empty()) continue;
 
+        
         std::size_t hash = std::hash<std::string>{}(label);
         uint8_t r = (hash >> 16) & 0xFF;
         uint8_t g = (hash >> 8)  & 0xFF;

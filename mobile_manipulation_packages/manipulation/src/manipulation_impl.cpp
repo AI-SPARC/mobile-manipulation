@@ -190,13 +190,13 @@ void SimpleManipulation::initMoveGroup()
 
         RCLCPP_INFO(this->get_logger(), "Inicializando PlanningSceneMonitor...");
         
-        // Cria o monitor usando o nó do moveit e o tópico robot_description
+        
         psm_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(
             moveit_node_, "robot_description");
 
         if (psm_->getPlanningScene())
         {
-            // Inicia os monitores para manter a cena atualizada (colisões, estados das juntas)
+            
             psm_->startSceneMonitor();
             psm_->startWorldGeometryMonitor();
             psm_->startStateMonitor();
@@ -206,11 +206,12 @@ void SimpleManipulation::initMoveGroup()
         {
             RCLCPP_ERROR(this->get_logger(), "Falha ao inicializar PlanningSceneMonitor.");
         }
-        // ============================================================
+        
 
         RCLCPP_INFO(this->get_logger(), "MoveGroup (arm e gripper) inicializados com sucesso.");
 
-        moveit_ready_ = true; 
+        moveit_ready_ = true;
+        
         init_timer_->cancel();
     } 
     catch (const std::exception &e) 
@@ -824,136 +825,129 @@ bool SimpleManipulation::follow_path_with_consistent_ik(
         return false;
     }
 
-    // --- 1. Preparação ---
     psm_->requestPlanningSceneState();
     planning_scene_monitor::LockedPlanningSceneRO scene(psm_);
     auto robot_model = move_group_arm->getRobotModel();
     const moveit::core::JointModelGroup* joint_model_group = robot_model->getJointModelGroup("panda_arm");
-    
-    // Nome do link da ponta para verificação (FK)
-    // Geralmente é o último link do grupo. Ajuste se o seu for diferente (ex: "panda_link8")
     const std::string& tip_frame = joint_model_group->getLinkModelNames().back();
 
-    moveit::core::RobotStatePtr current_state = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
+    moveit::core::RobotStatePtr validation_state = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
     
-    robot_trajectory::RobotTrajectory trajectory(robot_model, joint_model_group);
-    trajectory.addSuffixWayPoint(*current_state, 0.0);
-
-    RCLCPP_INFO(this->get_logger(), "Calculando IK RIGIDO para %zu pontos...", path_poses.size());
+    std::vector<std::vector<double>> valid_path_joints;
 
     collision_detection::CollisionRequest c_req;
     collision_detection::CollisionResult c_res;
-    
-    // Definição de rigidez: Tolerância máxima de erro angular (radianos)
-    // 0.005 rad ~= 0.28 graus (Extremamente rígido)
     const double MAX_ORIENTATION_ERROR = 0.005; 
 
-    int points_added = 0;
+    RCLCPP_INFO(this->get_logger(), "Validando IK e Colisões para %zu poses...", path_poses.size());
 
-    // --- 2. Loop de Cálculo ---
     for (size_t i = 0; i < path_poses.size(); ++i)
     {
-        if (goal_handle->is_canceling()) {
-            RCLCPP_WARN(this->get_logger(), "Cancelamento no cálculo.");
-            return false;
-        }
+        if (goal_handle->is_canceling()) return false;
 
         const auto& target_pose = path_poses[i];
+        moveit::core::RobotState candidate_state = *validation_state; 
 
-        // Copia estado anterior (Semente para consistência de juntas)
-        moveit::core::RobotState candidate_state = *current_state;
-
-        // Tenta IK com timeout curto
-        bool found_ik = candidate_state.setFromIK(joint_model_group, target_pose, 0.02);
-
-        if (found_ik)
+        
+        if (candidate_state.setFromIK(joint_model_group, target_pose, 0.02))
         {
-            candidate_state.update(); // Recalcula FK para verificar o resultado real
-
-            // --- VALIDAÇÃO DE RIGIDEZ DE ORIENTAÇÃO ---
-            // O solver pode achar uma solução "aproximada". Vamos verificar se ela é exata.
+            candidate_state.update(); 
             
-            // 1. Pega a orientação real que o robô ficaria com essa solução
+            
             const Eigen::Isometry3d& actual_transform = candidate_state.getGlobalLinkTransform(tip_frame);
             Eigen::Quaterniond q_actual(actual_transform.rotation());
+            Eigen::Quaterniond q_target(target_pose.orientation.w, target_pose.orientation.x, target_pose.orientation.y, target_pose.orientation.z);
             
-            // 2. Pega a orientação desejada
-            Eigen::Quaterniond q_target(
-                target_pose.orientation.w,
-                target_pose.orientation.x,
-                target_pose.orientation.y,
-                target_pose.orientation.z
-            );
-
-            // 3. Calcula a distância angular (menor ângulo entre os dois quaternions)
-            double angle_diff = q_actual.angularDistance(q_target);
-
-            if (angle_diff > MAX_ORIENTATION_ERROR)
+            if (q_actual.angularDistance(q_target) <= MAX_ORIENTATION_ERROR)
             {
-                // REJEITA: A solução existe, mas o ângulo está "torto" além do permitido
-                RCLCPP_DEBUG(this->get_logger(), 
-                    "Pulo Ponto %zu: IK encontrado, mas erro de orientação (%.4f rad) excede limite rígido.", 
-                    i, angle_diff);
-                continue; // Pula para o próximo ponto
-            }
-            // -------------------------------------------
+                c_res.clear();
+                scene->checkCollision(c_req, c_res, candidate_state);
+                if (!c_res.collision)
+                {
+                    // Sucesso: Armazena as juntas
+                    std::vector<double> joints;
+                    candidate_state.copyJointGroupPositions(joint_model_group, joints);
+                    valid_path_joints.push_back(joints);
 
-            c_res.clear();
-            scene->checkCollision(c_req, c_res, candidate_state);
-
-            if (!c_res.collision)
-            {
-                *current_state = candidate_state; // Aceita como nova semente
-                trajectory.addSuffixWayPoint(*current_state, 0.0);
-                points_added++;
+                    
+                    *validation_state = candidate_state; 
+                }
             }
-            else
-            {
-                RCLCPP_DEBUG(this->get_logger(), "Pulo Ponto %zu: Colisão.", i);
-            }
-        }
-        else
-        {
-            RCLCPP_DEBUG(this->get_logger(), "Pulo Ponto %zu: IK Falhou.", i);
         }
     }
 
-    if (points_added == 0) {
-        RCLCPP_ERROR(this->get_logger(), "Nenhum ponto atendeu aos critérios de colisão e rigidez.");
+    if (valid_path_joints.empty()) {
+        RCLCPP_ERROR(this->get_logger(), "Nenhum ponto válido encontrado.");
         return false;
     }
 
-    // --- 3. Parametrização ---
+    RCLCPP_INFO(this->get_logger(), "Iniciando execução segmentada de %zu pontos...", valid_path_joints.size());
+
     trajectory_processing::TimeOptimalTrajectoryGeneration totg;
-    if (!totg.computeTimeStamps(trajectory, 0.5, 0.5)) {
-        RCLCPP_ERROR(this->get_logger(), "Falha no TOTG.");
-        return false;
-    }
 
-    // --- 4. Execução ---
-    moveit_msgs::msg::RobotTrajectory traj_msg;
-    trajectory.getRobotTrajectoryMsg(traj_msg);
-
-    RCLCPP_INFO(this->get_logger(), "Executando %d pontos validados...", points_added);
-    move_group_arm->asyncExecute(traj_msg);
-
-    double estimated_duration = trajectory.getDuration();
-    auto start_time = std::chrono::steady_clock::now();
-    
-    while (rclcpp::ok())
+    for (size_t i = 0; i < valid_path_joints.size(); ++i)
     {
-        if (goal_handle->is_canceling()) 
-        {
+        if (goal_handle->is_canceling()) {
             move_group_arm->stop();
             return false;
         }
 
-        auto now = std::chrono::steady_clock::now();
-        double elapsed = std::chrono::duration<double>(now - start_time).count();
+    
+        moveit::core::RobotStatePtr current_real_state = move_group_arm->getCurrentState();
+        
+      
+        robot_trajectory::RobotTrajectory segment_traj(robot_model, joint_model_group);
+        segment_traj.addSuffixWayPoint(*current_real_state, 0.0); 
+        
+        moveit::core::RobotState target_state = *current_real_state;
+        target_state.setJointGroupPositions(joint_model_group, valid_path_joints[i]);
+        segment_traj.addSuffixWayPoint(target_state, 0.0); 
 
-        if (elapsed > (estimated_duration + 0.5)) break; 
+        
+        if (!totg.computeTimeStamps(segment_traj, 0.5, 0.5)) {
+            RCLCPP_ERROR(this->get_logger(), "Falha TOTG no segmento %zu", i);
+            return false;
+        }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        moveit_msgs::msg::RobotTrajectory segment_msg;
+        segment_traj.getRobotTrajectoryMsg(segment_msg);
+
+        
+        auto exec_result = move_group_arm->asyncExecute(segment_msg);
+        if (exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
+            RCLCPP_ERROR(this->get_logger(), "Falha envio segmento %zu", i);
+            return false;
+        }
+
+        auto start_time = std::chrono::steady_clock::now();
+        bool arrived = false;
+
+        while (rclcpp::ok())
+        {
+            if (goal_handle->is_canceling()) {
+                move_group_arm->stop();
+                return false;
+            }
+
+            
+            std::vector<double> current_joints = move_group_arm->getCurrentJointValues();
+            double error = 0.0;
+            for(size_t k=0; k<valid_path_joints[i].size(); k++) {
+                error += std::abs(valid_path_joints[i][k] - current_joints[k]);
+            }
+
+            if (error < 0.02) {
+                arrived = true;
+                break; 
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+
+        if (!arrived) return false;
+
+        
+    
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000)); 
     }
 
     return true;
@@ -1193,6 +1187,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
     {
         bool path_execution_success = follow_path_with_consistent_ik(goal->poses, goal_handle);
 
+      
         if (goal_handle->is_canceling()) 
         {
             if (move_group_arm) move_group_arm->stop();

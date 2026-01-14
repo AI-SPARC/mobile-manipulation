@@ -47,7 +47,8 @@
 #include <manipulation/IsGripperHolding.hpp>
 #include <manipulation/ProjectedReachabilityAnalysis.hpp>
 #include <manipulation/IKValidator.hpp>
-#include <manipulation/ScanObject.hpp>
+#include <vision/GenerateScanPoses.hpp>
+#include <vision/ObjectMapping.hpp>
 #include <storage_manager/GetStorageInfo.hpp>
 #include <storage_manager/Organize.hpp>
 #include <navigation/SharedObstacleGraph.hpp>
@@ -78,6 +79,16 @@ enum class TaskState
     RUNNING, // Action enviada, aguardando resultado
     SUCCESS, // Action terminou com sucesso
     FAILURE  // Action abortada ou falhou
+};
+
+enum class GraspPhase
+{
+    IDLE,           // Nada acontecendo
+    GRASPNET_SCAN,  // (Oculto) Rodando a lógica obrigatória do GraspNet
+    SEND_GOAL,
+    WAITING,
+    SUCCESS,
+    FAILURE// (Padrão) Esperando o braço se mover
 };
 
 // DOC-START: ParallelAny
@@ -172,33 +183,37 @@ public:
     // para permitir comunicação direta em memória, sem latência de tópicos.
     ServerNode(
         std::shared_ptr<manipulation::IsGripperHolding> gripper_node,
+        std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node,
+        std::shared_ptr<manipulation::IKValidator> ik_validator_node,
+        std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node,
         std::shared_ptr<storage_manager::StorageNode> storage_node,
         std::shared_ptr<storage_manager::OrganizeNode> organize_node,
-        std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node,
-        std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node,
-        std::shared_ptr<manipulation::IKValidator> ik_validator_node,
         std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node,
-        std::shared_ptr<manipulation::ScanObject> scan_object_node
+        std::shared_ptr<vision::GenerateScanPoses> scan_object_node,
+        std::shared_ptr<vision::ObjectMapping> object_mapping_node
     )
     : Node("server_node"),
     gripper_monitor_node_(gripper_node),
+    reachability_node_(reachability_node),
+    ik_validator_node_(ik_validator_node),
+    obstacle_graph_node_(obstacle_graph_node),
     storage_node_(storage_node),
     organize_node_(organize_node),
-    reachability_node_(reachability_node),
-    obstacle_graph_node_(obstacle_graph_node),
-    ik_validator_node_(ik_validator_node),
     bridge_to_inference_node_(bridge_to_inference_node),
-    scan_object_node_(scan_object_node)
+    scan_object_node_(scan_object_node),
+    object_mapping_node_(object_mapping_node)
     {
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<std::string>("bt_xml_path", "");
         this->declare_parameter<bool>("use_graspnet", true);
+        this->declare_parameter<int>("max_graspnet_attempts", 3);
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         std::string bt_xml_path = this->get_parameter("bt_xml_path").as_string();
         use_graspnet = this->get_parameter("use_graspnet").as_bool();
-        
+        this->grasp_context_.graspnet_maximum_attempts = this->get_parameter("max_graspnet_attempts").as_int();
+
         // 1. Subscribers:
         // Ouve as detecções do YOLO ("vision_msgs")
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
@@ -221,6 +236,7 @@ public:
         path_state_ = TaskState::IDLE;
         nav_state_ = TaskState::IDLE;
         manipulation_state_ = TaskState::IDLE;
+        current_pick_phase_ = GraspPhase::IDLE;
 
         // 3. Behavior Tree:
         // Registra os nós e carrega o arquivo XML
@@ -267,26 +283,37 @@ private:
     };
     // DOC-END: internal_structs
 
+    struct GraspContext
+    {
+        std::vector<geometry_msgs::msg::Pose> grasp_poses = {};
+        int graspnet_attempts = 0;
+        int graspnet_maximum_attempts = 3; 
+    };
+
     // DOC-START: member_variables
     // --- Injeção de Dependências ---
 
-    std::shared_ptr<manipulation::ScanObject> scan_object_node_;
-    // Ponteiro para o nó que envia a point cloud via msgpack para o arquivo python que faz a inferência no graspnet.
-    std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
+    // Ponteiro para o nó que monitora o sensor da garra
+    std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_;
+    // Ponteiro para o nó que verifica o ponto ideal para pegar o objeto.
+    std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node_;
     // Ponteiro para o nó que verifica se o robô consegue achar uma IK para uma série de pontos passados.
     std::shared_ptr<manipulation::IKValidator> ik_validator_node_;
     // Ponteiro para o nó que modifica o grafo de obstáculos.
     std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node_;
-    // Ponteiro para o nó que verifica o ponto ideal para pegar o objeto.
-    std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node_;
-    // Ponteiro para o nó que monitora o sensor da garra
-    std::shared_ptr<manipulation::IsGripperHolding> gripper_monitor_node_;
     // Ponteiro para o gerenciador de banco de dados de posições (Storage)
     std::shared_ptr<storage_manager::StorageNode> storage_node_;
     // Ponteiro para o algoritmo de organização (Bin Packing)
     std::shared_ptr<storage_manager::OrganizeNode> organize_node_;
+    // Ponteiro para o nó que envia a point cloud via msgpack para o arquivo python que faz a inferência no graspnet.
+    std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node_;
+    // Ponteiro para o nó que gera poses em que a câmera do robô deve estar para mapear o objeto.
+    std::shared_ptr<vision::GenerateScanPoses> scan_object_node_;
+    // Ponteiro para o nó que mapeia o objeto quando o braço robótico está parado.
+    std::shared_ptr<vision::ObjectMapping> object_mapping_node_;
     // Ponteiro para o publicador de logs do Groot2 (Visualizador da Behavior Tree)
     std::unique_ptr<BT::Groot2Publisher> groot_publisher_;
+
 
     // --- Comunicação ROS 2 ---
 
@@ -310,7 +337,7 @@ private:
     rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Controller>::SharedPtr active_controller_goal_handle_;
     // Handle para controlar a ação de planejamento ativa
     rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::Path>::SharedPtr active_path_goal_handle_;
-
+    rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>::SharedPtr active_arm_handle_;
     // --- Configuração e Estado Lógico ---
     // Caminho do arquivo YAML com objetos permitidos
     std::string yaml_file;
@@ -323,6 +350,7 @@ private:
     std::pair<std::string, geometry_msgs::msg::Pose> pick_pose;
     // Cache do último objeto válido detectado pela câmera
     ObjectInfo cached_object_;
+    GraspContext grasp_context_;
 
     // --- Estado do Alvo Atual ---
     // ID do objeto que está sendo processado pela Behavior Tree (vazio se ocioso)
@@ -350,6 +378,8 @@ private:
     TaskState nav_state_;
     // Estado atual da tarefa de manipulação
     TaskState manipulation_state_;
+
+    GraspPhase current_pick_phase_;
 
     // --- Sincronização ---
     // Mutex crítico para proteger transições de estado das Actions
@@ -388,6 +418,21 @@ private:
         return BT::NodeStatus::RUNNING; // Ainda processando
     }
     // DOC-END: check_task_status
+
+    BT::NodeStatus check_pick_phase_status(GraspPhase &state)
+    {
+        if (state == GraspPhase::SUCCESS)
+        {
+            state = GraspPhase::IDLE; 
+            return BT::NodeStatus::SUCCESS;
+        }
+        else if (state == GraspPhase::FAILURE)
+        {
+            state = GraspPhase::IDLE; 
+            return BT::NodeStatus::FAILURE;
+        }
+        return BT::NodeStatus::RUNNING; 
+    }
 
     // DOC-START: setup_behavior_tree
     // Configura a fábrica da Behavior Tree, registra os nós e carrega o XML.
@@ -453,7 +498,7 @@ private:
                 std::get<2>(actual_robot_position) = robot_base_z;
             }
 
-            auto start_total = std::chrono::high_resolution_clock::now();
+            // auto start_total = std::chrono::high_resolution_clock::now();
             
             std::sort(viable_points_3d.begin(), viable_points_3d.end(), 
             [&actual_robot_position](const std::tuple<float, float, float>& a, const std::tuple<float, float, float>& b) 
@@ -475,8 +520,8 @@ private:
                 return dist_sq_a < dist_sq_b;
             });
 
-            auto end_total = std::chrono::high_resolution_clock::now();
-            double ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
+            // auto end_total = std::chrono::high_resolution_clock::now();
+            // double ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
             
        
 
@@ -498,13 +543,12 @@ private:
 
                 float px = std::get<0>(p); 
                 float py = std::get<1>(p); 
-                float pz = std::get<2>(p); 
 
                 float dx_curr = px - this->pose_x;
                 float dy_curr = py - this->pose_y;
                 float dist_sq = std::sqrt((dx_curr * dx_curr) + (dy_curr * dy_curr));
 
-                const float threshold_sq = 0.07f; 
+                const float threshold_sq = 0.2f; 
 
                 if (dist_sq <= threshold_sq)
                 {
@@ -834,6 +878,7 @@ private:
         );
         // DOC-END: BT_IsGripperHoldingObject
 
+
         // DOC-START: BT_ComputePath
         // --- Action: ComputePath (Assíncrona) ---
         // Envia requisição para o planejador de caminho global (A* / D*).
@@ -956,126 +1001,173 @@ private:
         {
             return std::make_unique<AsyncAction>(name, config, [&](BT::TreeNode &self)
             {
-                if (manipulation_state_ == TaskState::IDLE)
+                auto object_pose = self.getInput<geometry_msgs::msg::Pose>("object_pose");
+                auto object_size = self.getInput<geometry_msgs::msg::Vector3>("object_size");
+                auto id = self.getInput<std::string>("id");
+
+                if (!object_pose || !id || !object_size) 
                 {
-                    auto object_pose = self.getInput<geometry_msgs::msg::Pose>("object_pose");
-                    auto object_size = self.getInput<geometry_msgs::msg::Vector3>("object_size");
-                    auto id = self.getInput<std::string>("id");
+                    RCLCPP_ERROR(this->get_logger(), "PickObject: Parâmetros faltando");
+                    return BT::NodeStatus::FAILURE;
+                }
 
-                    if (!object_pose || !id || !object_size) 
+                geometry_msgs::msg::Pose target = object_pose.value();
+                geometry_msgs::msg::Vector3 target_size = object_size.value();
+
+                cached_object_.id = id.value();
+                cached_object_.pose = target;
+                cached_object_.size = target_size;
+
+
+                if(use_graspnet == true)
+                {
+                    if (current_pick_phase_ == GraspPhase::IDLE)
                     {
-                        RCLCPP_ERROR(this->get_logger(), "PickObject: Parâmetros faltando");
-                        return BT::NodeStatus::FAILURE;
-                    }
-
-                    geometry_msgs::msg::Pose target = object_pose.value();
-                    geometry_msgs::msg::Vector3 target_size = object_size.value();
-
-                    cached_object_.id = id.value();
-                    cached_object_.pose = target;
-                    cached_object_.size = target_size;
-            
-                    if(use_graspnet == true)
-                    {
-                        
-                        target_size.x += 0.005;
-                        target_size.y += 0.005;
-                        target_size.z += 0.005;
-                        
+                       
                         
                         std::vector<geometry_msgs::msg::Pose> poses = this->scan_object_node_->getSortedScanPoses(cached_object_.id);
+                        this->object_mapping_node_->ObjectToMap(cached_object_.id);
 
-                        // === APLICAÇÃO DO OFFSET DA GARRA ===
-                        for (auto & pose : poses)
+                        if(!poses.empty())
                         {
-                            tf2::Quaternion q_scan_result;
-                            tf2::fromMsg(pose.orientation, q_scan_result);
+                            for (auto & pose : poses)
+                            {
+                                tf2::Quaternion q_scan_result;
+                                tf2::fromMsg(pose.orientation, q_scan_result);
 
-                            // Cria o quaternion de correção da garra
-                            tf2::Quaternion q_gripper_offset;
+                                
+                                tf2::Quaternion q_gripper_offset;
+                                
                             
-                            // Configura Roll (X), Pitch (Y), Yaw (Z)
-                            // Eixo X: 180 graus (M_PI)
-                            // Eixo Y: 0
-                            // Eixo Z: -45 graus (-M_PI / 4.0)
-                            q_gripper_offset.setRPY(M_PI, 0.0, -M_PI / 4.0);
+                                q_gripper_offset.setRPY(M_PI, 0.0, -M_PI / 4.0);
 
-                            // Multiplicação PELA DIREITA aplica a rotação no eixo LOCAL da pose atual.
-                            // Isso preserva a direção do apontamento (X), mas gira a garra ao redor dele.
-                            tf2::Quaternion q_final = q_scan_result * q_gripper_offset;
                             
-                            q_final.normalize(); // Sempre normalize após multiplicar quaternions
+                                tf2::Quaternion q_final = q_scan_result * q_gripper_offset;
+                                
+                                q_final.normalize();
 
-                            pose.orientation = tf2::toMsg(q_final);
+                                pose.orientation = tf2::toMsg(q_final);
+                            }
+                            
+                            for(int i = 0; i < 5; i++) 
+                            { 
+                                if (i < poses.size())
+                                    RCLCPP_INFO(this->get_logger(), "Pose %d ajustada enviada.", i);
+                            }
+
+                            
+                            
+                        
+                            this->send_goal(id.value(), poses, true, true); 
+                            
+                            
+                            current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
+                            return BT::NodeStatus::RUNNING;
                         }
-                        // ====================================
 
-                        // Log de debug
-                        for(int i = 0; i < 5; i++) { // Imprime só 5 pra não poluir
-                            if (i < poses.size())
-                                RCLCPP_INFO(this->get_logger(), "Pose %d ajustada enviada.", i);
-                        }
-
-                        // Envia para a action (follow_path=true)
-                        this->send_goal(id.value(), poses, true, true);
-                        manipulation_state_ = TaskState::RUNNING;
-
-                        // auto duration = rclcpp::Duration(5, 0); 
-
-                        // auto start_time = this->get_clock()->now();
-
-                        // while ((this->get_clock()->now() - start_time) < duration) 
-                        // {
-                        //     if (!rclcpp::ok()) 
-                        //     {
-                        //         break;
-                        //     }
-
-                        //     RCLCPP_INFO(this->get_logger(), "Executando tarefa...");
-                            
-                        //     my_processing_function(); 
-                        // }
-
-
-                        // this->cloud_box_filter_node_->set_bounding_box(target, target_size);
-
-                        rclcpp::sleep_for(std::chrono::milliseconds(1000));
-                        std::vector<geometry_msgs::msg::Pose> result;
-
-                        // if (this->cloud_box_filter_node_->has_points()) 
-                        // {
-                        //     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_points = this->cloud_box_filter_node_->get_filtered_points();
-                        //     result = this->bridge_to_inference_node_->process_point_cloud(filtered_points);
-                        //     RCLCPP_INFO(get_logger(), "Recebidos %zu grasps", result.size());
-                        // }
-                        // else
-                        // {
-                        //     RCLCPP_WARN(get_logger(), "Sem pontos para grasp");
-                        //     return BT::NodeStatus::FAILURE;
-                        // }
-
-                        // if (result.empty())
-                        // {
-                        //     RCLCPP_ERROR(get_logger(), "Nenhum grasp válido encontrado");
-                        //     return BT::NodeStatus::FAILURE;
-                        // }
-
-                        // this->send_goal(id.value(), result[0], true);
-                        // manipulation_state_ = TaskState::RUNNING;
                         
                     }
-                    else
+                    
+                    if (current_pick_phase_ == GraspPhase::GRASPNET_SCAN)
                     {
                         
-                        std::vector<geometry_msgs::msg::Pose> poses;
-                        poses.push_back(object_pose.value());
-                        this->send_goal(id.value(), poses, true, false);
-                        manipulation_state_ = TaskState::RUNNING; 
+                        auto duration = rclcpp::Duration(2, 0); 
+
+                        auto start_time = this->get_clock()->now();
+
+                        while ((this->get_clock()->now() - start_time) < duration) 
+                        {
+                            if (!rclcpp::ok()) 
+                            {
+                                break;
+                            }
+
+                            std::vector<geometry_msgs::msg::Pose> result;
+                           
+                            result = this->bridge_to_inference_node_->get_latest_grasps();
+                            
+                            
+                            if(result.empty())
+                            {
+                                this->grasp_context_.grasp_poses.clear();
+                                return BT::NodeStatus::RUNNING;
+                            }
+                            else
+                            {
+                                this->grasp_context_.grasp_poses = result;
+                                break;
+                            }
+                        }
+                        
+
+                        if (this->active_arm_handle_ != nullptr)
+                        {
+                            RCLCPP_INFO(this->get_logger(), "Enviando solicitação de CANCELAMENTO do goal...");
+                            
+                            current_pick_phase_ = GraspPhase::WAITING;
+                            auto future_cancel = this->client_ptr_->async_cancel_goal(this->active_arm_handle_);
+                            
+                            std::future_status status = future_cancel.wait_for(std::chrono::seconds(5));
+
+                            if (status == std::future_status::ready)
+                            {
+                                try
+                                {
+                                    auto cancel_response = future_cancel.get();
+                                    
+                                    
+                                    if (cancel_response->return_code == action_msgs::srv::CancelGoal::Response::ERROR_NONE)
+                                    {
+                                        RCLCPP_INFO(this->get_logger(), "Cancelamento ACEITO pelo servidor.");
+                                        current_pick_phase_ = GraspPhase::SEND_GOAL;
+                                    }
+                                    else
+                                    {
+                                        RCLCPP_WARN(this->get_logger(), "Cancelamento REJEITADO/FALHOU. Código: %d", (int)cancel_response->return_code);
+                                    }
+                                    
+                                }
+                                catch (const std::exception &e)
+                                {
+                                    RCLCPP_ERROR(this->get_logger(), "Exceção ao ler resposta do cancelamento: %s", e.what());
+                                }
+                            }
+                            else
+                            {
+                                RCLCPP_ERROR(this->get_logger(), "Timeout: O servidor demorou mais de 5s para responder ao cancelamento.");
+                            }
+                        }
+                        
+
+                        
+                        return BT::NodeStatus::RUNNING;
                     }
 
-                    return BT::NodeStatus::RUNNING;
+                    if (current_pick_phase_ == GraspPhase::SEND_GOAL)
+                    {
+                        
+                        this->grasp_context_.graspnet_attempts += 1;
+                        if(!this->grasp_context_.grasp_poses.empty())
+                        {
+                            
+                            this->send_goal(id.value(), this->grasp_context_.grasp_poses, true, false);
+                            current_pick_phase_ = GraspPhase::WAITING;
+                        }
+                        
+                        
+                        return BT::NodeStatus::RUNNING;
+                    }
+                    
+
+                   return BT::NodeStatus::RUNNING;
                 }
-                return check_task_status(manipulation_state_);
+                else if(use_graspnet == false)
+                {
+                    // return check_task_status(manipulation_state_);
+                }
+                
+
+                //  return check_pick_phase_status(current_pick_phase_);
             });
         };
         factory.registerBuilder(BT::TreeNodeManifest{
@@ -1166,8 +1258,8 @@ private:
                     // Se falhou, libera o ID para tentar de novo no futuro
                     if (result == BT::NodeStatus::FAILURE)
                     {
-                         picked.erase(cached_object_.id); 
-                         current_target_id_ = "";
+                        picked.erase(cached_object_.id); 
+                        current_target_id_ = "";
                     }
 
                     // Reset geral de estados
@@ -1177,6 +1269,7 @@ private:
                     }
                     nav_state_ = TaskState::IDLE;
                     manipulation_state_ = TaskState::IDLE;
+                    current_pick_phase_ = GraspPhase::IDLE;
                 }
             }
             rate.sleep();
@@ -1385,7 +1478,7 @@ private:
     // Envia o caminho (Path) para o controlador local seguir.
     bool send_controller_goal(const nav_msgs::msg::Path &target_path)
     {
-        if (!this->controller_client->wait_for_action_server(std::chrono::seconds(2))) 
+        if (!this->controller_client->wait_for_action_server(std::chrono::seconds(5))) 
         {
             RCLCPP_ERROR(this->get_logger(), "Action server 'controller' not available");
             return false;
@@ -1459,10 +1552,27 @@ private:
     // Envia Action de Manipulação (Pick ou Place) com ARRAY de poses.
     void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick, bool follow_path)
     {
-        if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(5)))
+        if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(10)))
         {
             RCLCPP_ERROR(this->get_logger(), "Action server manipulação not available");
-            manipulation_state_ = TaskState::FAILURE;
+
+            if(use_graspnet == true)
+            {
+                if(current_pick_phase_ == GraspPhase::SEND_GOAL && this->grasp_context_.graspnet_attempts <= this->grasp_context_.graspnet_maximum_attempts)
+                {
+                    current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
+                }
+                else if(current_pick_phase_ == GraspPhase::SEND_GOAL)
+                {
+                    current_pick_phase_ = GraspPhase::FAILURE; 
+                }
+                
+            }
+            else
+            {
+                manipulation_state_ = TaskState::FAILURE;
+            }
+            
             return;
         }
 
@@ -1491,10 +1601,27 @@ private:
         if (!goal_handle)
         {
             RCLCPP_ERROR(this->get_logger(), "Goal PICK rejeitado");
-            manipulation_state_ = TaskState::FAILURE;
+
+            if(use_graspnet == true)
+            {
+                if(current_pick_phase_ == GraspPhase::SEND_GOAL && this->grasp_context_.graspnet_attempts <= this->grasp_context_.graspnet_maximum_attempts)
+                {
+                    current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
+                }
+                else if(current_pick_phase_ == GraspPhase::SEND_GOAL)
+                {
+                    current_pick_phase_ = GraspPhase::FAILURE; 
+                }
+            }
+            else
+            {
+                manipulation_state_ = TaskState::FAILURE;
+            }
+            
         }
         else
         {
+            this->active_arm_handle_ = goal_handle;
             RCLCPP_INFO(this->get_logger(), "Goal PICK aceito.");
         }
     }
@@ -1506,14 +1633,38 @@ private:
     {
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result->success)
         {
-            manipulation_state_ = TaskState::SUCCESS;
+            if(use_graspnet == true)
+            {
+                current_pick_phase_ = GraspPhase::SUCCESS;
+            }
+            else
+            {
+                manipulation_state_ = TaskState::SUCCESS;
+            }
+            
             RCLCPP_INFO(this->get_logger(), "PICK SUCCESS");
         }
         else
         {
-            manipulation_state_ = TaskState::FAILURE;
+            if(use_graspnet == true)
+            {
+                if(current_pick_phase_ == GraspPhase::SEND_GOAL && this->grasp_context_.graspnet_attempts <= this->grasp_context_.graspnet_maximum_attempts)
+                {
+                    current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
+                }
+                else if(current_pick_phase_ == GraspPhase::SEND_GOAL)
+                {
+                    current_pick_phase_ = GraspPhase::FAILURE; 
+                }
+            }
+            else
+            {
+                manipulation_state_ = TaskState::FAILURE;
+            }
             RCLCPP_ERROR(this->get_logger(), "PICK FAILED");
         }
+
+        this->active_arm_handle_ = nullptr;
     }
     // DOC-END: result_callback
 
@@ -1578,13 +1729,18 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions scan_object_opts;
     scan_object_opts.arguments({"--ros-args", "-r", "__node:=scan_object"});
 
+    rclcpp::NodeOptions object_mapping_opts;
+    object_mapping_opts.arguments({"--ros-args", "-r", "__node:=object_mapping"});
+
     std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
     std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
 
     std::shared_ptr<manipulation::IsGripperHolding> gripper_node = nullptr;
     std::shared_ptr<manipulation::ProjectedReachabilityAnalysis> reachability_node = nullptr; 
-    std::shared_ptr<manipulation::IKValidator> ik_validator_node = nullptr; 
-    std::shared_ptr<manipulation::ScanObject> scan_object_node = nullptr; 
+    std::shared_ptr<manipulation::IKValidator> ik_validator_node = nullptr;
+
+    std::shared_ptr<vision::GenerateScanPoses> scan_object_node = nullptr; 
+    std::shared_ptr<vision::ObjectMapping> object_mapping_node = nullptr; 
 
     std::shared_ptr<navigation::SharedObstacleGraph> obstacle_graph_node = nullptr; 
 
@@ -1624,11 +1780,14 @@ int main(int argc, char * argv[])
     bridge_to_inference_node = std::make_shared<drl_to_pick_cpp::BridgeToInference>(bridge_to_inference_opts);
     executor.add_node(bridge_to_inference_node);
 
-    scan_object_node = std::make_shared<manipulation::ScanObject>(scan_object_opts);
+    scan_object_node = std::make_shared<vision::GenerateScanPoses>(scan_object_opts);
     executor.add_node(scan_object_node);
 
-    auto server_node = std::make_shared<ServerNode>(gripper_node, storage_node, organize_node, reachability_node, 
-        obstacle_graph_node, ik_validator_node, bridge_to_inference_node, scan_object_node);
+    object_mapping_node = std::make_shared<vision::ObjectMapping>(object_mapping_opts);
+    executor.add_node(object_mapping_node);
+
+    auto server_node = std::make_shared<ServerNode>(gripper_node, reachability_node, 
+        ik_validator_node, obstacle_graph_node, storage_node, organize_node, bridge_to_inference_node, scan_object_node, object_mapping_node);
 
     executor.add_node(server_node);
 

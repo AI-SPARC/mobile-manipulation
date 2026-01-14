@@ -6,7 +6,7 @@
       
         <DetectObject output_pose="{target_pose}" output_size="{target_size}" output_id="{target_id}"/>
         
-        <RetryUntilSuccessful num_attempts="-1">
+        <RetryUntilSuccessful num_attempts="3">
             <Fallback name="EnsureProximity">
                  
                  <IsReachable target_pose="{target_pose}"
@@ -79,20 +79,20 @@
         
         <SubTree ID="AcquireObject" target_id="{target_id}" target_pose="{target_pose}"/>
         
-        <GetStorageInfo object_id="{target_id}"
+        <!-- <GetStorageInfo object_id="{target_id}"
                         indexes="{indexes}" 
                         storage_pose="{storage_pose}" 
                         storage_size="{storage_size}"
-                        storage_id="{storage_id}"/>
+                        storage_id="{storage_id}"/> -->
         
-        <ComputePoseToStore storage_pose="{storage_pose}" 
+        <!-- <ComputePoseToStore storage_pose="{storage_pose}" 
                             storage_size="{storage_size}"
                             z_lift_offset="0.05"            
                             output_final_pose="{final_placement_pose}"/> 
 
         <SubTree ID="PlaceRoutine" 
                  storage_id="{storage_id}"
-                 final_placement_pose="{final_placement_pose}"/> 
+                 final_placement_pose="{final_placement_pose}"/>  -->
       </Sequence>
     </RetryUntilSuccessful>
   </BehaviorTree>

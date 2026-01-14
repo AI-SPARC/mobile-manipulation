@@ -76,17 +76,12 @@ void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr 
     parseLabelsJson(msg->data);
 }
 
-// -----------------------------------------------------------------------------
-// LÓGICA DE PARSING COM REGEX (Baseada no TranslatorNode + Fix para Strings)
-// -----------------------------------------------------------------------------
 
 std::string CombinedSemanticPCL::extractCleanLabel(std::string raw_label)
 {
     // Remove aspas se sobrarem
     raw_label.erase(std::remove(raw_label.begin(), raw_label.end(), '\"'), raw_label.end());
 
-    // Se vier "box:redbox_10", pega apenas "redbox_10"
-    // Se vier "class:BACKGROUND", pega "BACKGROUND"
     size_t colon_pos = raw_label.find(':');
     if (colon_pos != std::string::npos && colon_pos < raw_label.size() - 1)
     {
@@ -99,41 +94,34 @@ void CombinedSemanticPCL::parseLabelsJson(const std::string & json_str)
 {
     if (json_str.empty()) return;
 
-    // Regex 1: Formato Objeto (O que seu TranslatorNode usa)
-    // Exemplo: "2": { "box": "redbox_10" }
-    // Captura 1: ID, Captura 3: Valor
+
     std::regex object_regex("\"([0-9]+)\"\\s*:\\s*\\{[^}]*\"([A-Za-z0-9_]+)\"\\s*:\\s*\"([A-Za-z0-9_:.\\-]+)\"");
 
-    // Regex 2: Formato String Direta (O que apareceu no seu log de erro)
-    // Exemplo: "2": "box:redbox_10"
-    // Captura 1: ID, Captura 2: Valor
+    
     std::regex string_regex("\"([0-9]+)\"\\s*:\\s*\"([A-Za-z0-9_:.\\-]+)\"");
 
     std::smatch match;
     std::string::const_iterator search_start(json_str.cbegin());
 
-    // --- PASSADA 1: Busca Objetos JSON (Prioridade) ---
+
     while (std::regex_search(search_start, json_str.cend(), match, object_regex))
     {
         try {
             int32_t id = std::stoi(match[1].str());
             std::string val = match[3].str();
             
-            // Limpa o label (remove box:, class:, etc)
             id_to_label_[id] = extractCleanLabel(val);
         } catch (...) {}
 
         search_start = match.suffix().first;
     }
 
-    // --- PASSADA 2: Busca Strings Diretas (Fallback/Complemento) ---
     search_start = json_str.cbegin();
     while (std::regex_search(search_start, json_str.cend(), match, string_regex))
     {
         try {
             int32_t id = std::stoi(match[1].str());
-            // Se já achamos via objeto, preferimos o objeto (geralmente mais detalhado)
-            // mas se o objeto não existia, pegamos daqui.
+            
             if (id_to_label_.find(id) == id_to_label_.end()) {
                 std::string val = match[2].str();
                 id_to_label_[id] = extractCleanLabel(val);
@@ -335,7 +323,8 @@ void CombinedSemanticPCL::publishSplitSemanticPCL(
         custom_msg.clouds.push_back(obj_cloud);
     }
 
-    if (!custom_msg.labels.empty()) {
+    if (!custom_msg.labels.empty()) 
+    {
         pub_custom_msg_->publish(custom_msg);
     }
 }

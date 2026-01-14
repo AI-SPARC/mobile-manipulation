@@ -392,7 +392,7 @@ def generate_launch_description():
     
     final_launch_list = [
         ros2_control_hardware_type,
-        rviz_node,
+        # rviz_node,
         use_sim_time,
         robot_state_publisher,
         move_group_node,

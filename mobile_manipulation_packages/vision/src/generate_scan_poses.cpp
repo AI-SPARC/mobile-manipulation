@@ -17,7 +17,6 @@ using namespace std::chrono_literals;
 
 namespace vision {
 
-
 geometry_msgs::msg::Pose createPoseLookingAt(const tf2::Vector3& origin, const tf2::Vector3& target) {
     geometry_msgs::msg::Pose pose;
     pose.position.x = origin.x();
@@ -40,7 +39,6 @@ geometry_msgs::msg::Pose createPoseLookingAt(const tf2::Vector3& origin, const t
     return pose;
 }
 
-
 GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
  : Node("generate_scan_poses_visualizer", options),
    robot_position_(0.0, 0.0, 0.0),
@@ -48,7 +46,7 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
 {
     this->declare_parameter<std::string>("target_frame", "world");
     this->declare_parameter<std::string>("odom_topic", "/odom");
-    this->declare_parameter<double>("ray_length", 0.30); 
+    this->declare_parameter<double>("ray_length", 0.25); 
     this->declare_parameter<double>("grid_resolution", 0.04); 
     this->declare_parameter<double>("voxel_map_resolution", 0.02); 
     this->declare_parameter<double>("ray_step_size", 0.01);       
@@ -58,7 +56,9 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("camera_fov_h_deg", 60.0);
     this->declare_parameter<double>("camera_fov_v_deg", 40.0);
     this->declare_parameter<double>("target_surface_res", 0.005);
-    this->declare_parameter<double>("min_coverage_percent", 0.95);
+    this->declare_parameter<double>("min_coverage_percent", 0.6);
+    
+    this->declare_parameter<double>("max_incidence_angle_deg", 80.0);
 
     target_frame_ = this->get_parameter("target_frame").as_string();
     odom_topic_ = this->get_parameter("odom_topic").as_string();
@@ -75,6 +75,9 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     camera_fov_v_rad_ = fov_v * (M_PI / 180.0);
     target_surface_res_ = this->get_parameter("target_surface_res").as_double();
     min_coverage_percent_ = this->get_parameter("min_coverage_percent").as_double();
+    
+    double max_inc_deg = this->get_parameter("max_incidence_angle_deg").as_double();
+    max_incidence_angle_rad_ = max_inc_deg * (M_PI / 180.0);
 
     sub_detections_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
         "/bbox_3d_with_labels", 10, std::bind(&GenerateScanPoses::detectionCallback, this, std::placeholders::_1));
@@ -91,7 +94,6 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     RCLCPP_INFO(this->get_logger(), "GenerateScanPoses: Modo Greedy Online (2 Passadas) Iniciado.");
 }
 
-
 std::vector<TargetVoxel> GenerateScanPoses::generateTargetVoxels(const vision_msgs::msg::Detection3D& detection) {
     std::vector<TargetVoxel> targets;
     tf2::Vector3 center(detection.bbox.center.position.x, detection.bbox.center.position.y, detection.bbox.center.position.z);
@@ -102,7 +104,9 @@ std::vector<TargetVoxel> GenerateScanPoses::generateTargetVoxels(const vision_ms
 
     auto fill_face = [&](tf2::Vector3 normal, double offset, double len_u, double len_v) {
         tf2::Vector3 world_normal = rot * normal;
-        if (world_normal.z() < -0.5) return;
+        // Otimização: Ignora face inferior (Z < -0.5 assumindo normal unitaria apontando pra baixo)
+        if (world_normal.z() < -0.5) return; 
+
         for(double u = -len_u/2.0; u <= len_u/2.0; u+=res) {
             for(double v = -len_v/2.0; v <= len_v/2.0; v+=res) {
                 tf2::Vector3 local_pt;
@@ -121,21 +125,39 @@ std::vector<TargetVoxel> GenerateScanPoses::generateTargetVoxels(const vision_ms
     return targets;
 }
 
+// --------------------------------------------------------
+// FUNÇÃO DE VISIBILIDADE ATUALIZADA E CORRIGIDA
+// --------------------------------------------------------
 bool GenerateScanPoses::isVoxelVisible(const geometry_msgs::msg::Pose& pose, const TargetVoxel& voxel) {
-    tf2::Transform tf_cam; tf2::fromMsg(pose, tf_cam);
+    tf2::Transform tf_cam; 
+    tf2::fromMsg(pose, tf_cam);
+    
+    // Transforma o ponto do mundo para o referencial da câmera
     tf2::Vector3 pt_cam = tf_cam.inverse() * voxel.position;
+    
     double depth = pt_cam.x();
+    
     if (depth < 0.05 || depth > (ray_length_ * 2.5)) return false;
+    
     double angle_h = std::atan2(std::abs(pt_cam.y()), depth);
     double angle_v = std::atan2(std::abs(pt_cam.z()), depth);
-    if (angle_h > (camera_fov_h_rad_ / 2.0 * 0.95)) return false;
-    if (angle_v > (camera_fov_v_rad_ / 2.0 * 0.95)) return false;
+
+    if (angle_h > (camera_fov_h_rad_ / 2.0)) return false;
+    if (angle_v > (camera_fov_v_rad_ / 2.0)) return false;
+
     tf2::Vector3 cam_pos(pose.position.x, pose.position.y, pose.position.z);
-    tf2::Vector3 view_vec = (voxel.position - cam_pos).normalize();
-    if (view_vec.dot(voxel.normal) >= 0.0) return false;
+    
+    tf2::Vector3 voxel_to_cam = (cam_pos - voxel.position).normalize();
+    
+    double dot = voxel_to_cam.dot(voxel.normal);
+
+    if (dot < 0.0) return false;
+
+
+    if (std::acos(dot) > max_incidence_angle_rad_) return false;
+
     return true;
 }
-
 
 std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::filterPosesByCoverage(
     const std::vector<geometry_msgs::msg::Pose>& candidates, 
@@ -148,7 +170,7 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::filterPosesByCoverage(
     int total_covered = 0;
     int total_targets = targets.size();
 
-    
+    // Passada 1: Greedy (maximizar cobertura nova)
     for (size_t i = 0; i < candidates.size(); ++i) {
         if ((double)total_covered / total_targets >= min_coverage_percent_) break;
         std::vector<int> newly_seen_indices;
@@ -171,7 +193,7 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::filterPosesByCoverage(
         }
     }
 
-    
+    // Passada 2: Limpeza (pegar o resto)
     for (size_t i = 0; i < candidates.size(); ++i) {
         if (pose_used[i]) continue;
         if ((double)total_covered / total_targets >= min_coverage_percent_) break;
@@ -200,7 +222,6 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::filterPosesByCoverage(
     return final_poses;
 }
 
-
 std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getSortedScanPoses(const std::string& label)
 {
     tf2::Vector3 robot_pos;
@@ -216,7 +237,6 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getSortedScanPoses(cons
     const auto& obj_data = it->second;
     const auto& points = obj_data.valid_scan_grid;
 
-    
     std::map<int, std::vector<ScanPoint>> face_map;
     for(const auto& p : points) face_map[p.face_id].push_back(p);
 
@@ -238,14 +258,12 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getSortedScanPoses(cons
         }
     }
 
-    
     std::vector<TargetVoxel> targets = generateTargetVoxels(obj_data.detection);
     std::vector<geometry_msgs::msg::Pose> optimized_poses = filterPosesByCoverage(sorted_candidates, targets);
     debug_voxels_ = targets;
 
     return optimized_poses;
 }
-
 
 void GenerateScanPoses::detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg) 
 {
@@ -310,7 +328,6 @@ void GenerateScanPoses::animationTimerCallback()
     marker_pub_->publish(markers);
 }
 
-
 VoxelKey GenerateScanPoses::pointToVoxel(const tf2::Vector3& pt) 
 {
     VoxelKey key; key.x = static_cast<int>(std::floor(pt.x() / voxel_map_resolution_));
@@ -327,7 +344,6 @@ bool GenerateScanPoses::isRayBlocked(const tf2::Vector3& s, const tf2::Vector3& 
 
     tf2::Vector3 dir = e - s; double len = dir.length();
     
-    
     if (len < 1e-4) return false; 
 
     dir.normalize();
@@ -340,7 +356,6 @@ bool GenerateScanPoses::isRayBlocked(const tf2::Vector3& s, const tf2::Vector3& 
 
     return false;
 }
-
 
 std::vector<ScanPoint> GenerateScanPoses::computeValidScanningGrid(const geometry_msgs::msg::Pose& p, 
     const geometry_msgs::msg::Vector3& s, 

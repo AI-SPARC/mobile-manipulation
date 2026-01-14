@@ -47,7 +47,6 @@ add_library(manipulation_lib SHARED
   src/is_gripper_holding_impl.cpp
   src/projected_reachability_analysis.cpp 
   src/ik_validator.cpp
-  src/scan_object.cpp
 )
 
 target_include_directories(manipulation_lib
@@ -92,10 +91,9 @@ target_link_libraries(manipulation_lib
 add_executable(add_collision src/add_collision_main.cpp)
 add_executable(manipulation src/manipulation_main.cpp)
 add_executable(is_gripper_holding src/is_gripper_holding_main.cpp)
-add_executable(scan_object src/scan_object.cpp)
 
 # --- CORREÇÃO AQUI ---
-foreach(target add_collision manipulation is_gripper_holding scan_object)
+foreach(target add_collision manipulation is_gripper_holding)
   target_include_directories(${target}
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -110,30 +108,7 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
-ament_target_dependencies(scan_object
-  rclcpp
-  std_msgs
-  sensor_msgs
-  nav_msgs
-  geometry_msgs
-  visualization_msgs
-  trajectory_msgs
-  moveit_ros_planning_interface
-  mobile_manipulation_interfaces
-  vision_msgs
-  message_filters
-  rclcpp_components
-  tf2
-  tf2_ros
-  tf2_sensor_msgs
-  tf2_geometry_msgs
-  tf2_eigen
-  Eigen3
-  PCL
-  pcl_conversions
-  behaviortree_cpp
-  navigation
-)
+
 
 
 install(
@@ -142,7 +117,6 @@ install(
     add_collision
     manipulation
     is_gripper_holding
-    scan_object
   EXPORT manipulation_targets
   RUNTIME DESTINATION lib/${PROJECT_NAME}
   LIBRARY DESTINATION lib

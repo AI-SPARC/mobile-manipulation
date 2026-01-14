@@ -40,6 +40,7 @@ find_package(yaml-cpp REQUIRED)
 find_package(manipulation REQUIRED)
 find_package(storage_manager REQUIRED)
 find_package(navigation REQUIRED)
+find_package(vision REQUIRED)
 find_package(drl_to_pick_cpp REQUIRED)
 find_package(llms REQUIRED)
 
@@ -53,6 +54,7 @@ target_include_directories(server_node
     ${manipulation_INCLUDE_DIRS}
     ${navigation_INCLUDE_DIRS}
     ${storage_manager_INCLUDE_DIRS}
+    ${vision_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
 )
@@ -64,6 +66,7 @@ target_include_directories(server_node_with_llms
     ${manipulation_INCLUDE_DIRS}
     ${navigation_INCLUDE_DIRS}
     ${storage_manager_INCLUDE_DIRS}
+    ${vision_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
 )
@@ -128,6 +131,7 @@ target_link_libraries(server_node
   ${manipulation_LIBRARIES}
   ${storage_manager_LIBRARIES}
   ${navigation_LIBRARIES}
+  ${vision_LIBRARIES}
   drl_to_pick_cpp::drl_to_pick_cpp
 )
 
@@ -140,6 +144,7 @@ target_link_libraries(server_node_with_llms
   ${manipulation_LIBRARIES}
   ${storage_manager_LIBRARIES}
   ${navigation_LIBRARIES}
+  ${vision_LIBRARIES}
   drl_to_pick_cpp::drl_to_pick_cpp
   llms::world_state_node
 )

@@ -52,8 +52,8 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_latest_grasps()
 
 void BridgeToInference::cloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
-  RCLCPP_INFO(get_logger(), "==================================================");
-  RCLCPP_INFO(get_logger(), "Recebido PointCloud2. Convertendo...");
+  // RCLCPP_INFO(get_logger(), "==================================================");
+  // RCLCPP_INFO(get_logger(), "Recebido PointCloud2. Convertendo...");
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::fromROSMsg(*msg, *cloud);
@@ -79,14 +79,14 @@ void BridgeToInference::cloud_callback(const sensor_msgs::msg::PointCloud2::Shar
   }
 
   
-  if (!new_grasps.empty())
-  {
-    publish_grasps(new_grasps);
-  }
-  else
-  {
-    RCLCPP_WARN(get_logger(), "Nenhum grasp retornado pelo servidor.");
-  }
+    // if (!new_grasps.empty())
+    // {
+    //   publish_grasps(new_grasps);
+    // }
+    // else
+    // {
+    //   RCLCPP_WARN(get_logger(), "Nenhum grasp retornado pelo servidor.");
+    // }
 }
 
 geometry_msgs::msg::Pose BridgeToInference::matrix_to_pose(const Eigen::Matrix4f & matrix)
@@ -112,7 +112,7 @@ geometry_msgs::msg::Pose BridgeToInference::matrix_to_pose(const Eigen::Matrix4f
 std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
   const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud)
 {
-  RCLCPP_INFO(get_logger(), "Enviando %zu pontos para servidor...", cloud->size());
+  // RCLCPP_INFO(get_logger(), "Enviando %zu pontos para servidor...", cloud->size());
   auto t0 = std::chrono::steady_clock::now();
 
   int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -295,16 +295,16 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
       {
         grasps.push_back(score_pose_pairs[i].second);
 
-        if (i < 5)
-        {
-          const auto & pose = score_pose_pairs[i].second;
-          RCLCPP_INFO(get_logger(), "  #%zu: score=%.3f, pos=[%.3f, %.3f, %.3f]",
-            i + 1, score_pose_pairs[i].first,
-            pose.position.x, pose.position.y, pose.position.z);
-        }
+        // if (i < 5)
+        // {
+        //   const auto & pose = score_pose_pairs[i].second;
+        //   RCLCPP_INFO(get_logger(), "  #%zu: score=%.3f, pos=[%.3f, %.3f, %.3f]",
+        //     i + 1, score_pose_pairs[i].first,
+        //     pose.position.x, pose.position.y, pose.position.z);
+        // }
       }
 
-      RCLCPP_INFO(get_logger(), "Grasps válidos: %zu (threshold=%.2f)", count, score_threshold_);
+      // RCLCPP_INFO(get_logger(), "Grasps válidos: %zu (threshold=%.2f)", count, score_threshold_);
     }
   }
   catch (const std::exception & e)

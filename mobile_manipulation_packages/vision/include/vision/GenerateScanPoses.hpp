@@ -55,7 +55,7 @@ public:
 
     
     std::vector<geometry_msgs::msg::Pose> getSortedScanPoses(const std::string& label);
-
+    
 private:
     
     std::string target_frame_;
@@ -66,7 +66,7 @@ private:
     double ray_step_size_;
     std::string target_object_id_;
     bool publish_markers_; 
-
+    double max_incidence_angle_rad_;
     
     double camera_fov_h_rad_;
     double camera_fov_v_rad_;
