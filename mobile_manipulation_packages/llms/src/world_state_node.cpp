@@ -2,7 +2,6 @@
 #include <filesystem>
 #include <sstream> 
 #include "rclcpp_components/register_node_macro.hpp"
-#include <filesystem> 
 
 namespace llms
 {
@@ -10,11 +9,12 @@ namespace llms
 WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 : Node("world_state_node", options), db_(nullptr)
 {
-    this->declare_parameter<std::string>("database_path", "/home/momesso/AQUI/robot_data.db");
+    this->declare_parameter<std::string>("database_path", "/home/momesso/pibic/src/mobile_manipulation_packages/llms/db/robot_world_data.db");
+    this->declare_parameter<int>("num_cameras", 3);
 
     std::string db_path = this->get_parameter("database_path").as_string();
+    int num_cameras = this->get_parameter("num_cameras").as_int();
     
-   
     std::filesystem::path path_obj(db_path);
     
     if (path_obj.has_parent_path()) 
@@ -26,7 +26,6 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
         }
     }
 
-   
     if (sqlite3_open(db_path.c_str(), &db_) != SQLITE_OK) 
     {
         RCLCPP_FATAL(this->get_logger(), "Falha ao abrir DB: %s", sqlite3_errmsg(db_));
@@ -37,11 +36,18 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
         RCLCPP_INFO(this->get_logger(), "DB conectado com sucesso em: %s", db_path.c_str());
     }
 
+    for (int i = 0; i < num_cameras; ++i)
+    {
+        std::string topic_name = "/bbox_3d_with_labels_" + std::to_string(i);
 
-    subscription_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-        "/bbox_3d_with_labels", 10, 
-        std::bind(&WorldStateNode::handle_detections, this, std::placeholders::_1)
-    );
+        auto sub = this->create_subscription<vision_msgs::msg::Detection3DArray>(
+            topic_name, 10, 
+            std::bind(&WorldStateNode::handle_detections, this, std::placeholders::_1)
+        );
+
+        subscriptions_.push_back(sub);
+        RCLCPP_INFO(this->get_logger(), "Inscrito no tópico: %s", topic_name.c_str());
+    }
 }
 
 WorldStateNode::~WorldStateNode()
@@ -105,7 +111,6 @@ bool WorldStateNode::upsert_object(const std::string& id,
 {
     std::lock_guard<std::mutex> lock(db_mutex_);
 
-    
     std::string sql = R"(
         INSERT INTO objects (id, pose, size, last_update)
         VALUES (?, ?, ?, strftime('%s','now'))
