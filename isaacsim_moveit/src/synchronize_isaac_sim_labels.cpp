@@ -4,52 +4,63 @@
 #include <regex>
 #include <map>
 #include <string>
+#include <vector>
+#include <memory>
 
 using Detection3DArray = vision_msgs::msg::Detection3DArray;
 using StringMsg = std_msgs::msg::String;
 
-class TranslatorNode : public rclcpp::Node
+
+class CameraProcessor
 {
 public:
-    TranslatorNode()
-        : Node("synchronize_isaac_sim_labels")
+    CameraProcessor(rclcpp::Node* node, int camera_id)
+        : camera_id_(camera_id)
     {
-        std::string detections_topic = "/bbox_3d";
-        std::string mapping_topic = "/semantic_labels";
-        std::string output_topic = "/bbox_3d_with_labels";
+        std::string id_str = std::to_string(camera_id_);
 
-        publisher_ = this->create_publisher<Detection3DArray>(output_topic, 10);
+        
+        std::string detections_topic = "/bbox_3d_" + id_str;
+        std::string mapping_topic = "/semantic_labels_" + id_str;
+        std::string output_topic = "/bbox_3d_with_labels_" + id_str;
 
-        detections_sub_ = this->create_subscription<Detection3DArray>(
+        
+        publisher_ = node->create_publisher<Detection3DArray>(output_topic, 10);
+
+        
+        detections_sub_ = node->create_subscription<Detection3DArray>(
             detections_topic, 10,
-            std::bind(&TranslatorNode::detections_callback, this, std::placeholders::_1));
+            std::bind(&CameraProcessor::detections_callback, this, std::placeholders::_1));
 
-        mapping_sub_ = this->create_subscription<StringMsg>(
+        
+        mapping_sub_ = node->create_subscription<StringMsg>(
             mapping_topic, 10,
-            std::bind(&TranslatorNode::mapping_callback, this, std::placeholders::_1));
+            std::bind(&CameraProcessor::mapping_callback, this, std::placeholders::_1));
 
-        RCLCPP_INFO(this->get_logger(), "Nó iniciado. Aguardando mensagens...");
+        RCLCPP_INFO(node->get_logger(), "Configurado processador para Camera %d nos topicos: %s, %s -> %s", 
+            camera_id_, detections_topic.c_str(), mapping_topic.c_str(), output_topic.c_str());
     }
 
 private:
+    int camera_id_;
     rclcpp::Publisher<Detection3DArray>::SharedPtr publisher_;
     rclcpp::Subscription<Detection3DArray>::SharedPtr detections_sub_;
     rclcpp::Subscription<StringMsg>::SharedPtr mapping_sub_;
     std::map<std::string, std::string> label_map_;
 
-    // -------------------------------------------------------
+   
     void mapping_callback(const StringMsg::SharedPtr msg)
     {
         label_map_ = parse_label_map(msg->data);
-        // RCLCPP_INFO(this->get_logger(), "Mapa de labels atualizado (%zu itens).", label_map_.size());
+        // RCLCPP_INFO(rclcpp::get_logger("CameraProcessor"), "Camera %d: Mapa de labels atualizado (%zu itens).", camera_id_, label_map_.size());
     }
 
-    // -------------------------------------------------------
+    
     void detections_callback(const Detection3DArray::SharedPtr msg)
     {
         if (label_map_.empty())
         {
-            // RCLCPP_WARN(this->get_logger(), "Mapa de labels vazio. Ignorando detecções.");
+            
             return;
         }
 
@@ -76,12 +87,12 @@ private:
         publisher_->publish(labeled_msg);
     }
 
-    // -------------------------------------------------------
+    
     std::map<std::string, std::string> parse_label_map(const std::string &input)
     {
         std::map<std::string, std::string> result;
 
-        // Captura tanto "X":{"class":"YYY"} quanto "X":{"YYY":"YYY"}
+        
         std::regex pair_regex("\"([0-9]+)\"\\s*:\\s*\\{[^}]*\"([A-Za-z0-9_]+)\"\\s*:\\s*\"([A-Za-z0-9_]+)\"");
 
         std::smatch match;
@@ -100,7 +111,33 @@ private:
     }
 };
 
-// -------------------------------------------------------
+
+class TranslatorNode : public rclcpp::Node
+{
+public:
+    TranslatorNode()
+        : Node("synchronize_isaac_sim_labels")
+    {
+       
+        this->declare_parameter("num_cameras", 3);
+        
+        int num_cameras = this->get_parameter("num_cameras").as_int();
+
+        RCLCPP_INFO(this->get_logger(), "Iniciando TranslatorNode para %d cameras...", num_cameras);
+
+        
+        for (int i = 0; i < num_cameras; ++i)
+        {
+            camera_processors_.push_back(std::make_shared<CameraProcessor>(this, i));
+        }
+    }
+
+private:
+    
+    std::vector<std::shared_ptr<CameraProcessor>> camera_processors_;
+};
+
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
