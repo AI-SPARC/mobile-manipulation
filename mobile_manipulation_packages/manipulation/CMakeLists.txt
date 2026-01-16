@@ -12,7 +12,6 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
-
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
@@ -32,14 +31,12 @@ find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
 find_package(Boost REQUIRED)
 find_package(TBB REQUIRED)
-find_package(SQLite3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
-
 find_package(yaml-cpp REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
 find_package(navigation REQUIRED)
-
+find_package(SQLite3 REQUIRED)
 
 add_library(manipulation_lib SHARED
   src/add_collision_impl.cpp
@@ -53,6 +50,7 @@ target_include_directories(manipulation_lib
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+    ${SQLite3_INCLUDE_DIRS}
 )
 
 ament_target_dependencies(manipulation_lib
@@ -86,30 +84,25 @@ target_link_libraries(manipulation_lib
   ${OpenCV_LIBS}
   yaml-cpp
   ${PCL_LIBRARIES}
+  SQLite::SQLite3
 )
 
 add_executable(add_collision src/add_collision_main.cpp)
 add_executable(manipulation src/manipulation_main.cpp)
 add_executable(is_gripper_holding src/is_gripper_holding_main.cpp)
 
-# --- CORREÇÃO AQUI ---
 foreach(target add_collision manipulation is_gripper_holding)
   target_include_directories(${target}
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
       $<INSTALL_INTERFACE:include>
   )
-  # REMOVIDO "PUBLIC" PARA EVITAR CONFLITO COM AMENT_TARGET_DEPENDENCIES
   target_link_libraries(${target} manipulation_lib) 
 endforeach()
-# ---------------------
 
 install(DIRECTORY include/
   DESTINATION include
 )
-
-
-
 
 install(
   TARGETS
@@ -129,11 +122,9 @@ install(
   DESTINATION share/${PROJECT_NAME}/cmake
 )
 
-
 ament_export_targets(manipulation_targets HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
 ament_export_libraries(manipulation_lib)
-
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -141,6 +132,5 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
-
 
 ament_package()

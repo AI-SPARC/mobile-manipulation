@@ -1,14 +1,10 @@
-#include <memory>
-#include <vector>
+#include "manipulation/AddCollision.hpp"
+
 #include <cmath>
 #include <iostream>
 #include <functional>
-#include <unordered_set>
-#include <unordered_map>
 #include <fstream>
-#include <array>
-
-#include <manipulation/AddCollision.hpp>
+#include <sstream>
 
 #include "yaml-cpp/yaml.h"
 
@@ -16,19 +12,18 @@ using namespace std::chrono_literals;
 
 namespace manipulation {
 
-
-AddCollision::AddCollision()
- : Node("add_collision_objects")
+AddCollision::AddCollision(const rclcpp::NodeOptions & options)
+ : Node("add_collision_objects", options), db_(nullptr), stop_moving_obstacle(""), activate_movement(false)
 {
     this->declare_parameter<std::string>("yaml_file", "");
+    this->declare_parameter<std::string>("database_path", "/home/momesso/pibic/src/mobile_manipulation_packages/llms/db/robot_world_data.db");
+
     std::string labels_path = this->get_parameter("yaml_file").as_string();
+    db_path_ = this->get_parameter("database_path").as_string();
 
     load_labels_from_yaml(labels_path);
+    connect_database();
 
-    sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-        "/boxes_detection_array", 10,
-        std::bind(&AddCollision::detectionCallback, this, std::placeholders::_1));
-    
     service_ = this->create_service<mobile_manipulation_interfaces::srv::MobileObjectCollision>(
         "/object_collision",
         std::bind(&AddCollision::handleStopService, this, std::placeholders::_1, std::placeholders::_2));
@@ -38,9 +33,115 @@ AddCollision::AddCollision()
         [this]() {
             this->add_ground_plane();
             this->init_timer_->cancel(); 
-        });        
+        });
+
+
+    db_timer_ = this->create_wall_timer(
+        std::chrono::milliseconds(10),
+        std::bind(&AddCollision::sync_from_database, this));
+        
+    RCLCPP_INFO(this->get_logger(), "AddCollision iniciado. Lendo DB: %s", db_path_.c_str());
 }   
 
+AddCollision::~AddCollision()
+{
+    if (db_) {
+        sqlite3_close(db_);
+    }
+}
+
+void AddCollision::connect_database()
+{
+    
+    int rc = sqlite3_open_v2(db_path_.c_str(), &db_, SQLITE_OPEN_READONLY, nullptr);
+    if (rc != SQLITE_OK) 
+    {
+        RCLCPP_ERROR(this->get_logger(), "Falha ao abrir DB (pode não ter sido criado ainda): %s", sqlite3_errmsg(db_));
+        db_ = nullptr;
+    } 
+    else 
+    {
+        RCLCPP_INFO(this->get_logger(), "Conectado ao DB com sucesso.");
+    }
+}
+
+std::vector<double> AddCollision::parse_string_to_vector(const std::string& s)
+{
+    std::vector<double> v;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, ';')) {
+        try {
+            v.push_back(std::stod(item));
+        } catch (...) {
+            v.push_back(0.0);
+        }
+    }
+    
+    while (v.size() < 3) v.push_back(0.0);
+    return v;
+}
+
+void AddCollision::sync_from_database()
+{
+    if (!db_) 
+    {
+        
+        static int retry_counter = 0;
+        if (retry_counter++ % 50 == 0) connect_database(); 
+        return;
+    }
+
+    const char* sql = "SELECT id, pose, size FROM objects;";
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, 0) != SQLITE_OK) 
+    {
+        
+        return; 
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        std::string object_id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        std::string pose_str = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        std::string size_str = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+
+        
+        if (!is_authorized(object_id)) continue;
+
+        
+        std::vector<double> pose_vec = parse_string_to_vector(pose_str);
+        std::vector<double> size_vec = parse_string_to_vector(size_str);
+
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = pose_vec[0];
+        pose.position.y = pose_vec[1];
+        pose.position.z = pose_vec[2];
+        pose.orientation.w = 1.0; 
+   
+        pose.position.z += size_vec[2] / 2.0;
+
+        std::array<double, 3> size_array = {size_vec[0], size_vec[1], size_vec[2]};
+
+        if (added.find(object_id) == added.end()) 
+        {
+            add_collision_box(object_id, size_array, pose);
+        } 
+        else 
+        {
+            if (object_id == stop_moving_obstacle)
+            {
+                if (activate_movement) move_collision_box(object_id, pose);
+            }
+            else 
+            {
+                move_collision_box(object_id, pose);
+            }
+        }
+    }
+
+    sqlite3_finalize(stmt);
+}
 
 void AddCollision::load_labels_from_yaml(const std::string& file_path)
 {
@@ -153,40 +254,6 @@ bool AddCollision::is_authorized(const std::string& label)
             return true;
 
     return false;
-}
-
-void AddCollision::detectionCallback(const vision_msgs::msg::Detection3DArray::SharedPtr msg)
-{
-    if (msg->detections.empty()) return;
-
-    for (const auto &det : msg->detections)
-    {
-        if (det.results.empty()) continue;
-
-        std::string object_id = det.results[0].hypothesis.class_id;
-        if (!is_authorized(object_id)) continue;
-
-        geometry_msgs::msg::Pose pose = det.bbox.center;
-        pose.position.z += det.bbox.size.z / 2.0; 
-
-        std::array<double, 3> size_array = {det.bbox.size.x, det.bbox.size.y, det.bbox.size.z};
-
-        if (added.find(object_id) == added.end()) 
-        {
-            add_collision_box(object_id, size_array, pose);
-        } 
-        else 
-        {
-            if (object_id == stop_moving_obstacle)
-            {
-                if (activate_movement) move_collision_box(object_id, pose);
-            }
-            else 
-            {
-                move_collision_box(object_id, pose);
-            }
-        }
-    }
 }
 
 void AddCollision::handleStopService(
