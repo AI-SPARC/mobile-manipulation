@@ -53,10 +53,10 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<std::string>("target_object_id", "");
     this->declare_parameter<bool>("publish_markers", true); 
 
-    this->declare_parameter<double>("camera_fov_h_deg", 60.0);
-    this->declare_parameter<double>("camera_fov_v_deg", 40.0);
+    this->declare_parameter<double>("camera_fov_h_deg", 153.16); 
+    this->declare_parameter<double>("camera_fov_v_deg", 134.02);
     this->declare_parameter<double>("target_surface_res", 0.005);
-    this->declare_parameter<double>("min_coverage_percent", 0.6);
+    this->declare_parameter<double>("min_coverage_percent", 0.96);
     
     this->declare_parameter<double>("max_incidence_angle_deg", 80.0);
 
@@ -80,7 +80,7 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     max_incidence_angle_rad_ = max_inc_deg * (M_PI / 180.0);
 
     sub_detections_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-        "/bbox_3d_with_labels", 10, std::bind(&GenerateScanPoses::detectionCallback, this, std::placeholders::_1));
+        "/bbox_3d_with_labels_0", 10, std::bind(&GenerateScanPoses::detectionCallback, this, std::placeholders::_1));
 
     sub_semantic_pcl_ = this->create_subscription<mobile_manipulation_interfaces::msg::SemanticPcl>(
         "/semantic_pcl_array", 10, std::bind(&GenerateScanPoses::semanticPclCallback, this, std::placeholders::_1));
@@ -352,6 +352,7 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getOptimizedScanPoses(
     std::vector<TargetVoxel> targets = generateTargetVoxels(obj_data.detection);
     std::vector<geometry_msgs::msg::Pose> optimized_poses = filterPosesByCoverage(reordered_poses, targets);
     debug_voxels_ = targets;
+    poses_to_animate_ = optimized_poses;
 
     return optimized_poses;
 }
@@ -402,20 +403,8 @@ void GenerateScanPoses::animationTimerCallback()
         arrow.color.r = 0.0; arrow.color.g = 1.0; arrow.color.b = 0.0; arrow.color.a = 1.0;
         markers.markers.push_back(arrow);
     }
-    visualization_msgs::msg::Marker pts;
-    pts.header = last_header_; pts.header.stamp = this->now();
-    pts.ns = "coverage_debug"; pts.id = 9999;
-    pts.type = visualization_msgs::msg::Marker::POINTS;
-    pts.action = visualization_msgs::msg::Marker::ADD;
-    pts.scale.x = 0.01; pts.scale.y = 0.01;
-    for(const auto& v : debug_voxels_) {
-        geometry_msgs::msg::Point p; p.x = v.position.x(); p.y = v.position.y(); p.z = v.position.z();
-        pts.points.push_back(p);
-        std_msgs::msg::ColorRGBA c; c.a = 0.8;
-        if(v.covered) { c.g = 1.0; } else { c.r = 1.0; }
-        pts.colors.push_back(c);
-    }
-    markers.markers.push_back(pts);
+    
+
     marker_pub_->publish(markers);
 }
 

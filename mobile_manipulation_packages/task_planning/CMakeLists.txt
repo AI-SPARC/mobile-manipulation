@@ -133,6 +133,7 @@ target_link_libraries(server_node
   ${navigation_LIBRARIES}
   ${vision_LIBRARIES}
   drl_to_pick_cpp::drl_to_pick_cpp
+  llms::world_state_node
 )
 
 target_link_libraries(server_node_with_llms

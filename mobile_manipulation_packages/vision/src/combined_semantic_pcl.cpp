@@ -8,7 +8,6 @@
 #include <random>
 #include <cctype>
 
-// Includes de Transformação e Geometria
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/LinearMath/Transform.h>
 
@@ -20,55 +19,55 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
       frame_count_(0)
 {
     this->declare_parameter<std::string>("target_frame", "world"); 
-    this->declare_parameter<std::string>("topic_segmentation", "/semantic_segmentation");
-    this->declare_parameter<std::string>("topic_pointcloud", "/depth_pcl");
-    this->declare_parameter<std::string>("topic_labels", "/semantic_labels");
-    this->declare_parameter<std::string>("topic_output_semantic", "/semantic_pcl");
-    this->declare_parameter<std::string>("topic_output_colored", "/semantic_pcl_colored");
-    this->declare_parameter<std::string>("topic_custom_msg", "/semantic_pcl_array"); 
-    
     this->declare_parameter<int>("downsample_step", 4); 
 
     target_frame_ = this->get_parameter("target_frame").as_string();
-    topic_segmentation_ = this->get_parameter("topic_segmentation").as_string();
-    topic_pointcloud_ = this->get_parameter("topic_pointcloud").as_string();
-    topic_labels_ = this->get_parameter("topic_labels").as_string();
-    topic_output_semantic_ = this->get_parameter("topic_output_semantic").as_string();
-    topic_output_colored_ = this->get_parameter("topic_output_colored").as_string();
-    topic_custom_msg_ = this->get_parameter("topic_custom_msg").as_string();
     
     downsample_step_ = this->get_parameter("downsample_step").as_int();
     if (downsample_step_ < 1) downsample_step_ = 1;
 
     RCLCPP_INFO(this->get_logger(), "=== SEMANTIC PCL NODE (REGEX HYBRID) ===");
     RCLCPP_INFO(this->get_logger(), "Target Frame: %s", target_frame_.c_str());
+    RCLCPP_INFO(this->get_logger(), "Downsample Step: %d", downsample_step_);
 
+    
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
+
     labels_sub_ = this->create_subscription<std_msgs::msg::String>(
-        topic_labels_,
+        "semantic_labels", 
         10,
         std::bind(&CombinedSemanticPCL::labelsCallback, this, std::placeholders::_1)
     );
 
+   
     auto sensor_qos = rclcpp::SensorDataQoS(); 
     auto rmw_qos = sensor_qos.get_rmw_qos_profile();
     
+    
     seg_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-        this, topic_segmentation_, rmw_qos);
+        this, "semantic_segmentation", rmw_qos);
     
+
     pcl_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(
-        this, topic_pointcloud_, rmw_qos);
+        this, "depth_pcl", rmw_qos);
     
+   
     sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
         SyncPolicy(10), *seg_sub_, *pcl_sub_);
     
     sync_->registerCallback(std::bind(&CombinedSemanticPCL::syncedCallback, this, std::placeholders::_1, std::placeholders::_2));
     
-    pub_semantic_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_semantic_, 10);
-    pub_colored_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_colored_, 10);
-    pub_custom_msg_ = this->create_publisher<mobile_manipulation_interfaces::msg::SemanticPcl>(topic_custom_msg_, 10);
+    
+    pub_semantic_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+        "semantic_pcl", 10);
+        
+    pub_colored_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+        "semantic_pcl_colored", 10);
+        
+    pub_custom_msg_ = this->create_publisher<mobile_manipulation_interfaces::msg::SemanticPcl>(
+        "semantic_pcl_array", 10);
 }
 
 void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr msg)
@@ -79,7 +78,6 @@ void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr 
 
 std::string CombinedSemanticPCL::extractCleanLabel(std::string raw_label)
 {
-    // Remove aspas se sobrarem
     raw_label.erase(std::remove(raw_label.begin(), raw_label.end(), '\"'), raw_label.end());
 
     size_t colon_pos = raw_label.find(':');

@@ -55,6 +55,11 @@
 
 #include <drl_to_pick_cpp/BridgeToInference.hpp>
 
+#include <llms/DatabaseHandler.hpp>
+#include <llms/WorldStateNode.hpp>
+
+static DatabaseHandler* g_db_handler = nullptr;
+
 namespace BT
 {
     // DOC-START: convertFromString
@@ -190,7 +195,8 @@ public:
         std::shared_ptr<storage_manager::OrganizeNode> organize_node,
         std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node,
         std::shared_ptr<vision::GenerateScanPoses> scan_object_node,
-        std::shared_ptr<vision::ObjectMapping> object_mapping_node
+        std::shared_ptr<vision::ObjectMapping> object_mapping_node,
+        std::shared_ptr<llms::WorldStateNode> world_state_node
     )
     : Node("server_node"),
     gripper_monitor_node_(gripper_node),
@@ -201,23 +207,31 @@ public:
     organize_node_(organize_node),
     bridge_to_inference_node_(bridge_to_inference_node),
     scan_object_node_(scan_object_node),
-    object_mapping_node_(object_mapping_node)
+    object_mapping_node_(object_mapping_node),
+    world_state_node_(world_state_node)
     {
         // Declaração de parâmetros (caminhos de arquivos)
         this->declare_parameter<std::string>("yaml_file", "");
         this->declare_parameter<std::string>("bt_xml_path", "");
+        this->declare_parameter<std::string>("database_path", "");
         this->declare_parameter<bool>("use_graspnet", true);
         this->declare_parameter<int>("max_graspnet_attempts", 3);
 
         yaml_file = this->get_parameter("yaml_file").as_string();
         std::string bt_xml_path = this->get_parameter("bt_xml_path").as_string();
+        std::string db_path = this->get_parameter("database_path").as_string();
         use_graspnet = this->get_parameter("use_graspnet").as_bool();
         this->grasp_context_.graspnet_maximum_attempts = this->get_parameter("max_graspnet_attempts").as_int();
+
+        db_handler_ = std::make_unique<DatabaseHandler>(db_path);
+        g_db_handler = db_handler_.get();  
+
+        RCLCPP_INFO(this->get_logger(), "DatabaseHandler conectado: %s", db_path.c_str());
 
         // 1. Subscribers:
         // Ouve as detecções do YOLO ("vision_msgs")
         sub_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-            "/bbox_3d_with_labels", 10,
+            "/bbox_3d_with_labels_0", 10,
             std::bind(&ServerNode::detection_callback, this, std::placeholders::_1));
 
         // Ouve a posição do robô ("nav_msgs")
@@ -314,7 +328,7 @@ private:
     // Ponteiro para o publicador de logs do Groot2 (Visualizador da Behavior Tree)
     std::unique_ptr<BT::Groot2Publisher> groot_publisher_;
 
-
+    std::shared_ptr<llms::WorldStateNode> world_state_node_;
     // --- Comunicação ROS 2 ---
 
     // Publicador para enviar a pose do objeto em tempo real para o nó de manipulação
@@ -351,6 +365,8 @@ private:
     // Cache do último objeto válido detectado pela câmera
     ObjectInfo cached_object_;
     GraspContext grasp_context_;
+
+    std::unique_ptr<DatabaseHandler> db_handler_;
 
     // --- Estado do Alvo Atual ---
     // ID do objeto que está sendo processado pela Behavior Tree (vazio se ocioso)
@@ -1057,13 +1073,13 @@ private:
                             else
                             {
                                 RCLCPP_WARN(this->get_logger(), "Nenhuma pose de scan é alcançável (IK falhou ou colisão).");
-                                return BT::NodeStatus::FAILURE;
+                                return BT::NodeStatus::RUNNING;
                             }
                         }
                         else
                         {
                             RCLCPP_WARN(this->get_logger(), "Falha ao obter poses: Objeto não encontrado ou posição do robô desconhecida.");
-                            return BT::NodeStatus::FAILURE;
+                            return BT::NodeStatus::RUNNING;
                         }
 
                         this->object_mapping_node_->ObjectToMap(cached_object_.id);
@@ -1108,95 +1124,95 @@ private:
                         
                     }
                     
-                    // if (current_pick_phase_ == GraspPhase::GRASPNET_SCAN)
-                    // {
+                    if (current_pick_phase_ == GraspPhase::GRASPNET_SCAN)
+                    {
                         
-                    //     auto duration = rclcpp::Duration(2, 0); 
+                        auto duration = rclcpp::Duration(2, 0); 
 
-                    //     auto start_time = this->get_clock()->now();
+                        auto start_time = this->get_clock()->now();
 
-                    //     while ((this->get_clock()->now() - start_time) < duration) 
-                    //     {
-                    //         if (!rclcpp::ok()) 
-                    //         {
-                    //             break;
-                    //         }
+                        while ((this->get_clock()->now() - start_time) < duration) 
+                        {
+                            if (!rclcpp::ok()) 
+                            {
+                                break;
+                            }
 
-                    //         std::vector<geometry_msgs::msg::Pose> result;
+                            std::vector<geometry_msgs::msg::Pose> result;
                            
-                    //         result = this->bridge_to_inference_node_->get_latest_grasps();
+                            result = this->bridge_to_inference_node_->get_latest_grasps();
                             
                             
-                    //         if(result.empty())
-                    //         {
-                    //             this->grasp_context_.grasp_poses.clear();
-                    //             return BT::NodeStatus::RUNNING;
-                    //         }
-                    //         else
-                    //         {
-                    //             this->grasp_context_.grasp_poses = result;
-                    //             break;
-                    //         }
-                    //     }
+                            if(result.empty())
+                            {
+                                this->grasp_context_.grasp_poses.clear();
+                                return BT::NodeStatus::RUNNING;
+                            }
+                            else
+                            {
+                                this->grasp_context_.grasp_poses = result;
+                                break;
+                            }
+                        }
                         
 
-                    //     if (this->active_arm_handle_ != nullptr)
-                    //     {
-                    //         RCLCPP_INFO(this->get_logger(), "Enviando solicitação de CANCELAMENTO do goal...");
+                        if (this->active_arm_handle_ != nullptr)
+                        {
+                            RCLCPP_INFO(this->get_logger(), "Enviando solicitação de CANCELAMENTO do goal...");
                             
-                    //         current_pick_phase_ = GraspPhase::WAITING;
-                    //         auto future_cancel = this->client_ptr_->async_cancel_goal(this->active_arm_handle_);
+                            current_pick_phase_ = GraspPhase::WAITING;
+                            auto future_cancel = this->client_ptr_->async_cancel_goal(this->active_arm_handle_);
                             
-                    //         std::future_status status = future_cancel.wait_for(std::chrono::seconds(5));
+                            std::future_status status = future_cancel.wait_for(std::chrono::seconds(5));
 
-                    //         if (status == std::future_status::ready)
-                    //         {
-                    //             try
-                    //             {
-                    //                 auto cancel_response = future_cancel.get();
+                            if (status == std::future_status::ready)
+                            {
+                                try
+                                {
+                                    auto cancel_response = future_cancel.get();
                                     
                                     
-                    //                 if (cancel_response->return_code == action_msgs::srv::CancelGoal::Response::ERROR_NONE)
-                    //                 {
-                    //                     RCLCPP_INFO(this->get_logger(), "Cancelamento ACEITO pelo servidor.");
-                    //                     current_pick_phase_ = GraspPhase::SEND_GOAL;
-                    //                 }
-                    //                 else
-                    //                 {
-                    //                     RCLCPP_WARN(this->get_logger(), "Cancelamento REJEITADO/FALHOU. Código: %d", (int)cancel_response->return_code);
-                    //                 }
+                                    if (cancel_response->return_code == action_msgs::srv::CancelGoal::Response::ERROR_NONE)
+                                    {
+                                        RCLCPP_INFO(this->get_logger(), "Cancelamento ACEITO pelo servidor.");
+                                        current_pick_phase_ = GraspPhase::SEND_GOAL;
+                                    }
+                                    else
+                                    {
+                                        RCLCPP_WARN(this->get_logger(), "Cancelamento REJEITADO/FALHOU. Código: %d", (int)cancel_response->return_code);
+                                    }
                                     
-                    //             }
-                    //             catch (const std::exception &e)
-                    //             {
-                    //                 RCLCPP_ERROR(this->get_logger(), "Exceção ao ler resposta do cancelamento: %s", e.what());
-                    //             }
-                    //         }
-                    //         else
-                    //         {
-                    //             RCLCPP_ERROR(this->get_logger(), "Timeout: O servidor demorou mais de 5s para responder ao cancelamento.");
-                    //         }
-                    //     }
+                                }
+                                catch (const std::exception &e)
+                                {
+                                    RCLCPP_ERROR(this->get_logger(), "Exceção ao ler resposta do cancelamento: %s", e.what());
+                                }
+                            }
+                            else
+                            {
+                                RCLCPP_ERROR(this->get_logger(), "Timeout: O servidor demorou mais de 5s para responder ao cancelamento.");
+                            }
+                        }
                         
 
                         
-                    //     return BT::NodeStatus::RUNNING;
-                    // }
+                        return BT::NodeStatus::RUNNING;
+                    }
 
-                    // if (current_pick_phase_ == GraspPhase::SEND_GOAL)
-                    // {
+                    if (current_pick_phase_ == GraspPhase::SEND_GOAL)
+                    {
                         
-                    //     this->grasp_context_.graspnet_attempts += 1;
-                    //     if(!this->grasp_context_.grasp_poses.empty())
-                    //     {
+                        this->grasp_context_.graspnet_attempts += 1;
+                        if(!this->grasp_context_.grasp_poses.empty())
+                        {
                             
-                    //         this->send_goal(id.value(), this->grasp_context_.grasp_poses, true, false);
-                    //         current_pick_phase_ = GraspPhase::WAITING;
-                    //     }
+                            this->send_goal(id.value(), this->grasp_context_.grasp_poses, true, false);
+                            current_pick_phase_ = GraspPhase::WAITING;
+                        }
                         
                         
-                    //     return BT::NodeStatus::RUNNING;
-                    // }
+                        return BT::NodeStatus::RUNNING;
+                    }
                     
 
                    return BT::NodeStatus::RUNNING;
@@ -1206,7 +1222,7 @@ private:
                     // return check_task_status(manipulation_state_);
                 }
                 
-
+                return BT::NodeStatus::RUNNING;
                 //  return check_pick_phase_status(current_pick_phase_);
             });
         };
@@ -1515,7 +1531,6 @@ private:
 
 
     // DOC-START: send_controller_goal
-    // Envia o caminho (Path) para o controlador local seguir.
     bool send_controller_goal(const nav_msgs::msg::Path &target_path)
     {
         if (!this->controller_client->wait_for_action_server(std::chrono::seconds(5))) 
@@ -1589,7 +1604,6 @@ private:
     // DOC-END: controller_result_callback
 
     // DOC-START: send_goal
-    // Envia Action de Manipulação (Pick ou Place) com ARRAY de poses.
     void send_goal(const std::string id, const std::vector<geometry_msgs::msg::Pose> & target_poses, bool pick, bool follow_path)
     {
         if (!this->client_ptr_->wait_for_action_server(std::chrono::seconds(10)))
@@ -1621,7 +1635,7 @@ private:
         goal_msg.pick = pick;
         goal_msg.follow_path = follow_path;
         
-        // Agora atribuímos o vetor de poses
+        
         goal_msg.poses = target_poses; 
 
         RCLCPP_INFO(this->get_logger(), "BT: Enviando Goal para MANIPULATION com %zu poses...", target_poses.size());
@@ -1635,7 +1649,6 @@ private:
     // DOC-END: send_goal
 
     // DOC-START: goal_response_callback
-    // (Este callback geralmente permanece igual, a menos que a lógica de aceitação mude)
     void goal_response_callback(const std::shared_ptr<rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>> & goal_handle)
     {
         if (!goal_handle)
@@ -1668,7 +1681,6 @@ private:
     // DOC-END: goal_response_callback
 
     // DOC-START: result_callback
-    // (Este callback permanece igual pois o result continua sendo apenas 'bool success')
     void result_callback(const rclcpp_action::ClientGoalHandle<mobile_manipulation_interfaces::action::PickObject>::WrappedResult & result)
     {
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result->success)
@@ -1772,6 +1784,9 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions object_mapping_opts;
     object_mapping_opts.arguments({"--ros-args", "-r", "__node:=object_mapping"});
 
+    rclcpp::NodeOptions world_state_node_opts;
+    world_state_node_opts.arguments({"--ros-args", "-r", "__node:=world_state_node"});
+
     std::shared_ptr<storage_manager::OrganizeNode> organize_node = nullptr;
     std::shared_ptr<storage_manager::StorageNode> storage_node   = nullptr;
 
@@ -1786,7 +1801,8 @@ int main(int argc, char * argv[])
 
     std::shared_ptr<drl_to_pick_cpp::BridgeToInference> bridge_to_inference_node = nullptr; 
 
-
+    std::shared_ptr<llms::WorldStateNode> world_state_node = nullptr; 
+    
     rclcpp::executors::MultiThreadedExecutor executor;
 
     if (enable_organize)
@@ -1826,8 +1842,14 @@ int main(int argc, char * argv[])
     object_mapping_node = std::make_shared<vision::ObjectMapping>(object_mapping_opts);
     executor.add_node(object_mapping_node);
 
+    world_state_node = std::make_shared<llms::WorldStateNode>(world_state_node_opts);
+    executor.add_node(world_state_node);
+    
+
     auto server_node = std::make_shared<ServerNode>(gripper_node, reachability_node, 
-        ik_validator_node, obstacle_graph_node, storage_node, organize_node, bridge_to_inference_node, scan_object_node, object_mapping_node);
+        ik_validator_node, obstacle_graph_node, storage_node, organize_node, bridge_to_inference_node, 
+        scan_object_node, object_mapping_node, world_state_node
+    );
 
     executor.add_node(server_node);
 
