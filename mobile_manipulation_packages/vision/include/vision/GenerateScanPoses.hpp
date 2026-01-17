@@ -71,6 +71,8 @@ private:
     bool publish_markers_; 
     double max_incidence_angle_rad_;
     
+    int num_cameras_;
+
     double camera_fov_h_rad_;
     double camera_fov_v_rad_;
     double target_surface_res_;
@@ -93,8 +95,8 @@ private:
     std::vector<TargetVoxel> debug_voxels_;
     std::mutex anim_mutex_;
 
-   
-    rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr sub_detections_;
+    std::vector<rclcpp::Subscription<vision_msgs::msg::Detection3DArray>::SharedPtr> sub_detections_;
+    
     rclcpp::Subscription<mobile_manipulation_interfaces::msg::SemanticPcl>::SharedPtr sub_semantic_pcl_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odometry_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;

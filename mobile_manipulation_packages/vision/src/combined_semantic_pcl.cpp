@@ -93,6 +93,7 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
 
     // --- Timer de Publicação ---
     // Publica periodicamente independente da chegada dos dados
+
     int ms_period = static_cast<int>(1000.0 / publish_rate_);
     pub_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(ms_period),
@@ -106,9 +107,6 @@ void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr 
     parseLabelsJson(msg->data);
 }
 
-// -----------------------------------------------------------------------------
-// Callbacks e Loop Principal
-// -----------------------------------------------------------------------------
 
 void CombinedSemanticPCL::syncedCallback(
     const sensor_msgs::msg::Image::ConstSharedPtr & seg_msg,

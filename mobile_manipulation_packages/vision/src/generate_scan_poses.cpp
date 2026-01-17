@@ -45,7 +45,6 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
    robot_pos_received_(false)
 {
     this->declare_parameter<std::string>("target_frame", "world");
-    this->declare_parameter<std::string>("odom_topic", "/odom");
     this->declare_parameter<double>("ray_length", 0.25); 
     this->declare_parameter<double>("grid_resolution", 0.04); 
     this->declare_parameter<double>("voxel_map_resolution", 0.02); 
@@ -59,15 +58,18 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("min_coverage_percent", 0.96);
     
     this->declare_parameter<double>("max_incidence_angle_deg", 80.0);
+    
+
+    this->declare_parameter<int>("num_cameras", 3);
 
     target_frame_ = this->get_parameter("target_frame").as_string();
-    odom_topic_ = this->get_parameter("odom_topic").as_string();
     ray_length_ = this->get_parameter("ray_length").as_double();
     grid_resolution_ = this->get_parameter("grid_resolution").as_double();
     voxel_map_resolution_ = this->get_parameter("voxel_map_resolution").as_double();
     ray_step_size_ = this->get_parameter("ray_step_size").as_double();
     target_object_id_ = this->get_parameter("target_object_id").as_string();
     publish_markers_ = this->get_parameter("publish_markers").as_bool();
+    num_cameras_ = this->get_parameter("num_cameras").as_int();
     
     double fov_h = this->get_parameter("camera_fov_h_deg").as_double();
     double fov_v = this->get_parameter("camera_fov_v_deg").as_double();
@@ -79,14 +81,24 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     double max_inc_deg = this->get_parameter("max_incidence_angle_deg").as_double();
     max_incidence_angle_rad_ = max_inc_deg * (M_PI / 180.0);
 
-    sub_detections_ = this->create_subscription<vision_msgs::msg::Detection3DArray>(
-        "/bbox_3d_with_labels_0", 10, std::bind(&GenerateScanPoses::detectionCallback, this, std::placeholders::_1));
+ 
+    if (num_cameras_ < 1) num_cameras_ = 1;
+    
+    for (int i = 0; i < num_cameras_; ++i)
+    {
+        std::string topic_name = "/bbox_3d_with_labels_" + std::to_string(i);
+        auto sub = this->create_subscription<vision_msgs::msg::Detection3DArray>(
+            topic_name, 10, std::bind(&GenerateScanPoses::detectionCallback, this, std::placeholders::_1));
+        
+        sub_detections_.push_back(sub);
+        RCLCPP_INFO(this->get_logger(), "Inscrito em: %s", topic_name.c_str());
+    }
 
     sub_semantic_pcl_ = this->create_subscription<mobile_manipulation_interfaces::msg::SemanticPcl>(
         "/semantic_pcl_array", 10, std::bind(&GenerateScanPoses::semanticPclCallback, this, std::placeholders::_1));
 
     sub_odometry_ = this->create_subscription<nav_msgs::msg::Odometry>(
-        odom_topic_, 10, std::bind(&GenerateScanPoses::odometryCallback, this, std::placeholders::_1));
+        "/odom", 10, std::bind(&GenerateScanPoses::odometryCallback, this, std::placeholders::_1));
 
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/visualization_marker_array", 10);
     animation_timer_ = this->create_wall_timer(200ms, std::bind(&GenerateScanPoses::animationTimerCallback, this));
@@ -361,25 +373,34 @@ void GenerateScanPoses::detectionCallback(const vision_msgs::msg::Detection3DArr
 {
     last_header_.stamp = msg->header.stamp;
     last_header_.frame_id = target_frame_;
-
+ 
     {
         std::lock_guard<std::mutex> lock(objects_mutex_);
-        detected_objects_.clear();
-        for (const auto& detection : msg->detections) {
+
+        for (const auto& detection : msg->detections) 
+        {
             if (detection.results.empty()) continue;
             std::string label = detection.results[0].hypothesis.class_id;
-            ObjectData obj_data; obj_data.label = label; obj_data.detection = detection; obj_data.header = last_header_;
-            if (target_object_id_.empty() || target_object_id_ == label) {
+            ObjectData obj_data; 
+            obj_data.label = label; 
+            obj_data.detection = detection; 
+            obj_data.header = last_header_;
+
+            if (target_object_id_.empty() || target_object_id_ == label) 
+            {
                 obj_data.valid_scan_grid = computeValidScanningGrid(detection.bbox.center, detection.bbox.size, label);
             }
             detected_objects_[label] = obj_data;
         }
     }
     
-    std::lock_guard<std::mutex> anim_lock(anim_mutex_);
-    std::string label = target_object_id_.empty() && !msg->detections.empty() ? msg->detections[0].results[0].hypothesis.class_id : target_object_id_;
+    {
+        std::lock_guard<std::mutex> anim_lock(anim_mutex_);
+        std::string label = target_object_id_.empty() && !msg->detections.empty() ? msg->detections[0].results[0].hypothesis.class_id : target_object_id_;
+        
+        // if(!label.empty()) poses_to_animate_ = getSortedScanPoses(label);
+    }
     
-    // if(!label.empty()) poses_to_animate_ = getSortedScanPoses(label);
 }
 
 void GenerateScanPoses::animationTimerCallback() 
@@ -489,7 +510,9 @@ void GenerateScanPoses::semanticPclCallback(const mobile_manipulation_interfaces
 {
     std::lock_guard<std::mutex> lock(voxel_mutex_);
 
+
     voxel_grid_.clear();
+
     if (msg->labels.size() != msg->clouds.size()) return;
 
     for (size_t i = 0; i < msg->labels.size(); ++i) 
