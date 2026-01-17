@@ -13,7 +13,7 @@
 #include <mutex>
 #include <map>
 #include <chrono>
-
+// ESSE ARQUIVO "CONVERSA COM A LLM"
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/xml_parsing.h>
 #include <behaviortree_cpp/loggers/groot2_publisher.h>
