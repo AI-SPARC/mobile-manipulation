@@ -87,7 +87,7 @@ void WorldStateNode::handle_detections(const vision_msgs::msg::Detection3DArray:
         if (detection.results.empty()) continue;
 
         std::string obj_id = detection.results[0].hypothesis.class_id;
-        if (obj_id.empty()) continue;
+        if (obj_id.empty() || obj_id == "thegrid") continue;
 
         std::stringstream ss_pose;
         ss_pose << detection.bbox.center.position.x << ";" 
@@ -98,6 +98,8 @@ void WorldStateNode::handle_detections(const vision_msgs::msg::Detection3DArray:
         ss_size << detection.bbox.size.x << ";" 
                 << detection.bbox.size.y << ";" 
                 << detection.bbox.size.z;
+
+        
 
         if (upsert_object(obj_id, ss_pose.str(), ss_size.str())) 
         {

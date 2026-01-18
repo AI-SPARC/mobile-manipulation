@@ -1274,10 +1274,7 @@ private:
                 geometry_msgs::msg::Pose target = object_pose.value();
                 geometry_msgs::msg::Vector3 target_size = object_size.value();
 
-                RCLCPP_INFO(this->get_logger(), 
-                    "PICK TARGET -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Size: [x: %.3f, y: %.3f, z: %.3f]",
-                    target.position.x, target.position.y, target.position.z,
-                    target_size.x, target_size.y, target_size.z);
+                
 
                 cached_object_.id = id.value();
                 cached_object_.pose = target;
@@ -1288,6 +1285,10 @@ private:
                     if (current_pick_phase_ == GraspPhase::IDLE)
                     {
                         std::vector<geometry_msgs::msg::Pose> poses = {};
+                        RCLCPP_INFO(this->get_logger(), 
+                            "PICK TARGET -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Size: [x: %.3f, y: %.3f, z: %.3f]",
+                            target.position.x, target.position.y, target.position.z,
+                            target_size.x, target_size.y, target_size.z);
                         
                         auto scan_data_opt = this->scan_object_node_->getSortedScanPoses(cached_object_.id);
 
@@ -1321,6 +1322,7 @@ private:
                         }
 
                         this->object_mapping_node_->ObjectToMap(cached_object_.id);
+                        std::cout << cached_object_.id << std::endl;
 
                         if(!poses.empty())
                         {
@@ -1493,6 +1495,7 @@ private:
 
     void bt_loop()
     {
+        rclcpp::sleep_for(std::chrono::milliseconds(4000)); 
         rclcpp::Rate rate(50);
         while (rclcpp::ok())
         {

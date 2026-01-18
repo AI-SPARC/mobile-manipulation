@@ -92,9 +92,10 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         current_target = object_to_map_;
     }
     
- 
+  
     if (msg->labels.size() != msg->clouds.size()) return;
 
+  
     bool map_updated = false;
 
     for (size_t i = 0; i < msg->labels.size(); ++i) 
@@ -104,7 +105,7 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         if (label != current_target) 
         {
             continue;
-        }
+        }    
 
         pcl::PointCloud<pcl::PointXYZ> incoming_cloud;
         pcl::fromROSMsg(msg->clouds[i], incoming_cloud);

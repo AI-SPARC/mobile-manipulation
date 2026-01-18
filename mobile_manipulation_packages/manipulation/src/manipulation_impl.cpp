@@ -815,143 +815,234 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
     return true;
 }
 
-bool SimpleManipulation::follow_path_with_consistent_ik(
-    const std::vector<geometry_msgs::msg::Pose>& path_poses,
-    const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>>& goal_handle)
-{
-    if (path_poses.empty()) return false;
-    if (!move_group_arm || !psm_) {
-        RCLCPP_ERROR(this->get_logger(), "MoveGroup ou PSM não inicializados.");
-        return false;
-    }
-
-    psm_->requestPlanningSceneState();
-    planning_scene_monitor::LockedPlanningSceneRO scene(psm_);
-    auto robot_model = move_group_arm->getRobotModel();
-    const moveit::core::JointModelGroup* joint_model_group = robot_model->getJointModelGroup("panda_arm");
-    const std::string& tip_frame = joint_model_group->getLinkModelNames().back();
-
-    moveit::core::RobotStatePtr validation_state = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
+// bool SimpleManipulation::follow_path_with_consistent_ik(
+//     const std::vector<geometry_msgs::msg::Pose>& path_poses,
+//     const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>>& goal_handle)
+// {
+//     if (path_poses.empty()) return false;
     
-    std::vector<std::vector<double>> valid_path_joints;
+//     if (!move_group_arm || !psm_) {
+//         RCLCPP_ERROR(this->get_logger(), "MoveGroup ou PSM não inicializados.");
+//         return false;
+//     }
 
-    collision_detection::CollisionRequest c_req;
-    collision_detection::CollisionResult c_res;
-    const double MAX_ORIENTATION_ERROR = 0.005; 
-
-    RCLCPP_INFO(this->get_logger(), "Validando IK e Colisões para %zu poses...", path_poses.size());
-
-    for (size_t i = 0; i < path_poses.size(); ++i)
-    {
-        if (goal_handle->is_canceling()) return false;
-
-        const auto& target_pose = path_poses[i];
-        moveit::core::RobotState candidate_state = *validation_state; 
-
-        
-        if (candidate_state.setFromIK(joint_model_group, target_pose, 0.02))
-        {
-            candidate_state.update(); 
-            
-            
-            const Eigen::Isometry3d& actual_transform = candidate_state.getGlobalLinkTransform(tip_frame);
-            Eigen::Quaterniond q_actual(actual_transform.rotation());
-            Eigen::Quaterniond q_target(target_pose.orientation.w, target_pose.orientation.x, target_pose.orientation.y, target_pose.orientation.z);
-            
-            if (q_actual.angularDistance(q_target) <= MAX_ORIENTATION_ERROR)
-            {
-                c_res.clear();
-                scene->checkCollision(c_req, c_res, candidate_state);
-                if (!c_res.collision)
-                {
-                    // Sucesso: Armazena as juntas
-                    std::vector<double> joints;
-                    candidate_state.copyJointGroupPositions(joint_model_group, joints);
-                    valid_path_joints.push_back(joints);
-
-                    
-                    *validation_state = candidate_state; 
-                }
-            }
-        }
-    }
-
-    if (valid_path_joints.empty()) {
-        RCLCPP_ERROR(this->get_logger(), "Nenhum ponto válido encontrado.");
-        return false;
-    }
-
-    RCLCPP_INFO(this->get_logger(), "Iniciando execução segmentada de %zu pontos...", valid_path_joints.size());
-
-    trajectory_processing::TimeOptimalTrajectoryGeneration totg;
-
-    for (size_t i = 0; i < valid_path_joints.size(); ++i)
-    {
-        if (goal_handle->is_canceling()) {
-            move_group_arm->stop();
-            return false;
-        }
-
+//     // --- ETAPA 1: Validação dos Pontos de Destino (Filtra poses ruins) ---
     
-        moveit::core::RobotStatePtr current_real_state = move_group_arm->getCurrentState();
-        
-      
-        robot_trajectory::RobotTrajectory segment_traj(robot_model, joint_model_group);
-        segment_traj.addSuffixWayPoint(*current_real_state, 0.0); 
-        
-        moveit::core::RobotState target_state = *current_real_state;
-        target_state.setJointGroupPositions(joint_model_group, valid_path_joints[i]);
-        segment_traj.addSuffixWayPoint(target_state, 0.0); 
-
-        
-        if (!totg.computeTimeStamps(segment_traj, 0.5, 0.5)) {
-            RCLCPP_ERROR(this->get_logger(), "Falha TOTG no segmento %zu", i);
-            return false;
-        }
-
-        moveit_msgs::msg::RobotTrajectory segment_msg;
-        segment_traj.getRobotTrajectoryMsg(segment_msg);
-
-        
-        auto exec_result = move_group_arm->asyncExecute(segment_msg);
-        if (exec_result != moveit::core::MoveItErrorCode::SUCCESS) {
-            RCLCPP_ERROR(this->get_logger(), "Falha envio segmento %zu", i);
-            return false;
-        }
-
-        auto start_time = std::chrono::steady_clock::now();
-        bool arrived = false;
-
-        while (rclcpp::ok())
-        {
-            if (goal_handle->is_canceling()) {
-                move_group_arm->stop();
-                return false;
-            }
-
-            
-            std::vector<double> current_joints = move_group_arm->getCurrentJointValues();
-            double error = 0.0;
-            for(size_t k=0; k<valid_path_joints[i].size(); k++) {
-                error += std::abs(valid_path_joints[i][k] - current_joints[k]);
-            }
-
-            if (error < 0.02) {
-                arrived = true;
-                break; 
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-
-        if (!arrived) return false;
-
-        
+//     psm_->requestPlanningSceneState();
+//     planning_scene_monitor::LockedPlanningSceneRO scene(psm_);
     
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000)); 
-    }
+//     auto robot_model = move_group_arm->getRobotModel();
+//     const moveit::core::JointModelGroup* joint_model_group = robot_model->getJointModelGroup("panda_arm");
+//     const std::string& tip_frame = joint_model_group->getLinkModelNames().back();
 
-    return true;
-}
+//     // Começa a validação a partir do estado atual
+//     moveit::core::RobotStatePtr validation_state = std::make_shared<moveit::core::RobotState>(scene->getCurrentState());
+    
+//     std::vector<std::vector<double>> valid_path_joints;
+//     collision_detection::CollisionRequest c_req;
+//     collision_detection::CollisionResult c_res;
+//     const double MAX_ORIENTATION_ERROR = 0.01; 
+
+//     RCLCPP_INFO(this->get_logger(), "Validando %zu poses candidatas...", path_poses.size());
+
+//     for (size_t i = 0; i < path_poses.size(); ++i)
+//     {
+//         if (goal_handle->is_canceling()) return false;
+
+//         const auto& target_pose = path_poses[i];
+//         moveit::core::RobotState candidate_state = *validation_state; 
+
+//         // 1. Tenta calcular IK
+//         if (candidate_state.setFromIK(joint_model_group, target_pose, 0.05))
+//         {
+//             candidate_state.update(); 
+            
+//             // 2. Verifica a orientação
+//             const Eigen::Isometry3d& actual_transform = candidate_state.getGlobalLinkTransform(tip_frame);
+//             Eigen::Quaterniond q_actual(actual_transform.rotation());
+//             Eigen::Quaterniond q_target(target_pose.orientation.w, target_pose.orientation.x, target_pose.orientation.y, target_pose.orientation.z);
+            
+//             if (q_actual.angularDistance(q_target) <= MAX_ORIENTATION_ERROR)
+//             {
+//                 // 3. Verifica colisão no ponto final
+//                 c_res.clear();
+//                 scene->checkCollision(c_req, c_res, candidate_state);
+                
+//                 if (!c_res.collision)
+//                 {
+//                     // >>> SUCESSO NESTA POSE <<<
+//                     std::vector<double> joints;
+//                     candidate_state.copyJointGroupPositions(joint_model_group, joints);
+//                     valid_path_joints.push_back(joints);
+
+//                     // Atualiza o estado de validação para o próximo movimento ser a partir daqui
+//                     *validation_state = candidate_state; 
+//                     RCLCPP_INFO(this->get_logger(), "Pose %zu: VÁLIDA. Adicionada à fila.", i);
+//                 }
+//                 else
+//                 {
+//                     // FALHA: Colisão (Pula para a próxima)
+//                     RCLCPP_WARN(this->get_logger(), "Pose %zu: IK ok, mas destino em COLISÃO. Ignorando.", i);
+//                     continue; 
+//                 }
+//             }
+//             else
+//             {
+//                 // FALHA: Orientação (Pula para a próxima)
+//                 RCLCPP_WARN(this->get_logger(), "Pose %zu: Erro de orientação excessivo. Ignorando.", i);
+//                 continue;
+//             }
+//         }
+//         else
+//         {
+//             // FALHA: IK não encontrado (Pula para a próxima)
+//             RCLCPP_WARN(this->get_logger(), "Pose %zu: Falha no cálculo do IK. Ignorando.", i);
+//             continue;
+//         }
+//     }
+
+//     // Se no final não sobrou nenhuma pose válida, aí sim retornamos erro
+//     if (valid_path_joints.empty()) {
+//         RCLCPP_ERROR(this->get_logger(), "CRÍTICO: Todas as %zu poses falharam na validação.", path_poses.size());
+//         return false;
+//     }
+
+//     // --- ETAPA 2: Execução das Poses Válidas (Híbrida: Linear ou Planner) ---
+
+//     RCLCPP_INFO(this->get_logger(), "Iniciando execução de %zu poses VÁLIDAS...", valid_path_joints.size());
+
+//     trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+
+//     for (size_t i = 0; i < valid_path_joints.size(); ++i)
+//     {
+//         if (goal_handle->is_canceling()) {
+//             move_group_arm->stop();
+//             return false;
+//         }
+
+//         moveit::core::RobotStatePtr current_real_state = move_group_arm->getCurrentState();
+        
+//         moveit::core::RobotState target_state = *current_real_state;
+//         target_state.setJointGroupPositions(joint_model_group, valid_path_joints[i]);
+//         target_state.update();
+
+//         bool linear_path_is_safe = true;
+
+//         // 1. Verifica se o caminho LINEAR (interpolação) é seguro
+//         {
+//             planning_scene_monitor::LockedPlanningSceneRO execution_scene(psm_);
+            
+//             std::vector<moveit::core::RobotStatePtr> interpolated_states;
+//             double distance = current_real_state->distance(target_state);
+//             double interpolation_step = 0.05; 
+//             int num_steps = std::max(1, static_cast<int>(std::ceil(distance / interpolation_step)));
+
+//             for (int k = 0; k <= num_steps; ++k)
+//             {
+//                 double t = (double)k / num_steps;
+//                 moveit::core::RobotStatePtr temp_state = std::make_shared<moveit::core::RobotState>(*current_real_state);
+//                 current_real_state->interpolate(target_state, t, *temp_state);
+//                 interpolated_states.push_back(temp_state);
+//             }
+
+//             collision_detection::CollisionRequest check_req;
+//             check_req.group_name = "panda_arm";
+//             collision_detection::CollisionResult check_res;
+
+//             for (const auto& state : interpolated_states)
+//             {
+//                 check_res.clear();
+//                 execution_scene->checkCollision(check_req, check_res, *state);
+//                 if (check_res.collision)
+//                 {
+//                     linear_path_is_safe = false;
+//                     break;
+//                 }
+//             }
+//         }
+
+//         // 2. Decide como executar
+//         if (linear_path_is_safe)
+//         {
+//             // CAMINHO LIVRE: Executa movimento linear
+//             RCLCPP_INFO(this->get_logger(), "Passo %zu: Caminho direto livre. Executando linear.", i);
+
+//             robot_trajectory::RobotTrajectory segment_traj(robot_model, joint_model_group);
+//             segment_traj.addSuffixWayPoint(*current_real_state, 0.0); 
+//             segment_traj.addSuffixWayPoint(target_state, 0.0); 
+
+//             if (!totg.computeTimeStamps(segment_traj, 0.5, 0.5)) {
+//                 RCLCPP_ERROR(this->get_logger(), "Falha TOTG no passo %zu", i);
+//                 return false;
+//             }
+
+//             moveit_msgs::msg::RobotTrajectory segment_msg;
+//             segment_traj.getRobotTrajectoryMsg(segment_msg);
+            
+//             if (move_group_arm->asyncExecute(segment_msg) != moveit::core::MoveItErrorCode::SUCCESS) {
+//                 return false;
+//             }
+//         }
+//         else
+//         {
+//             // CAMINHO BLOQUEADO: Aciona o Planejador para desviar (Fallback)
+//             RCLCPP_WARN(this->get_logger(), "Passo %zu: Obstáculo na linha reta. Replanejando desvio...", i);
+
+//             move_group_arm->setStartState(*current_real_state);
+//             move_group_arm->setJointValueTarget(valid_path_joints[i]);
+            
+//             move_group_arm->setPlanningTime(2.0);
+//             move_group_arm->setNumPlanningAttempts(5);
+//             move_group_arm->setPlannerId("RRTConnectkConfigDefault"); 
+
+//             moveit::planning_interface::MoveGroupInterface::Plan avoidance_plan;
+//             auto plan_res = move_group_arm->plan(avoidance_plan);
+
+//             if (plan_res == moveit::core::MoveItErrorCode::SUCCESS)
+//             {
+//                 if (move_group_arm->asyncExecute(avoidance_plan) != moveit::core::MoveItErrorCode::SUCCESS) {
+//                     RCLCPP_ERROR(this->get_logger(), "Falha na execução do desvio.");
+//                     return false;
+//                 }
+//             }
+//             else
+//             {
+//                 RCLCPP_ERROR(this->get_logger(), "ABORTANDO: Não foi possível calcular desvio para o passo %zu.", i);
+//                 return false;
+//             }
+//         }
+
+//         // 3. Loop de Espera (Indefinido, até chegar ou cancelar)
+//         bool arrived = false;
+        
+//         while (rclcpp::ok())
+//         {
+//             if (goal_handle->is_canceling()) {
+//                 move_group_arm->stop();
+//                 return false;
+//             }
+
+//             std::vector<double> current_joints = move_group_arm->getCurrentJointValues();
+//             double error = 0.0;
+//             for(size_t k=0; k<valid_path_joints[i].size(); k++) {
+//                 error += std::abs(valid_path_joints[i][k] - current_joints[k]);
+//             }
+
+//             if (error < 0.02) {
+//                 arrived = true;
+//                 break; 
+//             }
+//             std::this_thread::sleep_for(std::chrono::milliseconds(20));
+//         }
+
+//         if (!arrived) return false;
+        
+//         // Pausa para estabilização
+//         std::this_thread::sleep_for(std::chrono::milliseconds(500)); 
+//     }
+
+//     return true;
+// }
 
 void SimpleManipulation::set_collision_allowance(const std::string& id1, const std::string& id2, bool allow_collision)
 {
@@ -1185,25 +1276,41 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
     }
     else
     {
-        bool path_execution_success = follow_path_with_consistent_ik(goal->poses, goal_handle);
+        for (const auto& target_pose : goal->poses)
+        {
+            // === VERIFICAÇÃO DE CANCELAMENTO CRÍTICA ===
+            if (goal_handle->is_canceling()) 
+            {
+                // Para qualquer movimento que esteja ocorrendo
+                if (move_group_arm) 
+                {
+                    move_group_arm->stop();
+                }
 
-      
-        if (goal_handle->is_canceling()) 
-        {
-            if (move_group_arm) move_group_arm->stop();
-            result->success = false;
-            goal_handle->canceled(result);
-            RCLCPP_WARN(this->get_logger(), "Action cancelada durante Follow Path.");
-            return;
-        }
+                if (move_group_gripper) 
+                {
+                    move_group_gripper->stop();
+                }
 
-        if (path_execution_success)
-        {
-            any_pose_succeeded = true;
-        }
-        else
-        {
-            any_pose_succeeded = false;
+                result->success = false;
+                goal_handle->canceled(result);
+                RCLCPP_WARN(this->get_logger(), "Action cancelada pelo usuário! Parando o robô.");
+                return;
+            }
+            // ===========================================
+
+            RCLCPP_INFO(this->get_logger(), "Tentando pose [x: %.3f, y: %.3f, z: %.3f]...", 
+                target_pose.position.x, target_pose.position.y, target_pose.position.z);
+
+            // Chama a sua função original
+            bool current_attempt = positions_for_arm(target_pose, 0.4, false);
+
+            rclcpp::sleep_for(std::chrono::milliseconds(500));
+                
+            if(current_attempt == true)
+            {
+                any_pose_succeeded = true;
+            }
         }
     }
    
