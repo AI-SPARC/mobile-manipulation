@@ -1161,8 +1161,6 @@ void SimpleManipulation::object_pose_callback(const geometry_msgs::msg::Pose & m
 
 // Action server (pick_object).
 
-// Action server (pick_object).
-
 rclcpp_action::GoalResponse SimpleManipulation::handle_goal(const rclcpp_action::GoalUUID & uuid,
     std::shared_ptr<const mobile_manipulation_interfaces::action::PickObject::Goal> goal)
 {

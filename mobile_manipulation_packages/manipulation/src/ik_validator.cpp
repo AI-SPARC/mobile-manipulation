@@ -10,6 +10,8 @@
 #include <cmath>
 #include <thread>
 #include <tuple>
+#include <future>
+#include <algorithm>
 
 namespace manipulation {
 
@@ -250,7 +252,7 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
     const std::vector<geometry_msgs::msg::Pose>& target_poses,
     bool seed_mode)
 {
-
+   
     int attempts = 0;
     while (!initialized_.load()) {
         if (attempts++ > 50) return {};
@@ -264,107 +266,134 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
 
     auto start_total = std::chrono::high_resolution_clock::now();
 
-    
+   
     psm_->requestPlanningSceneState();
     planning_scene_monitor::LockedPlanningSceneRO parent_scene(psm_);
     if (!parent_scene) return {};
     planning_scene::PlanningScenePtr temp_scene = parent_scene->diff();
 
-    
+   
     collision_detection::AllowedCollisionMatrix& acm = temp_scene->getAllowedCollisionMatrixNonConst();
-    
-
-    
-    moveit::core::RobotState& local_state = temp_scene->getCurrentStateNonConst();
-    const moveit::core::JointModelGroup* arm_jmg = local_state.getJointModelGroup(group_name_);
-
-    
-    moveit::core::GroupStateValidityCallbackFn validity_callback = 
-        [&temp_scene, &acm](moveit::core::RobotState* state, const moveit::core::JointModelGroup* group, const double* values) -> bool
-        {
-            state->setJointGroupPositions(group, values);
-            collision_detection::CollisionRequest req;
-            req.group_name = group->getName();
-            req.verbose = false; 
-            req.contacts = false;
-            
-            collision_detection::CollisionResult res;
-            temp_scene->checkCollision(req, res, *state, acm);
-            return !res.collision;
-        };
 
     
     float bx = std::get<0>(robot_position);
     float by = std::get<1>(robot_position);
     float bz = std::get<2>(robot_position);
-
-    std::vector<geometry_msgs::msg::Pose> valid_poses;
-    valid_poses.reserve(target_poses.size()); 
-    int valid_count = 0;
-
-    
     double max_reach_sq = max_reach_3d * max_reach_3d;
-    double min_reach_sq = 0.04; 
 
     
-    for (const auto& target_pose : target_poses)
-    {
-        double dx = target_pose.position.x - bx;
-        double dy = target_pose.position.y - by;
-        double dz = target_pose.position.z - bz;
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 1; 
+    if (target_poses.size() < 10) num_threads = 1;
+
+    size_t total_size = target_poses.size();
+    size_t chunk_size = (total_size + num_threads - 1) / num_threads;
+    
+    std::vector<std::future<std::vector<geometry_msgs::msg::Pose>>> futures;
+
+   
+    auto worker = [&](size_t start_idx, size_t end_idx) -> std::vector<geometry_msgs::msg::Pose> {
+        std::vector<geometry_msgs::msg::Pose> local_valid_poses;
+        local_valid_poses.reserve(end_idx - start_idx);
 
         
-        double dist_sq = (dx*dx) + (dy*dy) + (dz*dz);
+        moveit::core::RobotState local_state = temp_scene->getCurrentState();
+        const moveit::core::JointModelGroup* arm_jmg = local_state.getJointModelGroup(group_name_);
 
-        
-        if (dist_sq > max_reach_sq) 
-        {
-            continue; 
-        }
-
-        
-        double yaw_to_target = std::atan2(dy, dx);
-        
-        if (!virtual_joint_name_.empty()) {
-            const auto* vjoint = robot_model_->getJointModel(virtual_joint_name_);
-            
-            if (vjoint->getType() == moveit::core::JointModel::FLOATING) 
+       
+        moveit::core::GroupStateValidityCallbackFn local_validity_callback = 
+            [&temp_scene, &acm](moveit::core::RobotState* state, const moveit::core::JointModelGroup* group, const double* values) -> bool
             {
-                Eigen::Quaterniond q_base(Eigen::AngleAxisd(yaw_to_target, Eigen::Vector3d::UnitZ()));
-                std::vector<double> float_vals = { (double)bx, (double)by, (double)bz, q_base.x(), q_base.y(), q_base.z(), q_base.w() };
-                local_state.setJointPositions(virtual_joint_name_, float_vals);
-            } 
-            else 
-            { 
-                local_state.setJointPositions(virtual_joint_name_, {(double)bx, (double)by, yaw_to_target});
+                state->setJointGroupPositions(group, values);
+                collision_detection::CollisionRequest req;
+                req.group_name = group->getName();
+                req.verbose = false; 
+                req.contacts = false;
+                
+                collision_detection::CollisionResult res;
+                
+                temp_scene->checkCollision(req, res, *state, acm);
+                return !res.collision;
+            };
+
+        
+        for (size_t i = start_idx; i < end_idx; ++i)
+        {
+            const auto& target_pose = target_poses[i];
+
+            
+            double dx = target_pose.position.x - bx;
+            double dy = target_pose.position.y - by;
+            double dz = target_pose.position.z - bz;
+            double dist_sq = (dx*dx) + (dy*dy) + (dz*dz);
+
+            if (dist_sq > max_reach_sq) continue;
+
+            
+            double yaw_to_target = std::atan2(dy, dx);
+            
+            if (!virtual_joint_name_.empty()) 
+            {
+                
+                const auto* vjoint = robot_model_->getJointModel(virtual_joint_name_);
+                
+                if (vjoint->getType() == moveit::core::JointModel::FLOATING) 
+                {
+                    Eigen::Quaterniond q_base(Eigen::AngleAxisd(yaw_to_target, Eigen::Vector3d::UnitZ()));
+                    std::vector<double> float_vals = { (double)bx, (double)by, (double)bz, q_base.x(), q_base.y(), q_base.z(), q_base.w() };
+                    local_state.setJointPositions(virtual_joint_name_, float_vals);
+                } 
+                else 
+                { 
+                    local_state.setJointPositions(virtual_joint_name_, {(double)bx, (double)by, yaw_to_target});
+                }
+            }
+            local_state.update(); 
+
+            if (!seed_mode) 
+            {
+                local_state.setToDefaultValues(arm_jmg, "ready");
+            }
+
+            // Cálculo da IK
+            bool found_ik = local_state.setFromIK(arm_jmg, target_pose, 0.003, local_validity_callback);
+
+            if (found_ik)
+            {
+                local_valid_poses.push_back(target_pose);
             }
         }
-        
-        local_state.update(); 
+        return local_valid_poses;
+    };
 
-        
-        if (!seed_mode) 
+   
+    for (unsigned int i = 0; i < num_threads; ++i) 
+    {
+        size_t start = i * chunk_size;
+        size_t end = std::min(start + chunk_size, total_size);
+
+        if (start < end) 
         {
-            local_state.setToDefaultValues(arm_jmg, "ready");
+            futures.push_back(std::async(std::launch::async, worker, start, end));
         }
+    }
 
-     
-        bool found_ik = local_state.setFromIK(arm_jmg, target_pose, 0.005, validity_callback);
-
-        if (found_ik)
-        {
-            valid_poses.push_back(target_pose);
-            valid_count++;
-        }
+  
+    std::vector<geometry_msgs::msg::Pose> final_valid_poses;
+    
+    for (auto& f : futures) 
+    {
+        std::vector<geometry_msgs::msg::Pose> part = f.get();
+        final_valid_poses.insert(final_valid_poses.end(), part.begin(), part.end());
     }
 
     auto end_total = std::chrono::high_resolution_clock::now();
     double ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
     
-    RCLCPP_INFO(this->get_logger(), "IK Validator (Multi-Target): %d válidos de %zu testados (%.2f ms)", 
-        valid_count, target_poses.size(), ms);
+    RCLCPP_INFO(this->get_logger(), "IK Validator (Paralelo %u threads): %zu válidos de %zu testados (%.2f ms)", 
+        num_threads, final_valid_poses.size(), total_size, ms);
 
-    return valid_poses;
+    return final_valid_poses;
 }
 
 
