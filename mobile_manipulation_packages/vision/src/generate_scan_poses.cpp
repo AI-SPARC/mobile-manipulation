@@ -46,7 +46,7 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
 {
     this->declare_parameter<std::string>("target_frame", "world");
     this->declare_parameter<double>("ray_length", 0.175); 
-    this->declare_parameter<double>("grid_resolution", 0.04); 
+    this->declare_parameter<double>("grid_resolution", 0.05); 
     this->declare_parameter<double>("voxel_map_resolution", 0.02); 
     this->declare_parameter<double>("ray_step_size", 0.01);       
     this->declare_parameter<std::string>("target_object_id", "");

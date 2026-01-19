@@ -497,6 +497,7 @@ private:
     bool has_new_object_ = false;
     bool use_llm = false;
     bool use_graspnet = false;
+  
 
 
     void on_bt_xml_received(const std_msgs::msg::String::SharedPtr msg)
@@ -1493,6 +1494,53 @@ private:
         }
     }
 
+    void update_current_target_from_db()
+    {
+        
+        if (current_target_id_.empty() || !db_handler_) return;
+
+        std::lock_guard<std::mutex> lock(bt_mutex_);
+
+        auto props = db_handler_->get_object_data(current_target_id_);
+        if (props)
+        {
+            std::vector<double> p = parse_string_to_vector(props->pose_str);
+            std::vector<double> s = parse_string_to_vector(props->size_str);
+
+            if (p.size() >= 3)
+            {
+                // Atualiza Pose
+                cached_object_.pose.position.x = p[0];
+                cached_object_.pose.position.y = p[1];
+                cached_object_.pose.position.z = p[2];
+
+                if (p.size() >= 7) 
+                {
+                    cached_object_.pose.orientation.x = p[3];
+                    cached_object_.pose.orientation.y = p[4];
+                    cached_object_.pose.orientation.z = p[5];
+                    cached_object_.pose.orientation.w = p[6];
+                } 
+                else 
+                {
+                    cached_object_.pose.orientation.w = 1.0;
+                }
+            }
+
+            if (s.size() >= 3)
+            {
+                cached_object_.size.x = s[0];
+                cached_object_.size.y = s[1];
+                cached_object_.size.z = s[2];
+            }
+            
+            current_target_pose_ = cached_object_.pose;
+            
+            
+            // RCLCPP_DEBUG(this->get_logger(), "Dados do objeto '%s' atualizados do DB.", current_target_id_.c_str());
+        }
+    }
+
     // --- LOOP BT ---
 
     void bt_loop()
@@ -1576,6 +1624,8 @@ private:
                     std::lock_guard<std::mutex> lock(bt_mutex_);
                     new_obj = has_new_object_;
                 }
+
+                update_current_target_from_db();
 
                 if (status == BT::NodeStatus::RUNNING || new_obj || !current_target_id_.empty() || status == BT::NodeStatus::IDLE)
                 {
@@ -1687,8 +1737,7 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(bt_mutex_);
                     
-                    // Double-Check (Opcional, mas seguro): Verifica novamente dentro do lock final
-                    // caso o estado tenha mudado durante o tempo do parse (improvável, mas robusto).
+                 
                     if (picked.find(id) != picked.end()) continue; 
 
                     geometry_msgs::msg::Pose pose;
