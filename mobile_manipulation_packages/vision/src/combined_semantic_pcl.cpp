@@ -198,34 +198,26 @@ void CombinedSemanticPCL::syncedCallback(
 {
     frame_count_++;
 
-    
     geometry_msgs::msg::TransformStamped t_stamped;
-    bool has_transform = false;
     rclcpp::Time sensor_time = pcl_msg->header.stamp;
 
-    try {
-        
-        t_stamped = tf_buffer_->lookupTransform(
-            "world", pcl_msg->header.frame_id, sensor_time,
-            rclcpp::Duration::from_seconds(0.1));
-        has_transform = true;
-    } catch (const tf2::TransformException & ex) {}
 
-    
-    if (!has_transform)
+    try {
+        t_stamped = tf_buffer_->lookupTransform(
+            "world", 
+            pcl_msg->header.frame_id, 
+            sensor_time,
+            rclcpp::Duration::from_seconds(0.05)); 
+    } 
+    catch (const tf2::TransformException & ex) 
     {
-        try 
-        {
-            t_stamped = tf_buffer_->lookupTransform(
-                "world", pcl_msg->header.frame_id, tf2::TimePointZero);
-            has_transform = true;
-        } 
-        catch (const tf2::TransformException & ex) 
-        {
-            if (frame_count_ % 60 == 0) 
-                RCLCPP_ERROR(this->get_logger(), "TF Error: %s", ex.what());
-            return;
+
+        if (frame_count_ % 60 == 0) {
+            RCLCPP_WARN(this->get_logger(), 
+                "Ignorando frame %zu: TF não encontrada para o timestamp exato. Erro: %s", 
+                frame_count_, ex.what());
         }
+        return;
     }
 
     try
@@ -233,7 +225,6 @@ void CombinedSemanticPCL::syncedCallback(
         tf2::Transform transform;
         tf2::fromMsg(t_stamped.transform, transform);
 
-        
         uint32_t img_height = seg_msg->height;
         uint32_t img_width = seg_msg->width;
         size_t total_pixels = static_cast<size_t>(img_height) * img_width;
@@ -270,11 +261,9 @@ void CombinedSemanticPCL::syncedCallback(
             if (!std::isfinite(x_cam) || !std::isfinite(y_cam) || !std::isfinite(z_cam)) continue;
             if (z_cam < 0.1f) continue; 
 
-           
             tf2::Vector3 point_camera(x_cam, y_cam, z_cam);
             tf2::Vector3 point_world = transform * point_camera;
 
-           
             int32_t sem_id = 0;
             if (num_points == total_pixels) 
             {
