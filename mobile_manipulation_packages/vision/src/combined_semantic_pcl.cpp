@@ -17,34 +17,20 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
     : Node("combined_semantic_pcl", options),
       frame_count_(0)
 {
-    this->declare_parameter<std::string>("target_frame", "world"); 
-    this->declare_parameter<std::string>("topic_segmentation", "/semantic_segmentation_0");
-    this->declare_parameter<std::string>("topic_pointcloud", "/depth_pcl_0");
-    this->declare_parameter<std::string>("topic_labels", "/semantic_segmentation_labels_0");
-    this->declare_parameter<std::string>("topic_output_semantic", "/semantic_pcl");
-    this->declare_parameter<std::string>("topic_output_colored", "/semantic_pcl_colored");
-    this->declare_parameter<std::string>("topic_custom_msg", "/semantic_pcl_array"); 
     
     this->declare_parameter<int>("downsample_step", 1); 
-
-    target_frame_ = this->get_parameter("target_frame").as_string();
-    topic_segmentation_ = this->get_parameter("topic_segmentation").as_string();
-    topic_pointcloud_ = this->get_parameter("topic_pointcloud").as_string();
-    topic_labels_ = this->get_parameter("topic_labels").as_string();
-    topic_output_semantic_ = this->get_parameter("topic_output_semantic").as_string();
-    topic_output_colored_ = this->get_parameter("topic_output_colored").as_string();
-    topic_custom_msg_ = this->get_parameter("topic_custom_msg").as_string();
-    
     downsample_step_ = this->get_parameter("downsample_step").as_int();
     if (downsample_step_ < 1) downsample_step_ = 1;
 
-    RCLCPP_INFO(this->get_logger(), "=== SEMANTIC PCL NODE (SMART SPLIT) ===");
+    RCLCPP_INFO(this->get_logger(), "=== SEMANTIC PCL NODE (HARDCODED STRINGS) ===");
 
+    
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
+    
     labels_sub_ = this->create_subscription<std_msgs::msg::String>(
-        topic_labels_,
+        "/semantic_segmentation_labels_0",
         10,
         std::bind(&CombinedSemanticPCL::labelsCallback, this, std::placeholders::_1)
     );
@@ -52,20 +38,27 @@ CombinedSemanticPCL::CombinedSemanticPCL(const rclcpp::NodeOptions & options)
     auto sensor_qos = rclcpp::SensorDataQoS(); 
     auto rmw_qos = sensor_qos.get_rmw_qos_profile();
     
+    
     seg_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-        this, topic_segmentation_, rmw_qos);
+        this, "/semantic_segmentation_0", rmw_qos);
     
     pcl_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(
-        this, topic_pointcloud_, rmw_qos);
+        this, "/depth_pcl_0", rmw_qos);
+
+    bbox_sub_ = std::make_shared<message_filters::Subscriber<vision_msgs::msg::Detection3DArray>>(
+        this, "/bbox_3d_with_labels_0", rmw_qos);
+    
     
     sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
-        SyncPolicy(10), *seg_sub_, *pcl_sub_);
+        SyncPolicy(10), *seg_sub_, *pcl_sub_, *bbox_sub_);
     
-    sync_->registerCallback(std::bind(&CombinedSemanticPCL::syncedCallback, this, std::placeholders::_1, std::placeholders::_2));
+    sync_->registerCallback(std::bind(&CombinedSemanticPCL::syncedCallback, this, 
+        std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
     
-    pub_semantic_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_semantic_, 10);
-    pub_colored_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_output_colored_, 10);
-    pub_custom_msg_ = this->create_publisher<mobile_manipulation_interfaces::msg::SemanticPcl>(topic_custom_msg_, 10);
+    
+    pub_semantic_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/semantic_pcl", 10);
+    pub_colored_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/semantic_pcl_colored", 10);
+    pub_custom_msg_ = this->create_publisher<mobile_manipulation_interfaces::msg::SemanticPcl>("/semantic_pcl_array", 10);
 }
 
 void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr msg)
@@ -73,46 +66,31 @@ void CombinedSemanticPCL::labelsCallback(const std_msgs::msg::String::SharedPtr 
     parseLabelsJson(msg->data);
 }
 
-
 std::string CombinedSemanticPCL::extractCleanLabel(std::string raw_label)
 {
-    
     raw_label.erase(std::remove(raw_label.begin(), raw_label.end(), '\"'), raw_label.end());
     raw_label.erase(std::remove(raw_label.begin(), raw_label.end(), '\''), raw_label.end());
     
-   
     size_t colon_pos = raw_label.find(':');
-    
     if (colon_pos != std::string::npos)
     {
         std::string part1 = raw_label.substr(0, colon_pos);
         std::string part2 = raw_label.substr(colon_pos + 1);
 
-        
         const char* ws = " \t\n\r\f\v";
-        
-       
         size_t p1_start = part1.find_first_not_of(ws);
         if (p1_start != std::string::npos) part1 = part1.substr(p1_start);
         size_t p1_end = part1.find_last_not_of(ws);
         if (p1_end != std::string::npos) part1 = part1.substr(0, p1_end + 1);
 
-      
         size_t p2_start = part2.find_first_not_of(ws);
         if (p2_start != std::string::npos) part2 = part2.substr(p2_start);
         size_t p2_end = part2.find_last_not_of(ws);
         if (p2_end != std::string::npos) part2 = part2.substr(0, p2_end + 1);
 
-        
-        if (part1 == part2) {
-            return part1;
-        }
-        
-        
+        if (part1 == part2) return part1;
         return part2;
     }
-    
-   
     return raw_label;
 }
 
@@ -123,16 +101,12 @@ void CombinedSemanticPCL::parseLabelsJson(const std::string & json_str)
     std::lock_guard<std::mutex> lock(map_mutex_);
     id_to_label_.clear();
 
-
     std::regex nested_regex("\"([0-9]+)\"\\s*:\\s*\\{[^}]*\"[a-zA-Z]+\"\\s*:\\s*\"([^\"]+)\"");
-
-    
     std::regex string_regex("\"([0-9]+)\"\\s*:\\s*\"([^\"]+)\"");
 
     std::smatch match;
     std::string::const_iterator search_start(json_str.cbegin());
 
-    
     while (std::regex_search(search_start, json_str.cend(), match, nested_regex))
     {
         try {
@@ -143,15 +117,12 @@ void CombinedSemanticPCL::parseLabelsJson(const std::string & json_str)
         search_start = match.suffix().first;
     }
 
-    
     search_start = json_str.cbegin();
     while (std::regex_search(search_start, json_str.cend(), match, string_regex))
     {
         try {
             int32_t id = std::stoi(match[1].str());
-            
             if (id_to_label_.find(id) == id_to_label_.end()) {
-               
                 std::string val = extractCleanLabel(match[2].str());
                 id_to_label_[id] = val;
             }
@@ -222,28 +193,35 @@ sensor_msgs::msg::PointCloud2 CombinedSemanticPCL::createPCLMsg(
 
 void CombinedSemanticPCL::syncedCallback(
     const sensor_msgs::msg::Image::ConstSharedPtr & seg_msg,
-    const sensor_msgs::msg::PointCloud2::ConstSharedPtr & pcl_msg)
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr & pcl_msg,
+    const vision_msgs::msg::Detection3DArray::ConstSharedPtr & bbox_msg)
 {
     frame_count_++;
 
+    
     geometry_msgs::msg::TransformStamped t_stamped;
     bool has_transform = false;
     rclcpp::Time sensor_time = pcl_msg->header.stamp;
 
     try {
+        
         t_stamped = tf_buffer_->lookupTransform(
-            target_frame_, pcl_msg->header.frame_id, sensor_time,
+            "world", pcl_msg->header.frame_id, sensor_time,
             rclcpp::Duration::from_seconds(0.1));
         has_transform = true;
     } catch (const tf2::TransformException & ex) {}
 
+    
     if (!has_transform)
     {
-        try {
+        try 
+        {
             t_stamped = tf_buffer_->lookupTransform(
-                target_frame_, pcl_msg->header.frame_id, tf2::TimePointZero);
+                "world", pcl_msg->header.frame_id, tf2::TimePointZero);
             has_transform = true;
-        } catch (const tf2::TransformException & ex) {
+        } 
+        catch (const tf2::TransformException & ex) 
+        {
             if (frame_count_ % 60 == 0) 
                 RCLCPP_ERROR(this->get_logger(), "TF Error: %s", ex.what());
             return;
@@ -255,6 +233,7 @@ void CombinedSemanticPCL::syncedCallback(
         tf2::Transform transform;
         tf2::fromMsg(t_stamped.transform, transform);
 
+        
         uint32_t img_height = seg_msg->height;
         uint32_t img_width = seg_msg->width;
         size_t total_pixels = static_cast<size_t>(img_height) * img_width;
@@ -291,13 +270,18 @@ void CombinedSemanticPCL::syncedCallback(
             if (!std::isfinite(x_cam) || !std::isfinite(y_cam) || !std::isfinite(z_cam)) continue;
             if (z_cam < 0.1f) continue; 
 
+           
             tf2::Vector3 point_camera(x_cam, y_cam, z_cam);
             tf2::Vector3 point_world = transform * point_camera;
 
+           
             int32_t sem_id = 0;
-            if (num_points == total_pixels) {
+            if (num_points == total_pixels) 
+            {
                 sem_id = getPixelId(seg_msg, i);
-            } else {
+            } 
+            else 
+            {
                 size_t idx = static_cast<size_t>((double)i * total_pixels / num_points);
                 if (idx >= total_pixels) idx = total_pixels - 1;
                 sem_id = getPixelId(seg_msg, idx);
@@ -312,11 +296,12 @@ void CombinedSemanticPCL::syncedCallback(
         if (world_points.empty()) return;
 
         std_msgs::msg::Header output_header = pcl_msg->header;
-        output_header.frame_id = target_frame_; 
+        output_header.frame_id = "world"; 
         
         publishSemanticPCL(world_points, valid_ids, output_header);
         publishColoredPCL(world_points, valid_ids, output_header);
-        publishSplitSemanticPCL(world_points, valid_ids, output_header);
+        
+        publishSplitSemanticPCL(world_points, valid_ids, bbox_msg, output_header);
     }
     catch (const std::exception & e)
     {
@@ -327,12 +312,12 @@ void CombinedSemanticPCL::syncedCallback(
 void CombinedSemanticPCL::publishSplitSemanticPCL(
     const std::vector<std::array<float, 3>> & points,
     const std::vector<int32_t> & semantic_ids,
+    const vision_msgs::msg::Detection3DArray::ConstSharedPtr & bbox_msg,
     const std_msgs::msg::Header & header)
 {
     std::lock_guard<std::mutex> lock(map_mutex_);
 
     std::map<std::string, std::vector<std::array<float, 3>>> grouped_by_string;
-    int32_t detected_valid_id = -1;
 
     for (size_t i = 0; i < points.size(); ++i)
     {
@@ -344,27 +329,52 @@ void CombinedSemanticPCL::publishSplitSemanticPCL(
             if (!label_str.empty()) 
             {
                 grouped_by_string[label_str].push_back(points[i]);
-                detected_valid_id = current_pixel_id;
             }
         }
     }
 
-    if (detected_valid_id != -1 && frame_count_ % 60 == 0) {
-        RCLCPP_INFO(this->get_logger(), "Frame %zu: ID %d mapeado para '%s'", 
-            frame_count_, detected_valid_id, id_to_label_[detected_valid_id].c_str());
-    }
-
     mobile_manipulation_interfaces::msg::SemanticPcl custom_msg;
-    custom_msg.header = header;
+    custom_msg.header = header; 
 
     for (const auto & [label_string, pts] : grouped_by_string)
     {
-        if (pts.size() < 10) continue;
+        if (pts.size() < 10) continue; 
 
         sensor_msgs::msg::PointCloud2 obj_cloud = createPCLMsg(pts, header);
         
+        geometry_msgs::msg::Pose matched_pose;
+        matched_pose.orientation.w = 1.0; 
+        
+        bool found_bbox = false;
+        
+        if (bbox_msg && bbox_msg->header.frame_id != "world") 
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, 
+                "BBox frame (%s) diferente de 'world'. Assumindo coordenadas corretas.",
+                bbox_msg->header.frame_id.c_str());
+        }
+
+        if (bbox_msg) 
+        {
+            for (const auto & detection : bbox_msg->detections) 
+            {                
+                for (const auto & result : detection.results) {
+                    
+                    
+                    if (result.hypothesis.class_id == label_string) 
+                    {
+                        matched_pose = detection.bbox.center;
+                        found_bbox = true;
+                        break;
+                    }
+                }
+                if (found_bbox) break;
+            }
+        }
+
         custom_msg.labels.push_back(label_string); 
         custom_msg.clouds.push_back(obj_cloud);
+        custom_msg.poses.push_back(matched_pose);
     }
 
     if (!custom_msg.labels.empty()) 

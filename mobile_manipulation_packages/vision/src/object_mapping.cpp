@@ -92,27 +92,40 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         current_target = object_to_map_;
     }
     
-  
-    if (msg->labels.size() != msg->clouds.size()) return;
+    
+    if (msg->labels.size() != msg->clouds.size() || msg->labels.size() != msg->poses.size()) 
+    {
+        RCLCPP_WARN(this->get_logger(), "Tamanhos dos arrays na mensagem SemanticPcl não batem!");
+        return;
+    }
 
-  
     bool map_updated = false;
 
     for (size_t i = 0; i < msg->labels.size(); ++i) 
     {
         std::string label = msg->labels[i];
+
         
         if (label != current_target) 
         {
             continue;
         }    
 
+        
+        const auto & pose = msg->poses[i];
+        RCLCPP_INFO(this->get_logger(), 
+            "Objeto '%s' encontrado. Pose -> Pos: [x: %.3f, y: %.3f, z: %.3f] | Ori: [w: %.3f, x: %.3f, y: %.3f, z: %.3f]",
+            label.c_str(),
+            pose.position.x, pose.position.y, pose.position.z,
+            pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z
+        );
+        
         pcl::PointCloud<pcl::PointXYZ> incoming_cloud;
         pcl::fromROSMsg(msg->clouds[i], incoming_cloud);
 
         if (incoming_cloud.empty()) continue;
         
-       
+        
         if (object_points_.find(label) == object_points_.end()) 
         {
             object_points_[label] = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>(incoming_cloud);
@@ -121,12 +134,10 @@ void ObjectMapping::semanticPclCallback(const mobile_manipulation_interfaces::ms
         {
             *object_points_[label] += incoming_cloud;
         }
-
     
         map_updated = true;
     }
 
-    
     if (map_updated) 
     {
         publishAccumulatedCloud();
