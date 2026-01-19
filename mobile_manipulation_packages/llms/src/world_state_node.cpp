@@ -52,7 +52,8 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 
 WorldStateNode::~WorldStateNode()
 {
-    if (db_) {
+    if (db_) 
+    {
         sqlite3_close(db_);
     }
 }
@@ -84,22 +85,30 @@ void WorldStateNode::handle_detections(const vision_msgs::msg::Detection3DArray:
 {
     for (const auto& detection : msg->detections)
     {
-        if (detection.results.empty()) continue;
+        if (detection.results.empty()) 
+        {
+            continue;
+        }
 
         std::string obj_id = detection.results[0].hypothesis.class_id;
-        if (obj_id.empty() || obj_id == "thegrid") continue;
+        if (obj_id.empty()) 
+        {
+            continue;
+        }
 
         std::stringstream ss_pose;
         ss_pose << detection.bbox.center.position.x << ";" 
                 << detection.bbox.center.position.y << ";" 
-                << detection.bbox.center.position.z;
+                << detection.bbox.center.position.z << ";"
+                << detection.bbox.center.orientation.x << ";"
+                << detection.bbox.center.orientation.y << ";"
+                << detection.bbox.center.orientation.z << ";"
+                << detection.bbox.center.orientation.w;
         
         std::stringstream ss_size;
         ss_size << detection.bbox.size.x << ";" 
                 << detection.bbox.size.y << ";" 
                 << detection.bbox.size.z;
-
-        
 
         if (upsert_object(obj_id, ss_pose.str(), ss_size.str())) 
         {
@@ -123,7 +132,8 @@ bool WorldStateNode::upsert_object(const std::string& id,
     )";
 
     sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, 0) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, 0) != SQLITE_OK) 
+    {
         RCLCPP_ERROR(this->get_logger(), "SQL Prepare Error: %s", sqlite3_errmsg(db_));
         return false;
     }
@@ -143,6 +153,6 @@ bool WorldStateNode::upsert_object(const std::string& id,
     return success;
 }
 
-} // namespace llms
+} 
 
 RCLCPP_COMPONENTS_REGISTER_NODE(llms::WorldStateNode)

@@ -1305,7 +1305,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
             // Chama a sua função original
             bool current_attempt = positions_for_arm(target_pose, 0.4, false);
 
-            rclcpp::sleep_for(std::chrono::milliseconds(500));
+            rclcpp::sleep_for(std::chrono::milliseconds(600));
                 
             if(current_attempt == true)
             {

@@ -1322,7 +1322,7 @@ private:
                         }
 
                         this->object_mapping_node_->ObjectToMap(cached_object_.id);
-                        std::cout << cached_object_.id << std::endl;
+                        
 
                         if(!poses.empty())
                         {
@@ -1414,6 +1414,8 @@ private:
                     if (current_pick_phase_ == GraspPhase::SEND_GOAL)
                     {
                         this->grasp_context_.graspnet_attempts += 1;
+
+                        // std::cout << "ALOOOOOO" << std::endl;
                         if(!this->grasp_context_.grasp_poses.empty())
                         {
                             this->send_goal(id.value(), this->grasp_context_.grasp_poses, true, false);
