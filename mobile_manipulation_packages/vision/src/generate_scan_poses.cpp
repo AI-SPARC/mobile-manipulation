@@ -100,8 +100,8 @@ GenerateScanPoses::GenerateScanPoses(const rclcpp::NodeOptions & options)
     sub_odometry_ = this->create_subscription<nav_msgs::msg::Odometry>(
         "/odom", 10, std::bind(&GenerateScanPoses::odometryCallback, this, std::placeholders::_1));
 
-    marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/visualization_marker_array", 10);
-    animation_timer_ = this->create_wall_timer(200ms, std::bind(&GenerateScanPoses::animationTimerCallback, this));
+    // marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/visualization_marker_array", 10);
+    // animation_timer_ = this->create_wall_timer(200ms, std::bind(&GenerateScanPoses::animationTimerCallback, this));
 
     RCLCPP_INFO(this->get_logger(), "GenerateScanPoses: Modo Greedy Online (2 Passadas) Iniciado.");
 }
@@ -235,6 +235,7 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::filterPosesByCoverage(
 std::optional<std::pair<std::vector<geometry_msgs::msg::Pose>, tf2::Vector3>> 
 GenerateScanPoses::getSortedScanPoses(const std::string& label)
 {
+    
     tf2::Vector3 robot_pos;
     {
         std::lock_guard<std::mutex> lock(robot_pos_mutex_);
@@ -242,48 +243,55 @@ GenerateScanPoses::getSortedScanPoses(const std::string& label)
         robot_pos = robot_position_;
     }
 
-    std::lock_guard<std::mutex> lock(objects_mutex_);
-    auto it = detected_objects_.find(label);
-    if (it == detected_objects_.end()) return std::nullopt;
-
-    const auto& obj_data = it->second;
     
-    std::vector<ScanPoint> pending_points = obj_data.valid_scan_grid;
+    ObjectData obj_data_copy;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(objects_mutex_);
+        auto it = detected_objects_.find(label);
+        if (it != detected_objects_.end()) 
+        {
+            obj_data_copy = it->second; 
+            found = true;
+        }
+    }
+
+    if (!found) return std::nullopt;
+
+  
+    std::vector<ScanPoint> pending_points = computeValidScanningGrid(
+        obj_data_copy.detection.bbox.center, 
+        obj_data_copy.detection.bbox.size, 
+        label
+    );
 
     if (pending_points.empty()) return std::nullopt;
 
+   
     std::vector<geometry_msgs::msg::Pose> sorted_candidates;
     sorted_candidates.reserve(pending_points.size());
 
-  
+    
     auto start_it = std::min_element(pending_points.begin(), pending_points.end(),
         [&](const ScanPoint& a, const ScanPoint& b) {
             return (a.position - robot_pos).length2() < (b.position - robot_pos).length2();
         });
 
-    
     tf2::Vector3 current_pos = start_it->position;
     sorted_candidates.push_back(createPoseLookingAt(start_it->position, start_it->target_center));
     
-    
     pending_points.erase(start_it);
 
-    
+   
     while (!pending_points.empty())
     {
-        
         auto nearest_it = std::min_element(pending_points.begin(), pending_points.end(),
             [&](const ScanPoint& a, const ScanPoint& b) {
                 return (a.position - current_pos).length2() < (b.position - current_pos).length2();
             });
 
-        
         current_pos = nearest_it->position;
-        
-       
         sorted_candidates.push_back(createPoseLookingAt(nearest_it->position, nearest_it->target_center));
-
-        
         pending_points.erase(nearest_it);
     }
 
@@ -374,6 +382,7 @@ void GenerateScanPoses::detectionCallback(const vision_msgs::msg::Detection3DArr
     last_header_.stamp = msg->header.stamp;
     last_header_.frame_id = target_frame_;
  
+  
     {
         std::lock_guard<std::mutex> lock(objects_mutex_);
 
@@ -381,52 +390,45 @@ void GenerateScanPoses::detectionCallback(const vision_msgs::msg::Detection3DArr
         {
             if (detection.results.empty()) continue;
             std::string label = detection.results[0].hypothesis.class_id;
+            
             ObjectData obj_data; 
             obj_data.label = label; 
             obj_data.detection = detection; 
             obj_data.header = last_header_;
+            
 
-            if (target_object_id_.empty() || target_object_id_ == label) 
-            {
-                obj_data.valid_scan_grid = computeValidScanningGrid(detection.bbox.center, detection.bbox.size, label);
-            }
+            obj_data.valid_scan_grid.clear(); 
+
             detected_objects_[label] = obj_data;
         }
     }
-    
-    {
-        std::lock_guard<std::mutex> anim_lock(anim_mutex_);
-        std::string label = target_object_id_.empty() && !msg->detections.empty() ? msg->detections[0].results[0].hypothesis.class_id : target_object_id_;
-        
-        // if(!label.empty()) poses_to_animate_ = getSortedScanPoses(label);
-    }
-    
+
 }
 
 void GenerateScanPoses::animationTimerCallback() 
 {
-    if (!publish_markers_) return;
-    std::lock_guard<std::mutex> lock(anim_mutex_);
-    if (poses_to_animate_.empty()) return;
+    // if (!publish_markers_) return;
+    // std::lock_guard<std::mutex> lock(anim_mutex_);
+    // if (poses_to_animate_.empty()) return;
 
-    visualization_msgs::msg::MarkerArray markers;
-    visualization_msgs::msg::Marker del; del.action = visualization_msgs::msg::Marker::DELETEALL;
-    markers.markers.push_back(del);
+    // visualization_msgs::msg::MarkerArray markers;
+    // visualization_msgs::msg::Marker del; del.action = visualization_msgs::msg::Marker::DELETEALL;
+    // markers.markers.push_back(del);
 
-    for(size_t i=0; i<poses_to_animate_.size(); ++i) {
-        visualization_msgs::msg::Marker arrow;
-        arrow.header = last_header_; arrow.header.stamp = this->now();
-        arrow.ns = "final_poses"; arrow.id = i; 
-        arrow.type = visualization_msgs::msg::Marker::ARROW;
-        arrow.action = visualization_msgs::msg::Marker::ADD;
-        arrow.pose = poses_to_animate_[i];
-        arrow.scale.x = 0.10; arrow.scale.y = 0.015; arrow.scale.z = 0.015;
-        arrow.color.r = 0.0; arrow.color.g = 1.0; arrow.color.b = 0.0; arrow.color.a = 1.0;
-        markers.markers.push_back(arrow);
-    }
+    // for(size_t i=0; i<poses_to_animate_.size(); ++i) {
+    //     visualization_msgs::msg::Marker arrow;
+    //     arrow.header = last_header_; arrow.header.stamp = this->now();
+    //     arrow.ns = "final_poses"; arrow.id = i; 
+    //     arrow.type = visualization_msgs::msg::Marker::ARROW;
+    //     arrow.action = visualization_msgs::msg::Marker::ADD;
+    //     arrow.pose = poses_to_animate_[i];
+    //     arrow.scale.x = 0.10; arrow.scale.y = 0.015; arrow.scale.z = 0.015;
+    //     arrow.color.r = 0.0; arrow.color.g = 1.0; arrow.color.b = 0.0; arrow.color.a = 1.0;
+    //     markers.markers.push_back(arrow);
+    // }
     
 
-    marker_pub_->publish(markers);
+    // marker_pub_->publish(markers);
 }
 
 VoxelKey GenerateScanPoses::pointToVoxel(const tf2::Vector3& pt) 
@@ -501,9 +503,12 @@ std::vector<ScanPoint> GenerateScanPoses::computeValidScanningGrid(const geometr
 
 void GenerateScanPoses::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg) 
 {
-    std::lock_guard<std::mutex> lock(robot_pos_mutex_);
-    robot_position_ = tf2::Vector3(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
-    robot_pos_received_ = true;
+    {
+        std::lock_guard<std::mutex> lock(robot_pos_mutex_);
+        robot_position_ = tf2::Vector3(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+        robot_pos_received_ = true;
+    }
+    
 }
 
 void GenerateScanPoses::semanticPclCallback(const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr msg) 
