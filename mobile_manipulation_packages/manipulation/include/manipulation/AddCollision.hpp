@@ -33,7 +33,9 @@ public:
     ~AddCollision();
 
 private:
-    
+    int startup_cycles_ = 0; 
+    const int WARMUP_LIMIT = 50;    
+
     moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
     rclcpp::Service<mobile_manipulation_interfaces::srv::MobileObjectCollision>::SharedPtr service_;
     rclcpp::TimerBase::SharedPtr init_timer_;   
@@ -56,7 +58,7 @@ private:
     void load_labels_from_yaml(const std::string& file_path);
     void connect_database();
     void sync_from_database(); 
-    
+    bool check_if_object_exists_in_scene(const std::string& id);   
     
     std::vector<double> parse_string_to_vector(const std::string& s);
 

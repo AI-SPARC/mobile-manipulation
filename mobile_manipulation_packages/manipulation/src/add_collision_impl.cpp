@@ -5,6 +5,7 @@
 #include <functional>
 #include <fstream>
 #include <sstream>
+#include <map>
 
 #include "yaml-cpp/yaml.h"
 
@@ -35,9 +36,8 @@ AddCollision::AddCollision(const rclcpp::NodeOptions & options)
             this->init_timer_->cancel(); 
         });
 
-
     db_timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(10),
+        std::chrono::milliseconds(100),
         std::bind(&AddCollision::sync_from_database, this));
         
     RCLCPP_INFO(this->get_logger(), "AddCollision iniciado. Lendo DB: %s", db_path_.c_str());
@@ -52,11 +52,10 @@ AddCollision::~AddCollision()
 
 void AddCollision::connect_database()
 {
-    
     int rc = sqlite3_open_v2(db_path_.c_str(), &db_, SQLITE_OPEN_READONLY, nullptr);
     if (rc != SQLITE_OK) 
     {
-        RCLCPP_ERROR(this->get_logger(), "Falha ao abrir DB (pode não ter sido criado ainda): %s", sqlite3_errmsg(db_));
+        RCLCPP_ERROR(this->get_logger(), "Falha ao abrir DB: %s", sqlite3_errmsg(db_));
         db_ = nullptr;
     } 
     else 
@@ -82,34 +81,57 @@ std::vector<double> AddCollision::parse_string_to_vector(const std::string& s)
     return v;
 }
 
+bool AddCollision::check_if_object_exists_in_scene(const std::string& id)
+{
+    std::vector<std::string> object_ids;
+    object_ids.push_back(id);
+    auto objects = planning_scene_interface.getObjects(object_ids);
+    return (objects.find(id) != objects.end());
+}
+
+
 void AddCollision::sync_from_database()
 {
+    
     if (!db_) 
     {
-        
         static int retry_counter = 0;
         if (retry_counter++ % 50 == 0) connect_database(); 
         return;
     }
 
+    
     const char* sql = "SELECT id, pose, size FROM objects;";
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, 0) != SQLITE_OK) 
     {
-        
+        RCLCPP_ERROR(this->get_logger(), "Erro ao preparar SQL: %s", sqlite3_errmsg(db_));
         return; 
     }
 
+    
+    std::vector<moveit_msgs::msg::CollisionObject> collision_objects_batch;
+    
+    
+    std::set<std::string> current_db_ids;
+
+    bool force_update = (startup_cycles_ < WARMUP_LIMIT);
+
+    
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         std::string object_id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-        std::string pose_str = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        std::string size_str = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-
         
+        
+        if (object_id.empty()) continue;
         if (!is_authorized(object_id)) continue;
 
         
+        current_db_ids.insert(object_id);
+
+        std::string pose_str = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        std::string size_str = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+
         std::vector<double> pose_vec = parse_string_to_vector(pose_str);
         std::vector<double> size_vec = parse_string_to_vector(size_str);
 
@@ -118,29 +140,82 @@ void AddCollision::sync_from_database()
         pose.position.y = pose_vec[1];
         pose.position.z = pose_vec[2];
         pose.orientation.w = 1.0; 
-   
+        
+        
         pose.position.z += size_vec[2] / 2.0;
 
-        std::array<double, 3> size_array = {size_vec[0], size_vec[1], size_vec[2]};
+        
+        if (object_id == stop_moving_obstacle && !activate_movement) 
+        {
+            
+            continue; 
+        }
 
-        if (added.find(object_id) == added.end()) 
+       
+        if (force_update || is_significant_change(object_id, pose)) 
         {
-            add_collision_box(object_id, size_array, pose);
-        } 
-        else 
-        {
-            if (object_id == stop_moving_obstacle)
-            {
-                if (activate_movement) move_collision_box(object_id, pose);
-            }
-            else 
-            {
-                move_collision_box(object_id, pose);
-            }
+            moveit_msgs::msg::CollisionObject co;
+            co.id = object_id;
+            co.header.frame_id = "world";
+            
+           
+            co.operation = co.ADD; 
+
+            shape_msgs::msg::SolidPrimitive primitive;
+            primitive.type = primitive.BOX;
+            primitive.dimensions = {size_vec[0], size_vec[1], size_vec[2]};
+
+            co.primitives.push_back(primitive);
+            co.primitive_poses.push_back(pose);
+
+            collision_objects_batch.push_back(co);
+
+            
+            last_known_poses_[object_id] = pose;
+            added.insert(object_id);
         }
     }
 
     sqlite3_finalize(stmt);
+
+   
+    if (startup_cycles_ < WARMUP_LIMIT) {
+        startup_cycles_++;
+        if (startup_cycles_ == WARMUP_LIMIT) {
+            RCLCPP_INFO(this->get_logger(), "Inicialização do DB finalizada. Modo estável ativado.");
+        }
+    }
+
+    
+    for (auto it = last_known_poses_.begin(); it != last_known_poses_.end(); ) 
+    {
+        const std::string& known_id = it->first;
+        
+        if (current_db_ids.find(known_id) == current_db_ids.end()) 
+        {
+            moveit_msgs::msg::CollisionObject remove_obj;
+            remove_obj.id = known_id;
+            remove_obj.header.frame_id = "world";
+            remove_obj.operation = remove_obj.REMOVE;
+            
+            collision_objects_batch.push_back(remove_obj);
+            
+            
+            it = last_known_poses_.erase(it);
+            added.erase(known_id);
+            RCLCPP_INFO(this->get_logger(), "Objeto removido do DB, deletando da cena: %s", known_id.c_str());
+        } 
+        else 
+        {
+            ++it;
+        }
+    }
+
+    
+    if (!collision_objects_batch.empty()) 
+    {
+        planning_scene_interface.applyCollisionObjects(collision_objects_batch);
+    }
 }
 
 void AddCollision::load_labels_from_yaml(const std::string& file_path)
@@ -204,8 +279,6 @@ bool AddCollision::is_significant_change(const std::string& id, const geometry_m
 
 void AddCollision::add_collision_box(const std::string &id, const std::array<double, 3> &dimensions, const geometry_msgs::msg::Pose &pose)
 {
-    if (added.find(id) != added.end()) return;
-
     moveit_msgs::msg::CollisionObject collision_object;
     collision_object.id = id;
     collision_object.header.frame_id = "world"; 
@@ -219,11 +292,6 @@ void AddCollision::add_collision_box(const std::string &id, const std::array<dou
     collision_object.operation = collision_object.ADD;
 
     planning_scene_interface.applyCollisionObjects({collision_object});
-    
-    added.insert(id);
-    last_known_poses_[id] = pose; 
-    
-    RCLCPP_INFO(this->get_logger(), "Objeto adicionado: %s", id.c_str());
 }
 
 void AddCollision::move_collision_box(const std::string &id, const geometry_msgs::msg::Pose &pose)
@@ -267,4 +335,4 @@ void AddCollision::handleStopService(
     response->success = true;
 }
 
-} // namespace manipulation
+}

@@ -1289,6 +1289,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
                 {
                     move_group_gripper->stop();
                 }
+                ready();
 
                 result->success = false;
                 goal_handle->canceled(result);
@@ -1301,7 +1302,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
                 target_pose.position.x, target_pose.position.y, target_pose.position.z);
 
             // Chama a sua função original
-            bool current_attempt = positions_for_arm(target_pose, 0.4, false);
+            bool current_attempt = positions_for_arm(target_pose, 0.7, false);
 
             rclcpp::sleep_for(std::chrono::milliseconds(600));
                 
@@ -1320,6 +1321,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
         if (goal_handle->is_canceling()) 
         {
             if (move_group_arm) move_group_arm->stop();
+            ready();
             result->success = false;
             goal_handle->canceled(result);
             return;

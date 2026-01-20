@@ -432,7 +432,7 @@ def generate_launch_description():
         immediate_nodes + 
         [
             TimerAction(
-                period=3.0,
+                period=5.0,
                 actions=delayed_nodes
             )
         ]

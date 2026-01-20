@@ -1286,10 +1286,12 @@ private:
                     if (current_pick_phase_ == GraspPhase::IDLE)
                     {
                         std::vector<geometry_msgs::msg::Pose> poses = {};
-                        RCLCPP_INFO(this->get_logger(), 
+                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
                             "PICK TARGET -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Size: [x: %.3f, y: %.3f, z: %.3f]",
                             target.position.x, target.position.y, target.position.z,
                             target_size.x, target_size.y, target_size.z);
+
+                                                
                         
                         auto scan_data_opt = this->scan_object_node_->getSortedScanPoses(cached_object_.id);
 
@@ -1318,7 +1320,8 @@ private:
                         }
                         else
                         {
-                            RCLCPP_WARN(this->get_logger(), "Falha ao obter poses: Objeto não encontrado ou posição do robô desconhecida.");
+                            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
+                                "Falha ao obter poses: Objeto não encontrado ou posição do robô desconhecida.");
                             return BT::NodeStatus::RUNNING;
                         }
 
@@ -1347,7 +1350,7 @@ private:
                             this->send_goal(id.value(), poses, true, true); 
                             current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
                             return BT::NodeStatus::RUNNING;
-                        }
+                        }                      
                     }
                     
                     if (current_pick_phase_ == GraspPhase::GRASPNET_SCAN)

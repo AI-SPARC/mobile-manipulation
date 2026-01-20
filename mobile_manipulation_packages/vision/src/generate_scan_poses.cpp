@@ -235,7 +235,7 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::filterPosesByCoverage(
 std::optional<std::pair<std::vector<geometry_msgs::msg::Pose>, tf2::Vector3>> 
 GenerateScanPoses::getSortedScanPoses(const std::string& label)
 {
-    
+    // PASSO 1: Obter posição do Robô (Rápido)
     tf2::Vector3 robot_pos;
     {
         std::lock_guard<std::mutex> lock(robot_pos_mutex_);
@@ -243,7 +243,7 @@ GenerateScanPoses::getSortedScanPoses(const std::string& label)
         robot_pos = robot_position_;
     }
 
-    
+    // PASSO 2: Copiar dados do objeto para processamento (Rápido)
     ObjectData obj_data_copy;
     bool found = false;
     {
@@ -258,21 +258,30 @@ GenerateScanPoses::getSortedScanPoses(const std::string& label)
 
     if (!found) return std::nullopt;
 
-  
-    std::vector<ScanPoint> pending_points = computeValidScanningGrid(
+    
+    std::vector<ScanPoint> calculated_points = computeValidScanningGrid(
         obj_data_copy.detection.bbox.center, 
         obj_data_copy.detection.bbox.size, 
         label
     );
 
-    if (pending_points.empty()) return std::nullopt;
+    if (calculated_points.empty()) return std::nullopt;
+
+    {
+        std::lock_guard<std::mutex> lock(objects_mutex_);
+        auto it = detected_objects_.find(label);
+        if (it != detected_objects_.end()) 
+        {
+            it->second.valid_scan_grid = calculated_points;
+        }
+    }
 
    
     std::vector<geometry_msgs::msg::Pose> sorted_candidates;
-    sorted_candidates.reserve(pending_points.size());
+    sorted_candidates.reserve(calculated_points.size());
 
     
-    auto start_it = std::min_element(pending_points.begin(), pending_points.end(),
+    auto start_it = std::min_element(calculated_points.begin(), calculated_points.end(),
         [&](const ScanPoint& a, const ScanPoint& b) {
             return (a.position - robot_pos).length2() < (b.position - robot_pos).length2();
         });
@@ -280,19 +289,18 @@ GenerateScanPoses::getSortedScanPoses(const std::string& label)
     tf2::Vector3 current_pos = start_it->position;
     sorted_candidates.push_back(createPoseLookingAt(start_it->position, start_it->target_center));
     
-    pending_points.erase(start_it);
+    calculated_points.erase(start_it);
 
-   
-    while (!pending_points.empty())
+    while (!calculated_points.empty())
     {
-        auto nearest_it = std::min_element(pending_points.begin(), pending_points.end(),
+        auto nearest_it = std::min_element(calculated_points.begin(), calculated_points.end(),
             [&](const ScanPoint& a, const ScanPoint& b) {
                 return (a.position - current_pos).length2() < (b.position - current_pos).length2();
             });
 
         current_pos = nearest_it->position;
         sorted_candidates.push_back(createPoseLookingAt(nearest_it->position, nearest_it->target_center));
-        pending_points.erase(nearest_it);
+        calculated_points.erase(nearest_it);
     }
 
     return std::make_pair(sorted_candidates, robot_pos);
@@ -314,7 +322,7 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getOptimizedScanPoses(
 
     const auto& obj_data = it->second;
     const auto& points = obj_data.valid_scan_grid;
-
+    
     if (points.empty() || input_poses.empty()) return {};
 
     std::map<int, std::vector<ScanPoint>> face_map;
@@ -373,7 +381,9 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getOptimizedScanPoses(
     std::vector<geometry_msgs::msg::Pose> optimized_poses = filterPosesByCoverage(reordered_poses, targets);
     debug_voxels_ = targets;
     poses_to_animate_ = optimized_poses;
-
+    
+    it->second.valid_scan_grid.clear();
+  
     return optimized_poses;
 }
 
@@ -395,9 +405,7 @@ void GenerateScanPoses::detectionCallback(const vision_msgs::msg::Detection3DArr
             obj_data.label = label; 
             obj_data.detection = detection; 
             obj_data.header = last_header_;
-            
-
-            obj_data.valid_scan_grid.clear(); 
+      
 
             detected_objects_[label] = obj_data;
         }
