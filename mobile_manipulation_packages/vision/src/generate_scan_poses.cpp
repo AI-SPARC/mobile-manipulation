@@ -318,13 +318,17 @@ std::vector<geometry_msgs::msg::Pose> GenerateScanPoses::getOptimizedScanPoses(
 
     std::lock_guard<std::mutex> lock(objects_mutex_);
     auto it = detected_objects_.find(label);
-    if (it == detected_objects_.end()) return {};
-
+    if (it == detected_objects_.end()) 
+    {   
+        return {};
+    }
     const auto& obj_data = it->second;
     const auto& points = obj_data.valid_scan_grid;
     
-    if (points.empty() || input_poses.empty()) return {};
-
+    if (points.empty() || input_poses.empty()) 
+    {
+        return {};
+    }
     std::map<int, std::vector<ScanPoint>> face_map;
     for(const auto& p : points) face_map[p.face_id].push_back(p);
 

@@ -79,14 +79,11 @@ void BridgeToInference::cloud_callback(const sensor_msgs::msg::PointCloud2::Shar
   }
 
   
-    // if (!new_grasps.empty())
-    // {
-    //   publish_grasps(new_grasps);
-    // }
-    // else
-    // {
-    //   RCLCPP_WARN(get_logger(), "Nenhum grasp retornado pelo servidor.");
-    // }
+    if (!new_grasps.empty())
+    {
+      publish_grasps(new_grasps);
+    }
+   
 }
 
 geometry_msgs::msg::Pose BridgeToInference::matrix_to_pose(const Eigen::Matrix4f & matrix)
@@ -315,7 +312,7 @@ std::vector<geometry_msgs::msg::Pose> BridgeToInference::get_grasps_from_server(
 
   auto t1 = std::chrono::steady_clock::now();
   double dt = std::chrono::duration<double>(t1 - t0).count();
-  RCLCPP_INFO(get_logger(), "Recebido %zu grasps em %.2fs", grasps.size(), dt);
+  // RCLCPP_INFO(get_logger(), "Recebido %zu grasps em %.2fs", grasps.size(), dt);
 
   return grasps;
 }
@@ -328,7 +325,7 @@ void BridgeToInference::publish_grasps(const std::vector<geometry_msgs::msg::Pos
   pose_array.poses = grasps;
 
   pub_grasps_->publish(pose_array);
-  RCLCPP_INFO(get_logger(), "Publicados %zu grasps em /grasp_poses", grasps.size());
+  // RCLCPP_INFO(get_logger(), "Publicados %zu grasps em /grasp_poses", grasps.size());
 }
 
 }  // namespace drl_to_pick_cpp

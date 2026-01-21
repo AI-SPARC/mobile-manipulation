@@ -39,7 +39,7 @@ SimpleManipulation::SimpleManipulation()
  : Node("simple_manipulation")
 {
     this->declare_parameter<std::string>("yaml_file", "");
-    this->declare_parameter<bool>("use_graspnet", false);
+    this->declare_parameter<bool>("use_graspnet", true);
 
     yaml_file = this->get_parameter("yaml_file").as_string();
     use_graspnet = this->get_parameter("use_graspnet").as_bool();
@@ -455,26 +455,36 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
         if(pick == true)
         {
 
-            tf2::Quaternion q_original(
-                pose.orientation.x,
-                pose.orientation.y,
-                pose.orientation.z,
-                pose.orientation.w
-            );
-            double roll_orig, pitch_orig, yaw_orig;
-            tf2::Matrix3x3(q_original).getRPY(roll_orig, pitch_orig, yaw_orig);
+            // tf2::Quaternion q_original(
+            //     pose.orientation.x,
+            //     pose.orientation.y,
+            //     pose.orientation.z,
+            //     pose.orientation.w
+            // );
+            // double roll_orig, pitch_orig, yaw_orig;
+            // tf2::Matrix3x3(q_original).getRPY(roll_orig, pitch_orig, yaw_orig);
 
-            // Criar novo quaternion com roll=π, pitch=0, yaw=yaw_original
-            tf2::Quaternion q_new;
-            q_new.setRPY(M_PI, 0.0, yaw_orig + M_PI/4.0);
-            q_new.normalize();
+            // // Criar novo quaternion com roll=π, pitch=0, yaw=yaw_original
+            // tf2::Quaternion q_new;
+            // q_new.setRPY(M_PI, 0.0, yaw_orig + M_PI/4.0);
+            // q_new.normalize();
 
-            // Atribuir à pose
-            pose.orientation.x = q_new.x();
-            pose.orientation.y = q_new.y();
-            pose.orientation.z = q_new.z();
-            pose.orientation.w = q_new.w();
-            pose.position.z = pose.position.z + 0.11;
+            // // Atribuir à pose
+            // pose.orientation.x = q_new.x();
+            // pose.orientation.y = q_new.y();
+            // pose.orientation.z = q_new.z();
+            // pose.orientation.w = q_new.w();
+            // pose.position.z = pose.position.z + 0.11;
+
+            RCLCPP_INFO(this->get_logger(), 
+                            "ESSA MERDA É NO MANIPULATION -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Orient: [x: %.3f, y: %.3f, z: %.3f, w: %.3f]",
+                            pose.position.x, 
+                            pose.position.y, 
+                            pose.position.z,
+                            pose.orientation.x,
+                            pose.orientation.y,
+                            pose.orientation.z,
+                            pose.orientation.w);
 
             if (positions_for_arm(pose, 1.0, false)) 
             {
@@ -1290,6 +1300,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
                     move_group_gripper->stop();
                 }
                 ready();
+                rclcpp::sleep_for(std::chrono::milliseconds(1000));
 
                 result->success = false;
                 goal_handle->canceled(result);
@@ -1322,6 +1333,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
         {
             if (move_group_arm) move_group_arm->stop();
             ready();
+            rclcpp::sleep_for(std::chrono::milliseconds(1000));
             result->success = false;
             goal_handle->canceled(result);
             return;

@@ -17,7 +17,8 @@
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/xml_parsing.h>
 #include <behaviortree_cpp/loggers/groot2_publisher.h>
-
+#include <tf2/LinearMath/Transform.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
@@ -34,7 +35,7 @@
 
 #include <yaml-cpp/yaml.h>
 #include <sqlite3.h> 
-
+#include "geometry_msgs/msg/pose_array.hpp"
 
 #include "mobile_manipulation_interfaces/action/pick_object.hpp"
 #include "mobile_manipulation_interfaces/action/path.hpp"
@@ -379,6 +380,9 @@ public:
         client_ptr_ = rclcpp_action::create_client<mobile_manipulation_interfaces::action::PickObject>(this, "pick_object");
         path_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Path>(this, "path");
         controller_client = rclcpp_action::create_client<mobile_manipulation_interfaces::action::Controller>(this, "controller");
+        
+
+        pose_array_publisher_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/debug_grasps", 10);
 
         
         path_state_ = TaskState::IDLE;
@@ -435,7 +439,7 @@ private:
     std::unique_ptr<BT::Groot2Publisher> groot_publisher_;
     std::shared_ptr<llms::WorldStateNode> world_state_node_;
 
-    
+    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pose_array_publisher_;
     rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr publisher_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr bt_xml_sub_; 
@@ -1305,12 +1309,13 @@ private:
                             );
 
                             std::vector<geometry_msgs::msg::Pose> valid_poses = this->ik_validator_node_->find_valid_targets_from_base(
-                                robot_pos_tuple, raw_poses, true); 
+                                robot_pos_tuple, raw_poses, true, " "); 
 
                             if (!valid_poses.empty())
                             {
                                 RCLCPP_INFO(this->get_logger(), "Encontradas %zu poses válidas.", valid_poses.size());
                                 poses = this->scan_object_node_->getOptimizedScanPoses(valid_poses, cached_object_.id);
+                                RCLCPP_INFO(this->get_logger(), "Poses: %zu.", poses.size());
                             }
                             else
                             {
@@ -1362,17 +1367,98 @@ private:
                         {
                             if (!rclcpp::ok()) break;
 
-                            std::vector<geometry_msgs::msg::Pose> result;
-                            result = this->bridge_to_inference_node_->get_latest_grasps();
-                            
-                            if(result.empty())
+                            std::vector<geometry_msgs::msg::Pose> tcp_poses = this->bridge_to_inference_node_->get_latest_grasps();
+                            std::vector<geometry_msgs::msg::Pose> wrist_poses; 
+
+                            // Distância do recuo (comprimento dos dedos)
+                            double retreat_dist = 0.1034; 
+
+                            // CRIAR A TRANSFORMAÇÃO DE CORREÇÃO (Tool -> Hand)
+                            tf2::Transform tf_correction;
+                            tf_correction.setIdentity();
+
+                            // 1. O RECUO (Posição)
+                            // Recua no X negativo (pois no GraspNet, X é a profundidade)
+                            tf_correction.setOrigin(tf2::Vector3(-retreat_dist, 0.0, 0.0));
+
+                            // 2. A ROTAÇÃO (Orientação) - O "Pulo do Gato"
+                            // Precisamos transformar o referencial "X-para-frente" (GraspNet) 
+                            // para o referencial "Z-para-frente" (Panda).
+                            // Rotação de +90 graus (1.57 rad) em torno do eixo Y faz o X virar Z.
+                            tf2::Quaternion q_rot;
+                            q_rot.setRPY(0.0, 1.57079632679, 0.0); 
+                            tf_correction.setRotation(q_rot);
+
+                            for (const auto& tcp_pose_msg : tcp_poses) {
+                                
+                                // Converter msg para tf2
+                                tf2::Transform tf_world_to_grasp;
+                                tf2::fromMsg(tcp_pose_msg, tf_world_to_grasp);
+
+                                // MULTIPLICAÇÃO: Pose_Final = Pose_Grasp * Correcao
+                                // Isso aplica o recuo E gira o sistema de coordenadas localmente
+                                tf2::Transform tf_world_to_wrist = tf_world_to_grasp * tf_correction;
+
+                                // Converter de volta e salvar
+                                geometry_msgs::msg::Pose wrist_pose_msg;
+                                tf2::toMsg(tf_world_to_wrist, wrist_pose_msg);
+                                
+                                // Normaliza
+                                tf2::Quaternion q_final = tf_world_to_wrist.getRotation();
+                                q_final.normalize();
+                                wrist_pose_msg.orientation = tf2::toMsg(q_final);
+
+                                wrist_poses.push_back(wrist_pose_msg);
+                            }
+
+                            // Publique wrist_poses e veja no Rviz
+                                                        
+                            if(wrist_poses.empty())
                             {
                                 this->grasp_context_.grasp_poses.clear();
                                 return BT::NodeStatus::RUNNING;
                             }
                             else
                             {
-                                this->grasp_context_.grasp_poses = result;
+
+                                geometry_msgs::msg::PoseArray msg;
+
+                                
+                                msg.header.stamp = this->now();
+                                msg.header.frame_id = "world"; 
+
+                                
+                                msg.poses = wrist_poses;
+
+                                
+                                if (pose_array_publisher_) {
+                                    pose_array_publisher_->publish(msg);
+                                }
+                                    
+                                
+
+                                std::vector<geometry_msgs::msg::Pose> validated_poses = this->ik_validator_node_->find_valid_targets_from_base(
+                                    std::make_tuple(pose_x, pose_y, pose_z), wrist_poses, true, cached_object_.id);
+
+                                    
+                                if(validated_poses.empty())
+                                {
+                                    return BT::NodeStatus::RUNNING;
+                                }
+
+                                                                
+                                this->grasp_context_.grasp_poses = validated_poses;
+
+                                RCLCPP_INFO(this->get_logger(), 
+                                "VAI SE FERRAR -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Orient: [x: %.3f, y: %.3f, z: %.3f, w: %.3f]",
+                                this->grasp_context_.grasp_poses[0].position.x, 
+                                this->grasp_context_.grasp_poses[0].position.y, 
+                                this->grasp_context_.grasp_poses[0].position.z,
+                                this->grasp_context_.grasp_poses[0].orientation.x,
+                                this->grasp_context_.grasp_poses[0].orientation.y,
+                                this->grasp_context_.grasp_poses[0].orientation.z,
+                                this->grasp_context_.grasp_poses[0].orientation.w);
+ 
                                 break;
                             }
                         }
@@ -1380,13 +1466,11 @@ private:
                         if (this->active_arm_handle_ != nullptr)
                         {
                             RCLCPP_INFO(this->get_logger(), "Enviando solicitação de CANCELAMENTO do goal...");
-                            
                             current_pick_phase_ = GraspPhase::WAITING;
                             auto future_cancel = this->client_ptr_->async_cancel_goal(this->active_arm_handle_);
-                            
-                            std::future_status status = future_cancel.wait_for(std::chrono::seconds(5));
+                            std::future_status cancel_status = future_cancel.wait_for(std::chrono::seconds(10));
 
-                            if (status == std::future_status::ready)
+                            if (cancel_status == std::future_status::ready)
                             {
                                 try
                                 {
@@ -1394,23 +1478,65 @@ private:
                                     
                                     if (cancel_response->return_code == action_msgs::srv::CancelGoal::Response::ERROR_NONE)
                                     {
-                                        RCLCPP_INFO(this->get_logger(), "Cancelamento ACEITO pelo servidor.");
-                                        current_pick_phase_ = GraspPhase::SEND_GOAL;
+                                        RCLCPP_INFO(this->get_logger(), "Pedido de cancelamento ACEITO. Aguardando confirmação...");
+                                        
+                                        auto future_result = this->client_ptr_->async_get_result(this->active_arm_handle_);
+                                        std::future_status result_status = future_result.wait_for(std::chrono::seconds(10));
+                                        
+                                        if (result_status == std::future_status::ready)
+                                        {
+                                            auto wrapped_result = future_result.get();
+                                            
+                                            // Verifica o status final do goal
+                                            switch (wrapped_result.code)
+                                            {
+                                                case rclcpp_action::ResultCode::CANCELED:
+                                                    RCLCPP_INFO(this->get_logger(), "Action CANCELADA com sucesso!");
+                                                    current_pick_phase_ = GraspPhase::SEND_GOAL;
+                                                    this->active_arm_handle_ = nullptr;
+                                                    break;
+                                                    
+                                                case rclcpp_action::ResultCode::SUCCEEDED:
+                                                    RCLCPP_WARN(this->get_logger(), "Action terminou com SUCESSO antes do cancelamento.");
+                                                    current_pick_phase_ = GraspPhase::SEND_GOAL;
+                                                    this->active_arm_handle_ = nullptr;
+                                                    break;
+                                                    
+                                                case rclcpp_action::ResultCode::ABORTED:
+                                                    RCLCPP_WARN(this->get_logger(), "Action foi ABORTADA (não cancelada).");
+                                                    current_pick_phase_ = GraspPhase::SEND_GOAL;
+                                                    this->active_arm_handle_ = nullptr;
+                                                    break;
+                                                    
+                                                case rclcpp_action::ResultCode::UNKNOWN:
+                                                    RCLCPP_ERROR(this->get_logger(), "Status DESCONHECIDO da action.");
+                                                    break;
+                                                    
+                                                default:
+                                                    RCLCPP_ERROR(this->get_logger(), "ResultCode inesperado: %d", (int)wrapped_result.code);
+                                                    break;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            RCLCPP_ERROR(this->get_logger(), "Timeout aguardando resultado final da action.");
+                                        }
                                     }
-                                    else
-                                    {
-                                        RCLCPP_WARN(this->get_logger(), "Cancelamento REJEITADO/FALHOU. Código: %d", (int)cancel_response->return_code);
-                                    }
+                                    
                                 }
                                 catch (const std::exception &e)
                                 {
-                                    RCLCPP_ERROR(this->get_logger(), "Exceção ao ler resposta do cancelamento: %s", e.what());
+                                    RCLCPP_ERROR(this->get_logger(), "Exceção: %s", e.what());
                                 }
                             }
                             else
                             {
-                                RCLCPP_ERROR(this->get_logger(), "Timeout: O servidor demorou mais de 5s para responder ao cancelamento.");
+                                RCLCPP_ERROR(this->get_logger(), "Timeout no pedido de cancelamento.");
                             }
+                        }
+                        else
+                        {
+                            current_pick_phase_ = GraspPhase::SEND_GOAL;
                         }
                         return BT::NodeStatus::RUNNING;
                     }
@@ -1420,15 +1546,34 @@ private:
                         this->grasp_context_.graspnet_attempts += 1;
 
                         // std::cout << "ALOOOOOO" << std::endl;
-                        if(!this->grasp_context_.grasp_poses.empty())
+                        if(!this->grasp_context_.grasp_poses.empty() && this->active_arm_handle_ == nullptr)
                         {
-                            this->send_goal(id.value(), this->grasp_context_.grasp_poses, true, false);
+                            std::cout << cached_object_.id << std::endl;
+                             RCLCPP_INFO(this->get_logger(), 
+                            "MERDA DO CARAMBA -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Orient: [x: %.3f, y: %.3f, z: %.3f, w: %.3f]",
+                            this->grasp_context_.grasp_poses[0].position.x, 
+                            this->grasp_context_.grasp_poses[0].position.y, 
+                            this->grasp_context_.grasp_poses[0].position.z,
+                            this->grasp_context_.grasp_poses[0].orientation.x,
+                            this->grasp_context_.grasp_poses[0].orientation.y,
+                            this->grasp_context_.grasp_poses[0].orientation.z,
+                            this->grasp_context_.grasp_poses[0].orientation.w);
+
+                            if (std::isnan(this->grasp_context_.grasp_poses[0].position.x) || std::isnan(this->grasp_context_.grasp_poses[0].orientation.w)) {
+                                RCLCPP_ERROR(this->get_logger(), "ERRO CRÍTICO: Tentativa de enviar Pose com NaN!");
+                                return BT::NodeStatus::RUNNING;
+                            }
+                            this->send_goal(id.value(),{this->grasp_context_.grasp_poses[0]}, true, false);
                             current_pick_phase_ = GraspPhase::WAITING;
                         }
                         return BT::NodeStatus::RUNNING;
                     }
                     
                    return BT::NodeStatus::RUNNING;
+                }
+                else if(use_pca == true)
+                {
+
                 }
                 else 
                 {
@@ -1688,7 +1833,7 @@ private:
 
         pose_x = msg->pose.pose.position.x;
         pose_y = msg->pose.pose.position.y;
-        pose_z = 0.0; 
+        pose_z = 0.11; 
     }
     // std::unordered_set<std::string> blocked_ids;
 
@@ -2015,7 +2160,10 @@ private:
         {
             if(use_graspnet == true)
             {
-                current_pick_phase_ = GraspPhase::SUCCESS;
+                if(current_pick_phase_ == GraspPhase::SEND_GOAL)
+                {
+                    current_pick_phase_ = GraspPhase::SUCCESS; 
+                }
             }
             else
             {
@@ -2026,21 +2174,21 @@ private:
         }
         else
         {
-            if(use_graspnet == true)
-            {
-                if(current_pick_phase_ == GraspPhase::SEND_GOAL && this->grasp_context_.graspnet_attempts <= this->grasp_context_.graspnet_maximum_attempts)
-                {
-                    current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
-                }
-                else if(current_pick_phase_ == GraspPhase::SEND_GOAL)
-                {
-                    current_pick_phase_ = GraspPhase::FAILURE; 
-                }
-            }
-            else
-            {
-                manipulation_state_ = TaskState::FAILURE;
-            }
+            // if(use_graspnet == true)
+            // {
+            //     if(current_pick_phase_ == GraspPhase::SEND_GOAL && this->grasp_context_.graspnet_attempts <= this->grasp_context_.graspnet_maximum_attempts)
+            //     {
+            //         current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
+            //     }
+            //     else if(current_pick_phase_ == GraspPhase::SEND_GOAL)
+            //     {
+            //         current_pick_phase_ = GraspPhase::FAILURE; 
+            //     }
+            // }
+            // else
+            // {
+            //     manipulation_state_ = TaskState::FAILURE;
+            // }
             RCLCPP_ERROR(this->get_logger(), "PICK FAILED");
         }
 

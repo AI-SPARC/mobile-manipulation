@@ -250,7 +250,8 @@ std::optional<std::tuple<float, float, float>> IKValidator::find_best_base_posit
 std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
     const std::tuple<float, float, float>& robot_position,
     const std::vector<geometry_msgs::msg::Pose>& target_poses,
-    bool seed_mode)
+    bool seed_mode,
+    const std::string& allowed_collision_object) // <--- Recebendo a string
 {
    
     int attempts = 0;
@@ -274,6 +275,22 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
 
    
     collision_detection::AllowedCollisionMatrix& acm = temp_scene->getAllowedCollisionMatrixNonConst();
+
+    
+    if (!allowed_collision_object.empty() && allowed_collision_object != " ") 
+    {
+        
+        if (temp_scene->getWorld()->hasObject(allowed_collision_object))
+        {
+            
+            acm.setEntry(allowed_collision_object, true);
+            // acm.setEntry("willowbench_01", true);
+            
+            // Log de debug para garantir que funcionou
+            RCLCPP_DEBUG(this->get_logger(), "Ignorando colisões com: %s", allowed_collision_object.c_str());
+        }
+    }
+    
 
     
     float bx = std::get<0>(robot_position);
@@ -300,7 +317,6 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
         moveit::core::RobotState local_state = temp_scene->getCurrentState();
         const moveit::core::JointModelGroup* arm_jmg = local_state.getJointModelGroup(group_name_);
 
-       
         moveit::core::GroupStateValidityCallbackFn local_validity_callback = 
             [&temp_scene, &acm](moveit::core::RobotState* state, const moveit::core::JointModelGroup* group, const double* values) -> bool
             {
@@ -334,9 +350,7 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
             
             if (!virtual_joint_name_.empty()) 
             {
-                
                 const auto* vjoint = robot_model_->getJointModel(virtual_joint_name_);
-                
                 if (vjoint->getType() == moveit::core::JointModel::FLOATING) 
                 {
                     Eigen::Quaterniond q_base(Eigen::AngleAxisd(yaw_to_target, Eigen::Vector3d::UnitZ()));
@@ -356,7 +370,7 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
             }
 
             // Cálculo da IK
-            bool found_ik = local_state.setFromIK(arm_jmg, target_pose, 0.003, local_validity_callback);
+            bool found_ik = local_state.setFromIK(arm_jmg, target_pose, 0.005, local_validity_callback);
 
             if (found_ik)
             {
@@ -390,8 +404,8 @@ std::vector<geometry_msgs::msg::Pose> IKValidator::find_valid_targets_from_base(
     auto end_total = std::chrono::high_resolution_clock::now();
     double ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
     
-    RCLCPP_INFO(this->get_logger(), "IK Validator (Paralelo %u threads): %zu válidos de %zu testados (%.2f ms)", 
-        num_threads, final_valid_poses.size(), total_size, ms);
+    // RCLCPP_INFO(this->get_logger(), "IK Validator (Paralelo %u threads): %zu válidos de %zu testados (%.2f ms)", 
+    //     num_threads, final_valid_poses.size(), total_size, ms);
 
     return final_valid_poses;
 }
