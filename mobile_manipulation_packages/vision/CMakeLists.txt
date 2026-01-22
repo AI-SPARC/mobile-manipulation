@@ -64,6 +64,10 @@ target_link_libraries(vision_lib
 add_executable(combined_semantic_pcl src/combined_semantic_pcl.cpp)
 target_link_libraries(combined_semantic_pcl vision_lib) 
 
+add_executable(generate_grasp_poses src/generate_grasp_poses.cpp)
+target_link_libraries(generate_grasp_poses vision_lib) 
+
+
 target_include_directories(combined_semantic_pcl PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
@@ -71,6 +75,25 @@ target_include_directories(combined_semantic_pcl PUBLIC
 )
 
 ament_target_dependencies(combined_semantic_pcl
+  rclcpp
+  sensor_msgs
+  std_msgs
+  vision_msgs
+  geometry_msgs
+  visualization_msgs
+  message_filters
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  tf2_sensor_msgs
+  tf2_eigen
+  mobile_manipulation_interfaces
+  PCL
+  pcl_conversions
+  rclcpp_components
+)
+
+ament_target_dependencies(generate_grasp_poses
   rclcpp
   sensor_msgs
   std_msgs
@@ -103,7 +126,9 @@ install(
 )
 
 install(
-  TARGETS combined_semantic_pcl
+  TARGETS 
+  combined_semantic_pcl
+  generate_grasp_poses
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -111,6 +136,13 @@ install(
   EXPORT vision_targets
   NAMESPACE ${PROJECT_NAME}::
   DESTINATION share/${PROJECT_NAME}/cmake
+)
+
+install(
+  DIRECTORY
+  launch
+ 
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_export_targets(vision_targets HAS_LIBRARY_TARGET)

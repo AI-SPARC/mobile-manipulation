@@ -1571,10 +1571,10 @@ private:
                     
                    return BT::NodeStatus::RUNNING;
                 }
-                else if(use_pca == true)
-                {
+                // else if(use_pca == true)
+                // {
 
-                }
+                // }
                 else 
                 {
                     // Lógica original sem GraspNet (se necessário)
