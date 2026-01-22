@@ -11,8 +11,8 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     
     parameters = [{
-        "pcd_path": "/home/momesso/toma5.pcd",
-        "grid_res": 0.005,         
+        "pcd_path": "/home/momesso/toma2.pcd",
+        "grid_res": 0.0075,         
         "cloud_voxel_size": 0.001,
         
         "cylinder_radius": 0.01,  
@@ -20,12 +20,17 @@ def generate_launch_description():
         "analysis_step_size": 0.01,
         "mls_radius": 0.0045,
         "use_mls_smoothing": True,
-        "num_best_grasps": 10,
-        "finger_offset": 0.02,
+        "num_best_grasps": 20,
+        "finger_offset": 0.03,
         "min_points_per_segment": 4, 
         "weight_orientation": 0.5, 
         "weight_symmetry": 0.5,
-        "weight_planarity": 0.0
+        "weight_planarity": 0.0,
+        "max_gripper_width": 0.07,
+        "gripper_finger_depth": 0.08,
+        "gripper_collision_threshold": 5,
+        "gripper_structure_thickness": 0.005,
+        "num_collision_checks": 20
     }]
 
   
