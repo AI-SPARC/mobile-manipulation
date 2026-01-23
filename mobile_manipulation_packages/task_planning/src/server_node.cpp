@@ -338,6 +338,7 @@ public:
         this->declare_parameter<std::string>("database_path", "/home/momesso/pibic/src/mobile_manipulation_packages/llms/db/robot_world_data.db");
         this->declare_parameter<bool>("use_llm", false); 
         this->declare_parameter<bool>("use_graspnet", true);
+        this->declare_parameter<bool>("use_pca", false);
         this->declare_parameter<int>("max_graspnet_attempts", 3);
 
         yaml_file = this->get_parameter("yaml_file").as_string();
@@ -345,6 +346,7 @@ public:
         db_path_ = this->get_parameter("database_path").as_string();
         use_llm = this->get_parameter("use_llm").as_bool();
         use_graspnet = this->get_parameter("use_graspnet").as_bool();
+        use_pca = this->get_parameter("use_pca").as_bool();
         this->grasp_context_.graspnet_maximum_attempts = this->get_parameter("max_graspnet_attempts").as_int();
 
         db_handler_ = std::make_unique<DatabaseHandler>(db_path_);
@@ -501,7 +503,7 @@ private:
     bool has_new_object_ = false;
     bool use_llm = false;
     bool use_graspnet = false;
-  
+    bool use_pca = true;
 
 
     void on_bt_xml_received(const std_msgs::msg::String::SharedPtr msg)
@@ -1370,40 +1372,35 @@ private:
                             std::vector<geometry_msgs::msg::Pose> tcp_poses = this->bridge_to_inference_node_->get_latest_grasps();
                             std::vector<geometry_msgs::msg::Pose> wrist_poses; 
 
-                            // Distância do recuo (comprimento dos dedos)
+                           
                             double retreat_dist = 0.1034; 
 
-                            // CRIAR A TRANSFORMAÇÃO DE CORREÇÃO (Tool -> Hand)
+                            
                             tf2::Transform tf_correction;
                             tf_correction.setIdentity();
 
-                            // 1. O RECUO (Posição)
-                            // Recua no X negativo (pois no GraspNet, X é a profundidade)
+                            
                             tf_correction.setOrigin(tf2::Vector3(-retreat_dist, 0.0, 0.0));
 
-                            // 2. A ROTAÇÃO (Orientação) - O "Pulo do Gato"
-                            // Precisamos transformar o referencial "X-para-frente" (GraspNet) 
-                            // para o referencial "Z-para-frente" (Panda).
-                            // Rotação de +90 graus (1.57 rad) em torno do eixo Y faz o X virar Z.
+                        
                             tf2::Quaternion q_rot;
                             q_rot.setRPY(0.0, 1.57079632679, 0.0); 
                             tf_correction.setRotation(q_rot);
 
                             for (const auto& tcp_pose_msg : tcp_poses) {
                                 
-                                // Converter msg para tf2
+                                
                                 tf2::Transform tf_world_to_grasp;
                                 tf2::fromMsg(tcp_pose_msg, tf_world_to_grasp);
 
-                                // MULTIPLICAÇÃO: Pose_Final = Pose_Grasp * Correcao
-                                // Isso aplica o recuo E gira o sistema de coordenadas localmente
+                                
                                 tf2::Transform tf_world_to_wrist = tf_world_to_grasp * tf_correction;
 
-                                // Converter de volta e salvar
+                                
                                 geometry_msgs::msg::Pose wrist_pose_msg;
                                 tf2::toMsg(tf_world_to_wrist, wrist_pose_msg);
                                 
-                                // Normaliza
+                               
                                 tf2::Quaternion q_final = tf_world_to_wrist.getRotation();
                                 q_final.normalize();
                                 wrist_pose_msg.orientation = tf2::toMsg(q_final);

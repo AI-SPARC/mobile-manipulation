@@ -91,6 +91,7 @@ def generate_launch_description():
         .trajectory_execution(file_path="config/gripper_moveit_controllers.yaml")
         .planning_pipelines(pipelines=["ompl", "pilz_industrial_motion_planner"])
         .robot_description_kinematics(file_path="config/kinematics.yaml")
+        # .sensors_3d(file_path="config/sensors_kinect_pointcloud.yaml")
         .to_moveit_configs()
     )
 
@@ -125,6 +126,30 @@ def generate_launch_description():
         'config',
         'storages.yaml'
     )
+    raw_sensors_config = load_yaml(
+        "vai_se_ferrar_moveit_config", 
+        "config/sensors_kinect_pointcloud.yaml"
+    )
+
+   
+    sensors_3d_config = {}
+    
+    if raw_sensors_config and 'sensors' in raw_sensors_config:
+        sensor_names = []
+        for i, sensor_data in enumerate(raw_sensors_config['sensors']):
+            
+            sensor_name = f"custom_camera_{i}"
+            sensor_names.append(sensor_name)
+            
+            
+            sensors_3d_config[sensor_name] = sensor_data
+        
+        
+        sensors_3d_config['sensors'] = sensor_names
+    else:
+      
+        print("[LAUNCH ERROR] Estrutura de sensores inválida ou vazia!")
+        sensors_3d_config = raw_sensors_config 
   
     move_group_node = Node(
         package="moveit_ros_move_group",
@@ -132,6 +157,8 @@ def generate_launch_description():
         output="screen",
         parameters=[
             moveit_config.to_dict(),
+            {"octomap_resolution": 0.0075},
+            sensors_3d_config,
             {"num_planning_attempts": 200},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -191,7 +218,7 @@ def generate_launch_description():
             "vai_se_ferrar_moveit_config", path.join("config", "joint_limits.yaml")
         )
     }
-
+    
     manipulation = Node(
         package="manipulation",
         executable="manipulation",
@@ -205,6 +232,7 @@ def generate_launch_description():
             robot_description_joint_limits,  
             moveit_config.trajectory_execution,
             robot_description_kinematics,
+            sensors_3d_config,
             moveit_config.planning_scene_monitor,
             {'yaml_file': pick_place_yaml},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
