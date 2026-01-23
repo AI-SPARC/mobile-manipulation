@@ -24,7 +24,9 @@ find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(rclcpp_components REQUIRED)
-
+find_package(moveit_msgs REQUIRED)
+find_package(octomap_msgs REQUIRED) # Provavelmente vai precisar deste também
+find_package(octomap REQUIRED)
 
 add_library(vision_lib SHARED
   src/generate_scan_poses.cpp
@@ -54,6 +56,9 @@ ament_target_dependencies(vision_lib
   PCL
   pcl_conversions
   rclcpp_components
+  moveit_msgs   
+  octomap_msgs  
+  octomap
 )
 
 target_link_libraries(vision_lib

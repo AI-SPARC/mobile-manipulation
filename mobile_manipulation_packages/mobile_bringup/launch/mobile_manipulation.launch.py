@@ -157,8 +157,8 @@ def generate_launch_description():
         output="screen",
         parameters=[
             moveit_config.to_dict(),
-            {"octomap_resolution": 0.0075},
-            sensors_3d_config,
+            # {"octomap_resolution": 0.0075},
+            # sensors_3d_config,
             {"num_planning_attempts": 200},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ],
@@ -232,7 +232,7 @@ def generate_launch_description():
             robot_description_joint_limits,  
             moveit_config.trajectory_execution,
             robot_description_kinematics,
-            sensors_3d_config,
+            # sensors_3d_config,
             moveit_config.planning_scene_monitor,
             {'yaml_file': pick_place_yaml},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
@@ -429,7 +429,7 @@ def generate_launch_description():
         ros2_control_node,
         joint_state_broadcaster_spawner,
         panda_arm_controller_spawner,
-        # rviz_node, 
+        rviz_node, 
     ]
 
     # 2. Nós que vão aguardar 3 segundos (Aplicação / Lógica)

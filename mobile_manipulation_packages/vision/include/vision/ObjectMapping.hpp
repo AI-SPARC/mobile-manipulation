@@ -23,7 +23,9 @@
 #include <unordered_map>
 #include <mutex>
 #include <chrono>
-
+#include <moveit_msgs/msg/planning_scene.hpp>
+#include <octomap/octomap.h>
+#include <octomap_msgs/conversions.h>
 namespace vision {
 
 class ObjectMapping : public rclcpp::Node
@@ -47,17 +49,19 @@ private:
     void semanticPclCallback(const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr msg);
     void jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
     
+    void publishToPlanningScene();
     void publishAccumulatedCloud();
 
     rclcpp::Subscription<mobile_manipulation_interfaces::msg::SemanticPcl>::SharedPtr sub_semantic_pcl_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joint_states_;
     
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_accumulated_cloud_;
-
+    rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr pub_planning_scene_;
     
     std::unordered_map<std::string, ObjectData> object_map_;
     std::mutex data_mutex_;
 
+    bool publish_octomap_to_moveit_;
     bool is_robot_stopped_;
     rclcpp::Time last_motion_time_;
     std::string object_to_map_;

@@ -207,7 +207,7 @@ void CombinedSemanticPCL::syncedCallback(
             "world", 
             pcl_msg->header.frame_id, 
             sensor_time,
-            rclcpp::Duration::from_seconds(0.05)); 
+            rclcpp::Duration::from_seconds(0.075)); 
     } 
     catch (const tf2::TransformException & ex) 
     {
@@ -336,12 +336,12 @@ void CombinedSemanticPCL::publishSplitSemanticPCL(
         
         bool found_bbox = false;
         
-        if (bbox_msg && bbox_msg->header.frame_id != "world") 
-        {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, 
-                "BBox frame (%s) diferente de 'world'. Assumindo coordenadas corretas.",
-                bbox_msg->header.frame_id.c_str());
-        }
+        // if (bbox_msg && bbox_msg->header.frame_id != "world") 
+        // {
+        //     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, 
+        //         "BBox frame (%s) diferente de 'world'. Assumindo coordenadas corretas.",
+        //         bbox_msg->header.frame_id.c_str());
+        // }
 
         if (bbox_msg) 
         {
