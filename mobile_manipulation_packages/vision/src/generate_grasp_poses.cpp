@@ -10,7 +10,7 @@
 #include <string>
 #include <algorithm>
 #include <map>
-
+#include <unordered_map>
 // PCL
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -25,7 +25,7 @@
 // Eigen
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-
+#include <sys/resource.h>
 using namespace std::chrono_literals;
 
 struct StepAnalysis
@@ -410,6 +410,11 @@ private:
         return best_q;
     }
 
+    struct VoxelBucket {
+    Eigen::Vector3f center;
+    std::vector<pcl::PointXYZ> points;
+};
+
     void evaluateGrasps()
     {
         std::vector<ScoredGrasp> initial_candidates; 
@@ -419,6 +424,44 @@ private:
 
         auto start = std::chrono::high_resolution_clock::now();
 
+        double total_time_inliers_ms = 0.0;
+        double total_time_analysis_ms = 0.0;
+        double total_time_scoring_ms  = 0.0;
+        
+    
+        float voxel_size = 0.01f;
+        std::unordered_map<long, VoxelBucket> voxel_grid;
+        
+        
+        auto get_key = [&](int x, int y, int z) -> long {
+            return ((long)x * 73856093) ^ ((long)y * 19349663) ^ ((long)z * 83492791);
+        };
+
+        
+        for (const auto& pt : stored_cloud_->points) {
+            int ix = std::floor(pt.x / voxel_size);
+            int iy = std::floor(pt.y / voxel_size);
+            int iz = std::floor(pt.z / voxel_size);
+            
+            long key = get_key(ix, iy, iz);
+            
+            
+            if (voxel_grid.find(key) == voxel_grid.end()) {
+                voxel_grid[key].center = Eigen::Vector3f(
+                    (ix + 0.5f) * voxel_size, 
+                    (iy + 0.5f) * voxel_size, 
+                    (iz + 0.5f) * voxel_size
+                );
+            }
+            voxel_grid[key].points.push_back(pt);
+        }
+
+        
+        float voxel_radius = (voxel_size * 1.73205f) / 2.0f;
+    
+        float voxel_check_threshold = cylinder_radius_ + voxel_radius; 
+        
+
         for (const auto& raw_pose : all_candidates_) 
         {
             Eigen::Quaternionf q(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
@@ -427,34 +470,69 @@ private:
 
             float t_min = 1e6, t_max = -1e6;
             bool hit = false;
-            pcl::PointCloud<pcl::PointXYZ> current_inliers;
             
-            for (const auto& pt : stored_cloud_->points) 
+            pcl::PointCloud<pcl::PointXYZ> current_inliers;
+            pcl::PointCloud<pcl::PointXYZ>::Ptr current_inliers_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+
+            auto t_inliers_start = std::chrono::high_resolution_clock::now();
+
+            
+            for (const auto& [key, bucket] : voxel_grid) 
             {
-                Eigen::Vector3f p(pt.x, pt.y, pt.z);
-                float t = (p - ray_origin).dot(ray_dir);
-                if ((p - (ray_origin + t*ray_dir)).norm() < cylinder_radius_) 
+            
+                Eigen::Vector3f diff = bucket.center - ray_origin;
+                float dist_sq_to_ray = (diff.cross(ray_dir)).squaredNorm();
+
+                
+                if (dist_sq_to_ray > (voxel_check_threshold * voxel_check_threshold)) {
+                    continue;
+                }
+
+                
+                for (const auto& pt : bucket.points) 
                 {
-                    if (t < t_min) t_min = t;
-                    if (t > t_max) t_max = t;
-                    hit = true;
-                    current_inliers.points.push_back(pt);
+                    Eigen::Vector3f p(pt.x, pt.y, pt.z);
+                    float t = (p - ray_origin).dot(ray_dir);
+                    
+                    
+                    if ((p - (ray_origin + t*ray_dir)).norm() < cylinder_radius_) 
+                    {
+                        if (t < t_min) t_min = t;
+                        if (t > t_max) t_max = t;
+                        hit = true;
+                        current_inliers.points.push_back(pt);
+                        current_inliers_ptr->points.push_back(pt);
+                    }
                 }
             }
+        
+            
+            auto t_inliers_end = std::chrono::high_resolution_clock::now();
+            total_time_inliers_ms += std::chrono::duration<double, std::milli>(t_inliers_end - t_inliers_start).count();
+
 
             if (!hit || (t_max - t_min) < 0.005) continue;
             
             hit_candidates_.push_back(raw_pose);
 
             std::vector<StepAnalysis> steps;
+
+            auto t_analysis_start = std::chrono::high_resolution_clock::now();
+
             for (float t = t_min; t <= t_max; t += analysis_step_size_) 
             {
                 Eigen::Vector3f center = ray_origin + ray_dir * t;
-                StepAnalysis res = analyzeLocalCylinder(stored_cloud_, center, ray_dir, cylinder_radius_, cylinder_height_);
+                StepAnalysis res = analyzeLocalCylinder(current_inliers_ptr, center, ray_dir, cylinder_radius_, cylinder_height_);
                 if (res.valid) steps.push_back(res);
             }
 
+            auto t_analysis_end = std::chrono::high_resolution_clock::now();
+            total_time_analysis_ms += std::chrono::duration<double, std::milli>(t_analysis_end - t_analysis_start).count();
+
+
             if (steps.empty()) continue;
+
+            auto t_scoring_start = std::chrono::high_resolution_clock::now();
 
             StepAnalysis& entry = steps.front();
             StepAnalysis& exit = steps.back();
@@ -490,7 +568,7 @@ private:
             float score_sym_exit  = exit.symmetry_score;
 
             double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + score_sym_entry * weight_symmetry_ + score_plan_entry * weight_planarity_) * 0.5 + 
-                           (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ + score_plan_exit * weight_planarity_) * 0.5;
+                        (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ + score_plan_exit * weight_planarity_) * 0.5;
 
             if (real_thickness < 0.015) total *= 0.1;
 
@@ -520,6 +598,9 @@ private:
             sg.debug_inliers = current_inliers;
             
             initial_candidates.push_back(sg);
+
+            auto t_scoring_end = std::chrono::high_resolution_clock::now();
+            total_time_scoring_ms += std::chrono::duration<double, std::milli>(t_scoring_end - t_scoring_start).count();
         }
 
         if (initial_candidates.empty()) 
@@ -544,12 +625,20 @@ private:
         has_best_ = !best_grasps_.empty();
         RCLCPP_INFO(this->get_logger(), "Encontrados %lu grasps.", best_grasps_.size());
         
-        
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-        auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-
-        RCLCPP_INFO(this->get_logger(), "Tempo de Processamento: %ld ms", duration);
+        RCLCPP_INFO(this->get_logger(), "Tempo Total: %ld ms", duration);
+        RCLCPP_INFO(this->get_logger(), ">> Breakdown: Inliers: %.2f ms | Analysis: %.2f ms | Scoring: %.2f ms", 
+            total_time_inliers_ms, total_time_analysis_ms, total_time_scoring_ms);
+            
+            
+        struct rusage usage;
+        getrusage(RUSAGE_SELF, &usage);
+        
+        long max_mem_mb = usage.ru_maxrss / 1024; 
+        
+        RCLCPP_INFO(this->get_logger(), "Memória Máxima Usada (RSS): %ld MB", max_mem_mb);
+        
     }
 
     void timerCallback() 

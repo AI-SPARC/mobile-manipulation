@@ -10,7 +10,7 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 : Node("world_state_node", options), db_(nullptr)
 {
     this->declare_parameter<std::string>("database_path", "/home/momesso/pibic/src/mobile_manipulation_packages/llms/db/robot_world_data.db");
-    this->declare_parameter<int>("num_cameras", 3);
+    this->declare_parameter<int>("num_cameras", 1);
 
     std::string db_path = this->get_parameter("database_path").as_string();
     int num_cameras = this->get_parameter("num_cameras").as_int();
@@ -38,7 +38,7 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 
     for (int i = 0; i < num_cameras; ++i)
     {
-        std::string topic_name = "/bbox_3d_with_labels_" + std::to_string(i);
+        std::string topic_name = "/bbox_3d_with_labels";
 
         auto sub = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             topic_name, 10, 

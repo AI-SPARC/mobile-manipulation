@@ -84,6 +84,7 @@ obstacle_graph_with_occupancy_grid:
 manipulation:
   ros__parameters:
     use_sim_time: true
+    use_graspnet: false
     yaml_file: ""          # Preenchido pelo launch
 
 add_collision_objects:

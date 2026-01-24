@@ -429,7 +429,7 @@ def generate_launch_description():
         ros2_control_node,
         joint_state_broadcaster_spawner,
         panda_arm_controller_spawner,
-        rviz_node, 
+        # rviz_node, 
     ]
 
     # 2. Nós que vão aguardar 3 segundos (Aplicação / Lógica)
