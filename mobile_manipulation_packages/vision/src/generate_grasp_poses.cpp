@@ -21,7 +21,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/surface/mls.h>
 #include <pcl/search/kdtree.h>
-
+#include <pcl/kdtree/kdtree_flann.h>
 // Eigen
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -65,7 +65,6 @@ class BestGraspFinder : public rclcpp::Node
 public:
     BestGraspFinder() : Node("best_grasp_finder") 
     {
-        // 1. Declaração dos Parâmetros
         this->declare_parameter<bool>("subscribe_to_point_cloud", false);
         this->declare_parameter<std::string>("pcd_path", "/home/momesso/pibic/nuvem.pcd");
         
@@ -95,13 +94,12 @@ public:
         this->declare_parameter<double>("weight_symmetry", 0.2);
         this->declare_parameter<double>("weight_planarity", 0.2);
         
-        this->declare_parameter<bool>("use_mls_smoothing", false); 
-        this->declare_parameter<double>("mls_radius", 0.03);
+        this->declare_parameter<bool>("use_mean_filter", true); 
+        this->declare_parameter<int>("mean_filter_k", 10);
 
         this->declare_parameter<int>("num_best_grasps", 5);
         this->declare_parameter<double>("rotation_step_deg", 30.0);
 
-        // 2. Recuperação dos valores para as variáveis membro PRIVADAS
         subscribe_to_point_cloud_ = this->get_parameter("subscribe_to_point_cloud").as_bool();
         pcd_path_ = this->get_parameter("pcd_path").as_string();
         
@@ -132,13 +130,12 @@ public:
         weight_symmetry_ = static_cast<float>(this->get_parameter("weight_symmetry").as_double());
         weight_planarity_ = static_cast<float>(this->get_parameter("weight_planarity").as_double());
 
-        use_mls_smoothing_ = this->get_parameter("use_mls_smoothing").as_bool();
-        mls_radius_ = static_cast<float>(this->get_parameter("mls_radius").as_double());
+        mean_filter = this->get_parameter("use_mean_filter").as_bool();
+        mean_filter_k_ = this->get_parameter("mean_filter_k").as_int();
 
         num_best_grasps_ = this->get_parameter("num_best_grasps").as_int();
         rotation_step_deg_ = static_cast<float>(this->get_parameter("rotation_step_deg").as_double());
 
-        // 3. Inicialização dos Publishers/Subscribers
         pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", 10);
         pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", 10);
         pub_bbox_  = this->create_publisher<visualization_msgs::msg::Marker>("bounding_box", 10);
@@ -186,8 +183,8 @@ private:
     float weight_symmetry_;
     float weight_planarity_;
 
-    bool use_mls_smoothing_;
-    float mls_radius_;
+    bool mean_filter;
+    float mean_filter_k_;
 
     int num_best_grasps_;
     float rotation_step_deg_;
@@ -232,6 +229,7 @@ private:
 
     void processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud)
     {
+        auto start = std::chrono::high_resolution_clock::now();
         if (input_cloud->empty()) return;
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr voxel_cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -248,25 +246,57 @@ private:
             *voxel_cloud = *input_cloud;
         }
 
-        if (use_mls_smoothing_) 
+        if (mean_filter) 
         {
-            RCLCPP_INFO(this->get_logger(), "Aplicando MLS...");
-            pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
-            pcl::PointCloud<pcl::PointNormal> mls_points;
-            pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointNormal> mls;
-            mls.setComputeNormals(true);
-            mls.setInputCloud(voxel_cloud);
-            mls.setPolynomialOrder(2);
-            mls.setSearchMethod(tree);
-            mls.setSearchRadius(mls_radius_);
-            mls.process(mls_points);
-            stored_cloud_->clear();
-            for (const auto& pt_n : mls_points) 
+            pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+            kdtree.setInputCloud(voxel_cloud);
+
+            stored_cloud_->points.resize(voxel_cloud->points.size());
+            stored_cloud_->width = voxel_cloud->width;
+            stored_cloud_->height = voxel_cloud->height;
+            stored_cloud_->is_dense = voxel_cloud->is_dense;
+            stored_cloud_->header = voxel_cloud->header; 
+
+            
+            int K = mean_filter_k_; 
+
+            
+            #pragma omp parallel for
+            for (size_t i = 0; i < voxel_cloud->points.size(); ++i) 
             {
-                pcl::PointXYZ pt; pt.x = pt_n.x; pt.y = pt_n.y; pt.z = pt_n.z;
-                stored_cloud_->points.push_back(pt);
+                
+                std::vector<int> pointIdxNKNSearch(K);
+                std::vector<float> pointNKNSquaredDistance(K);
+
+                
+                if (kdtree.nearestKSearch(voxel_cloud->points[i], K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0) 
+                {
+                    float sum_x = 0, sum_y = 0, sum_z = 0;
+                    int valid_pts = 0;
+
+                  
+                    for (int j = 0; j < K; ++j) 
+                    {
+                        
+                        const auto& neighbor = voxel_cloud->points[pointIdxNKNSearch[j]];
+                        sum_x += neighbor.x;
+                        sum_y += neighbor.y;
+                        sum_z += neighbor.z;
+                        valid_pts++;
+                    }
+
+                   
+                    stored_cloud_->points[i].x = sum_x / valid_pts;
+                    stored_cloud_->points[i].y = sum_y / valid_pts;
+                    stored_cloud_->points[i].z = sum_z / valid_pts;
+                }
+                else
+                {
+                    
+                    stored_cloud_->points[i] = voxel_cloud->points[i];
+                }
             }
-        } 
+        }
         else 
         {
             *stored_cloud_ = *voxel_cloud;
@@ -279,6 +309,12 @@ private:
         
         all_candidates_ = generateOrthogonalRays(min_pt_, max_pt_, grid_res_);
 
+           auto end = std::chrono::high_resolution_clock::now();
+
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+        RCLCPP_INFO(this->get_logger(), "Tempo Total: %ld ms", duration);
+      
         evaluateGrasps();
     }
 
