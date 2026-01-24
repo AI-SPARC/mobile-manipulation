@@ -52,15 +52,12 @@ struct ScoredGrasp
     double exit_planarity;
     Eigen::Vector3f entry_normal;
 
-    // --- CAMPOS CORRIGIDOS QUE FALTAVAM ---
     Eigen::Vector3f raw_ray_dir;
     Eigen::Vector3f raw_p_f1;
     Eigen::Vector3f raw_p_f2;
-
-    // --- CAMPOS DE DEBUG VISUAL ---
     Eigen::Vector3f debug_entry_pt;
     Eigen::Vector3f debug_exit_pt;
-    pcl::PointCloud<pcl::PointXYZ> debug_inliers; // Pontos que o raio tocou
+    pcl::PointCloud<pcl::PointXYZ> debug_inliers; 
 };
 
 class BestGraspFinder : public rclcpp::Node
@@ -70,30 +67,25 @@ public:
     {
         this->declare_parameter<std::string>("pcd_path", "/home/momesso/pibic/nuvem.pcd");
         
-        
         this->declare_parameter<std::string>("gripper_mesh_path", "/home/momesso/hand_and_finger.stl");
         this->declare_parameter<float>("gripper_mesh_scale", 0.001);
         
-      
         this->declare_parameter<float>("mesh_offset_x", 0.0);
         this->declare_parameter<float>("mesh_offset_y", 0.0);
         this->declare_parameter<float>("mesh_offset_z", -0.025);
         
-        
         this->declare_parameter<float>("mesh_rot_roll", 0.0);
         this->declare_parameter<float>("mesh_rot_pitch", 0.0);
         this->declare_parameter<float>("mesh_rot_yaw", 1.57); 
-        
+
         this->declare_parameter<float>("grid_res", 0.02);
         this->declare_parameter<float>("cloud_voxel_size", 0.003);
         
-       
-        this->declare_parameter<float>("cylinder_radius", 0.015); 
+        this->declare_parameter<float>("cylinder_radius", 0.02); 
         this->declare_parameter<float>("cylinder_height", 0.015);
         this->declare_parameter<float>("analysis_step_size", 0.01);
         
-        this->declare_parameter<float>("max_gripper_width", 0.10); 
-        
+        this->declare_parameter<float>("max_gripper_width", 0.12); 
         this->declare_parameter<float>("finger_offset", 0.03); 
         
         this->declare_parameter<int>("min_points_per_segment", 6);
@@ -106,13 +98,15 @@ public:
 
         this->declare_parameter<int>("num_best_grasps", 5);
 
+        this->declare_parameter<float>("rotation_step_deg", 30.0);
+
         pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", 10);
         pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", 10);
         pub_bbox_  = this->create_publisher<visualization_msgs::msg::Marker>("bounding_box", 10);
         pub_markers_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("best_grasps_markers", 10);
+        
         pub_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_poses", 10);
         
-        // NOVO PUBLISHER DE DEBUG
         pub_debug_inliers_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_ray_inliers", 10);
 
         stored_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
@@ -165,23 +159,7 @@ private:
 
         if (this->get_parameter("use_mls_smoothing").as_bool()) 
         {
-            RCLCPP_INFO(this->get_logger(), "Aplicando MLS...");
-            float mls_rad = this->get_parameter("mls_radius").as_double();
-            pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
-            pcl::PointCloud<pcl::PointNormal> mls_points;
-            pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointNormal> mls;
-            mls.setComputeNormals(true);
-            mls.setInputCloud(voxel_cloud);
-            mls.setPolynomialOrder(2);
-            mls.setSearchMethod(tree);
-            mls.setSearchRadius(mls_rad);
-            mls.process(mls_points);
-            stored_cloud_->clear();
-            for (const auto& pt_n : mls_points) 
-            {
-                pcl::PointXYZ pt; pt.x = pt_n.x; pt.y = pt_n.y; pt.z = pt_n.z;
-                stored_cloud_->points.push_back(pt);
-            }
+            *stored_cloud_ = *voxel_cloud; // Fallback simples
         } 
         else 
         {
@@ -189,14 +167,10 @@ private:
         }
         
         stored_cloud_->header.frame_id = "world";
-
         pcl::getMinMax3D(*stored_cloud_, min_pt_, max_pt_);
         float padding = 0.02; min_pt_.array() -= padding; max_pt_.array() += padding;
-
         float grid_res = this->get_parameter("grid_res").as_double();
-        
         all_candidates_ = generateOrthogonalRays(min_pt_, max_pt_, grid_res);
-
         evaluateGrasps();
     }
 
@@ -212,34 +186,24 @@ private:
             p.orientation.x = q.x(); p.orientation.y = q.y(); p.orientation.z = q.z(); p.orientation.w = q.w();
             poses.push_back(p);
         };
-
         // Eixo X
         for(float y = min[1]; y < max[1]; y += res)
-        {
-            for(float z = min[2]; z < max[2]; z += res) 
-            {
+            for(float z = min[2]; z < max[2]; z += res) {
                 add_ray({min[0], y+res/2, z+res/2}, {1, 0, 0});
                 add_ray({max[0], y+res/2, z+res/2}, {-1, 0, 0});
             }
-        }
         // Eixo Y
         for(float x = min[0]; x < max[0]; x += res)
-        {
-            for(float z = min[2]; z < max[2]; z += res) 
-            {
+            for(float z = min[2]; z < max[2]; z += res) {
                 add_ray({x+res/2, min[1], z+res/2}, {0, 1, 0});
                 add_ray({x+res/2, max[1], z+res/2}, {0, -1, 0});
             }
-        }
         // Eixo Z
         for(float x = min[0]; x < max[0]; x += res)
-        {
-            for(float y = min[1]; y < max[1]; y += res) 
-            {
+            for(float y = min[1]; y < max[1]; y += res) {
                 add_ray({x+res/2, y+res/2, min[2]}, {0, 0, 1});
                 add_ray({x+res/2, y+res/2, max[2]}, {0, 0, -1});
             }
-        }
         return poses;
     }
 
@@ -263,12 +227,10 @@ private:
         {
             Eigen::Vector3f p(pt.x, pt.y, pt.z);
             Eigen::Vector3f diff = p - center;
-
             if (std::abs(diff.dot(ray_dir)) > height/2.0f) continue;
             if (diff.cross(ray_dir).norm() > radius) continue;
 
             local_cloud->points.push_back(pt);
-
             float coord_u = diff.dot(u);
             float coord_v = diff.dot(v);
             float deg = std::atan2(coord_v, coord_u) * 180.0f / M_PI;
@@ -287,7 +249,6 @@ private:
         Eigen::Vector3f ev = pca.getEigenValues();
         float sum = ev.sum();
         result.curvature = (sum > 1e-6) ? ev[2] / sum : 0.0;
-
         Eigen::Vector3f normal = pca.getEigenVectors().col(2);
         result.normal_vector = normal;
         float dot = std::abs(ray_dir.dot(normal));
@@ -296,7 +257,6 @@ private:
         int occupied = 0;
         for (int c : sector_counts) if (c > 0) occupied++;
         result.symmetry_score = (float)occupied / 12.0f;
-        
         result.valid = true;
         return result;
     }
@@ -306,9 +266,51 @@ private:
         return true; 
     }
 
+    Eigen::Quaternionf findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2)
+    {
+        // 1. Definir o eixo Y da garra (Linha entre os dedos)
+        Eigen::Vector3f finger_axis = (p_f2 - p_f1).normalized();
+        
+        // 2. Criar um vetor base perpendicular
+        Eigen::Vector3f base_approach;
+        if (std::abs(finger_axis.dot(Eigen::Vector3f::UnitZ())) > 0.95) {
+             base_approach = finger_axis.cross(Eigen::Vector3f::UnitX()).normalized();
+        } else {
+             base_approach = finger_axis.cross(Eigen::Vector3f::UnitZ()).normalized();
+        }
+
+        float best_score = -1000.0;
+        Eigen::Quaternionf best_q = Eigen::Quaternionf::Identity();
+        
+        double step_deg = this->get_parameter("rotation_step_deg").as_double();
+        double step_rad = step_deg * M_PI / 180.0;
+
+        for (double angle = 0; angle < 2 * M_PI; angle += step_rad) 
+        {
+            Eigen::AngleAxisf rotation(angle, finger_axis);
+            Eigen::Vector3f candidate_approach = rotation * base_approach; 
+            Eigen::Vector3f candidate_up = candidate_approach.cross(finger_axis);
+
+            Eigen::Matrix3f rot_mat;
+            rot_mat.col(0) = candidate_approach; 
+            rot_mat.col(1) = finger_axis;        
+            rot_mat.col(2) = candidate_up;       
+
+            
+            float score = candidate_approach.dot(-Eigen::Vector3f::UnitZ());
+
+            if (score > best_score) {
+                best_score = score;
+                best_q = Eigen::Quaternionf(rot_mat);
+            }
+        }
+
+       
+        return best_q;
+    }
+
     void evaluateGrasps()
     {
-        // Lendo parametros atualizados
         float radius = this->get_parameter("cylinder_radius").as_double();
         float max_width = this->get_parameter("max_gripper_width").as_double(); 
         float cyl_height = this->get_parameter("cylinder_height").as_double();
@@ -333,25 +335,17 @@ private:
 
             float t_min = 1e6, t_max = -1e6;
             bool hit = false;
-            
-            
             pcl::PointCloud<pcl::PointXYZ> current_inliers;
 
             for (const auto& pt : stored_cloud_->points) 
             {
                 Eigen::Vector3f p(pt.x, pt.y, pt.z);
-                
-               
                 float t = (p - ray_origin).dot(ray_dir);
-                
-                
                 if ((p - (ray_origin + t*ray_dir)).norm() < radius) 
                 {
                     if (t < t_min) t_min = t;
                     if (t > t_max) t_max = t;
                     hit = true;
-                    
-                    
                     current_inliers.points.push_back(pt);
                 }
             }
@@ -360,7 +354,6 @@ private:
             
             hit_candidates_.push_back(raw_pose);
 
-            
             std::vector<StepAnalysis> steps;
             for (float t = t_min; t <= t_max; t += step_size) 
             {
@@ -374,19 +367,26 @@ private:
             StepAnalysis& entry = steps.front();
             StepAnalysis& exit = steps.back();
 
-            Eigen::Vector3f p_f1 = ray_origin + ray_dir * (t_min - finger_offset);
-            
-            Eigen::Vector3f p_f2 = ray_origin + ray_dir * (t_max + finger_offset);
-            
-            
-            Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
-            
             float real_thickness = t_max - t_min;
             if (real_thickness > max_width) continue; 
 
+            float current_offset = finger_offset;
+            float total_width_needed = real_thickness + (2.0f * current_offset);
 
-            
-            // Score
+            if (total_width_needed > max_width) 
+            {
+                current_offset = (max_width - real_thickness) / 2.0f;
+                if (current_offset < 0.01f) current_offset = 0.01f;
+            }
+            total_width_needed = real_thickness + (2.0f * current_offset);
+            if(total_width_needed > max_width) continue;
+
+            Eigen::Vector3f p_f1 = ray_origin + ray_dir * (t_min - current_offset);
+            Eigen::Vector3f p_f2 = ray_origin + ray_dir * (t_max + current_offset);
+            Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
+
+            Eigen::Quaternionf best_orientation = findBestOrientation(p_f1, p_f2);
+
             float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
             float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
             float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
@@ -403,9 +403,15 @@ private:
             if (real_thickness < 0.015) total *= 0.1;
 
             ScoredGrasp sg;
-            sg.pose_center = raw_pose; sg.pose_center.position.x = center_grasp.x(); sg.pose_center.position.y = center_grasp.y(); sg.pose_center.position.z = center_grasp.z();
-            sg.pose_finger1 = raw_pose; sg.pose_finger1.position.x = p_f1.x(); sg.pose_finger1.position.y = p_f1.y(); sg.pose_finger1.position.z = p_f1.z();
-            sg.pose_finger2 = raw_pose; sg.pose_finger2.position.x = p_f2.x(); sg.pose_finger2.position.y = p_f2.y(); sg.pose_finger2.position.z = p_f2.z();
+            
+            sg.pose_center.position.x = center_grasp.x(); sg.pose_center.position.y = center_grasp.y(); sg.pose_center.position.z = center_grasp.z();
+            sg.pose_center.orientation.x = best_orientation.x(); sg.pose_center.orientation.y = best_orientation.y(); sg.pose_center.orientation.z = best_orientation.z(); sg.pose_center.orientation.w = best_orientation.w();
+            
+            sg.pose_finger1 = sg.pose_center;
+            sg.pose_finger1.position.x = p_f1.x(); sg.pose_finger1.position.y = p_f1.y(); sg.pose_finger1.position.z = p_f1.z();
+            
+            sg.pose_finger2 = sg.pose_center;
+            sg.pose_finger2.position.x = p_f2.x(); sg.pose_finger2.position.y = p_f2.y(); sg.pose_finger2.position.z = p_f2.z();
             
             sg.raw_ray_dir = ray_dir;
             sg.raw_p_f1 = p_f1;
@@ -416,7 +422,6 @@ private:
             sg.entry_planarity = 1.0 - entry.curvature;
             sg.exit_planarity = 1.0 - exit.curvature;
             sg.entry_normal = entry.normal_vector;
-            
             
             sg.debug_entry_pt = ray_origin + ray_dir * t_min;
             sg.debug_exit_pt = ray_origin + ray_dir * t_max;
@@ -442,25 +447,17 @@ private:
                 best_grasps_.push_back(sg);
             }
         }
-        
         has_best_ = !best_grasps_.empty();
-        
         RCLCPP_INFO(this->get_logger(), "Encontrados %lu grasps.", best_grasps_.size());
-        for(size_t i = 0; i < best_grasps_.size(); i++)
-        {
-            RCLCPP_INFO(this->get_logger(), "#%lu Score: %.2f", i, best_grasps_[i].total_score);
-        }
     }
 
     void timerCallback() 
     {
         auto t = this->now();
-
         sensor_msgs::msg::PointCloud2 m; 
         pcl::toROSMsg(*stored_cloud_, m); 
         m.header.stamp = t; m.header.frame_id = "world"; 
         pub_cloud_->publish(m);
-        
         
         visualization_msgs::msg::Marker bbox_marker;
         bbox_marker.header.frame_id = "world"; bbox_marker.header.stamp = t;
@@ -474,12 +471,10 @@ private:
         bbox_marker.color.r = 0.8; bbox_marker.color.g = 0.8; bbox_marker.color.b = 0.8; bbox_marker.color.a = 0.2; 
         pub_bbox_->publish(bbox_marker);
 
-       
         visualization_msgs::msg::MarkerArray ma_rays; 
         float ray_len = 0.15; 
         size_t hit_lim = std::min((size_t)500, hit_candidates_.size());
-        for(size_t i=0; i<hit_lim; ++i) 
-        {
+        for(size_t i=0; i<hit_lim; ++i) {
             visualization_msgs::msg::Marker k; 
             k.header.frame_id="world"; k.header.stamp=t; k.ns="rays_hit"; k.id=i; k.type=0; k.action=0; 
             k.scale.x=ray_len * 0.5; k.scale.y=0.002; k.scale.z=0.002; 
@@ -488,19 +483,20 @@ private:
             ma_rays.markers.push_back(k);
         }
         pub_rays_->publish(ma_rays);
-
         if(has_best_) publishBest();
     }
 
     void publishBest() 
     {
         visualization_msgs::msg::MarkerArray ma; 
+        
+        
         geometry_msgs::msg::PoseArray pose_array_msg;
         pose_array_msg.header.frame_id = "world";
         pose_array_msg.header.stamp = this->now();
+       
         auto t = this->now();
 
-        
         std::string mesh_path = this->get_parameter("gripper_mesh_path").as_string();
         float mesh_scale = this->get_parameter("gripper_mesh_scale").as_double();
         float off_x = this->get_parameter("mesh_offset_x").as_double();
@@ -525,7 +521,6 @@ private:
             return m;
         };
 
-        
         if (!best_grasps_.empty()) {
             sensor_msgs::msg::PointCloud2 debug_msg;
             pcl::toROSMsg(best_grasps_[0].debug_inliers, debug_msg);
@@ -533,12 +528,14 @@ private:
             debug_msg.header.stamp = t;
             pub_debug_inliers_->publish(debug_msg);
         }
-        
 
         for(size_t i = 0; i < best_grasps_.size(); i++)
         {
             const auto& grasp = best_grasps_[i];
+
+           
             pose_array_msg.poses.push_back(grasp.pose_center);
+            
 
             float r=0, g=1, b=0, alpha=0.6;
             if (i == 0) { r=0; g=0; b=1; alpha=1.0; }
@@ -547,26 +544,16 @@ private:
             ma.markers.push_back(sphere(base_id + 0, grasp.pose_finger1, r, g, b, alpha, 0.025)); 
             ma.markers.push_back(sphere(base_id + 1, grasp.pose_finger2, r, g, b, alpha, 0.025)); 
             
-            
             if (i == 0) {
                 geometry_msgs::msg::Pose p_start; 
-                p_start.position.x = grasp.debug_entry_pt.x();
-                p_start.position.y = grasp.debug_entry_pt.y();
-                p_start.position.z = grasp.debug_entry_pt.z();
-                
+                p_start.position.x = grasp.debug_entry_pt.x(); p_start.position.y = grasp.debug_entry_pt.y(); p_start.position.z = grasp.debug_entry_pt.z();
                 geometry_msgs::msg::Pose p_end; 
-                p_end.position.x = grasp.debug_exit_pt.x();
-                p_end.position.y = grasp.debug_exit_pt.y();
-                p_end.position.z = grasp.debug_exit_pt.z();
+                p_end.position.x = grasp.debug_exit_pt.x(); p_end.position.y = grasp.debug_exit_pt.y(); p_end.position.z = grasp.debug_exit_pt.z();
 
-                
                 ma.markers.push_back(sphere(base_id + 10, p_start, 0.0, 1.0, 0.0, 1.0, 0.015));
-                
                 ma.markers.push_back(sphere(base_id + 11, p_end, 1.0, 0.0, 0.0, 1.0, 0.015));
             }
-            
 
-            
             visualization_msgs::msg::Marker mesh_marker;
             mesh_marker.header.frame_id = "world"; mesh_marker.header.stamp = t;
             mesh_marker.ns = "gripper_mesh"; mesh_marker.id = base_id + 5;
@@ -596,7 +583,6 @@ private:
             mesh_marker.mesh_resource = mesh_path; mesh_marker.mesh_use_embedded_materials = true;
             ma.markers.push_back(mesh_marker);
             
-            // Texto
             visualization_msgs::msg::Marker txt; 
             txt.header.frame_id="world"; txt.header.stamp=t; txt.ns="txt"; txt.id=base_id+3; txt.type=9; txt.action=0; 
             txt.pose=grasp.pose_center; txt.pose.position.z+=0.05; txt.scale.z=0.03; 
@@ -609,6 +595,8 @@ private:
         }
         
         pub_markers_->publish(ma);
+        
+        
         pub_poses_->publish(pose_array_msg);
     }
 };
