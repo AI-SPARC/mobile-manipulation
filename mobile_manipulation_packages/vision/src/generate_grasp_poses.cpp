@@ -65,58 +65,133 @@ class BestGraspFinder : public rclcpp::Node
 public:
     BestGraspFinder() : Node("best_grasp_finder") 
     {
+        // 1. Declaração dos Parâmetros
+        this->declare_parameter<bool>("subscribe_to_point_cloud", false);
         this->declare_parameter<std::string>("pcd_path", "/home/momesso/pibic/nuvem.pcd");
         
         this->declare_parameter<std::string>("gripper_mesh_path", "/home/momesso/hand_and_finger.stl");
-        this->declare_parameter<float>("gripper_mesh_scale", 0.001);
+        this->declare_parameter<double>("gripper_mesh_scale", 0.001);
         
-        this->declare_parameter<float>("mesh_offset_x", 0.0);
-        this->declare_parameter<float>("mesh_offset_y", 0.0);
-        this->declare_parameter<float>("mesh_offset_z", -0.025);
+        this->declare_parameter<double>("mesh_offset_x", 0.0);
+        this->declare_parameter<double>("mesh_offset_y", 0.0);
+        this->declare_parameter<double>("mesh_offset_z", -0.025);
         
-        this->declare_parameter<float>("mesh_rot_roll", 0.0);
-        this->declare_parameter<float>("mesh_rot_pitch", 0.0);
-        this->declare_parameter<float>("mesh_rot_yaw", 1.57); 
+        this->declare_parameter<double>("mesh_rot_roll", 0.0);
+        this->declare_parameter<double>("mesh_rot_pitch", 0.0);
+        this->declare_parameter<double>("mesh_rot_yaw", 1.57); 
 
-        this->declare_parameter<float>("grid_res", 0.02);
-        this->declare_parameter<float>("cloud_voxel_size", 0.003);
+        this->declare_parameter<double>("grid_res", 0.02);
+        this->declare_parameter<double>("cloud_voxel_size", 0.003);
         
-        this->declare_parameter<float>("cylinder_radius", 0.02); 
-        this->declare_parameter<float>("cylinder_height", 0.015);
-        this->declare_parameter<float>("analysis_step_size", 0.01);
+        this->declare_parameter<double>("cylinder_radius", 0.02); 
+        this->declare_parameter<double>("cylinder_height", 0.015);
+        this->declare_parameter<double>("analysis_step_size", 0.01);
         
-        this->declare_parameter<float>("max_gripper_width", 0.12); 
-        this->declare_parameter<float>("finger_offset", 0.03); 
+        this->declare_parameter<double>("max_gripper_width", 0.12); 
+        this->declare_parameter<double>("finger_offset", 0.03); 
         
         this->declare_parameter<int>("min_points_per_segment", 6);
-        this->declare_parameter<float>("weight_orientation", 0.6); 
-        this->declare_parameter<float>("weight_symmetry", 0.2);
-        this->declare_parameter<float>("weight_planarity", 0.2);
+        this->declare_parameter<double>("weight_orientation", 0.6); 
+        this->declare_parameter<double>("weight_symmetry", 0.2);
+        this->declare_parameter<double>("weight_planarity", 0.2);
         
         this->declare_parameter<bool>("use_mls_smoothing", false); 
-        this->declare_parameter<float>("mls_radius", 0.03);
+        this->declare_parameter<double>("mls_radius", 0.03);
 
         this->declare_parameter<int>("num_best_grasps", 5);
+        this->declare_parameter<double>("rotation_step_deg", 30.0);
 
-        this->declare_parameter<float>("rotation_step_deg", 30.0);
+        // 2. Recuperação dos valores para as variáveis membro PRIVADAS
+        subscribe_to_point_cloud_ = this->get_parameter("subscribe_to_point_cloud").as_bool();
+        pcd_path_ = this->get_parameter("pcd_path").as_string();
+        
+        gripper_mesh_path_ = this->get_parameter("gripper_mesh_path").as_string();
+        gripper_mesh_scale_ = static_cast<float>(this->get_parameter("gripper_mesh_scale").as_double());
 
+        mesh_offset_x_ = static_cast<float>(this->get_parameter("mesh_offset_x").as_double());
+        mesh_offset_y_ = static_cast<float>(this->get_parameter("mesh_offset_y").as_double());
+        mesh_offset_z_ = static_cast<float>(this->get_parameter("mesh_offset_z").as_double());
+
+        mesh_rot_roll_ = static_cast<float>(this->get_parameter("mesh_rot_roll").as_double());
+        mesh_rot_pitch_ = static_cast<float>(this->get_parameter("mesh_rot_pitch").as_double());
+        mesh_rot_yaw_ = static_cast<float>(this->get_parameter("mesh_rot_yaw").as_double());
+
+        grid_res_ = static_cast<float>(this->get_parameter("grid_res").as_double());
+        cloud_voxel_size_ = static_cast<float>(this->get_parameter("cloud_voxel_size").as_double());
+
+        cylinder_radius_ = static_cast<float>(this->get_parameter("cylinder_radius").as_double());
+        cylinder_height_ = static_cast<float>(this->get_parameter("cylinder_height").as_double());
+        analysis_step_size_ = static_cast<float>(this->get_parameter("analysis_step_size").as_double());
+
+        max_gripper_width_ = static_cast<float>(this->get_parameter("max_gripper_width").as_double());
+        finger_offset_ = static_cast<float>(this->get_parameter("finger_offset").as_double());
+
+        min_points_per_segment_ = this->get_parameter("min_points_per_segment").as_int();
+        
+        weight_orientation_ = static_cast<float>(this->get_parameter("weight_orientation").as_double());
+        weight_symmetry_ = static_cast<float>(this->get_parameter("weight_symmetry").as_double());
+        weight_planarity_ = static_cast<float>(this->get_parameter("weight_planarity").as_double());
+
+        use_mls_smoothing_ = this->get_parameter("use_mls_smoothing").as_bool();
+        mls_radius_ = static_cast<float>(this->get_parameter("mls_radius").as_double());
+
+        num_best_grasps_ = this->get_parameter("num_best_grasps").as_int();
+        rotation_step_deg_ = static_cast<float>(this->get_parameter("rotation_step_deg").as_double());
+
+        // 3. Inicialização dos Publishers/Subscribers
         pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", 10);
         pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", 10);
         pub_bbox_  = this->create_publisher<visualization_msgs::msg::Marker>("bounding_box", 10);
         pub_markers_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("best_grasps_markers", 10);
-        
         pub_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_poses", 10);
-        
         pub_debug_inliers_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_ray_inliers", 10);
 
         stored_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
-        std::string pcd_path = this->get_parameter("pcd_path").as_string();
-        loadAndProcess(pcd_path);
+        
+    
+        RCLCPP_INFO(this->get_logger(), "MODO ARQUIVO: Carregando PCD de %s...", pcd_path_.c_str());
+        loadAndProcess(pcd_path_);
+        
         
         timer_ = this->create_wall_timer(1000ms, std::bind(&BestGraspFinder::timerCallback, this));
     }
 
 private:
+    // --- VARIÁVEIS DE CONFIGURAÇÃO (PARAMETROS) ---
+    bool subscribe_to_point_cloud_;
+    std::string pcd_path_;
+    std::string gripper_mesh_path_;
+    float gripper_mesh_scale_;
+
+    float mesh_offset_x_;
+    float mesh_offset_y_;
+    float mesh_offset_z_;
+
+    float mesh_rot_roll_;
+    float mesh_rot_pitch_;
+    float mesh_rot_yaw_;
+
+    float grid_res_;
+    float cloud_voxel_size_;
+
+    float cylinder_radius_;
+    float cylinder_height_;
+    float analysis_step_size_;
+
+    float max_gripper_width_;
+    float finger_offset_;
+
+    int min_points_per_segment_;
+    float weight_orientation_;
+    float weight_symmetry_;
+    float weight_planarity_;
+
+    bool use_mls_smoothing_;
+    float mls_radius_;
+
+    int num_best_grasps_;
+    float rotation_step_deg_;
+
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;
@@ -124,6 +199,7 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_poses_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_inliers_;
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_input_cloud_;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr stored_cloud_;
     std::vector<geometry_msgs::msg::Pose> all_candidates_;
@@ -132,34 +208,64 @@ private:
     bool has_best_ = false;
     Eigen::Vector4f min_pt_, max_pt_;
 
+    void inputCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+    {
+        if(subscribe_to_point_cloud_ == true)
+        {
+            pcl::PointCloud<pcl::PointXYZ>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::fromROSMsg(*msg, *temp_cloud);
+            processCloud(temp_cloud);
+        }
+        
+    }
+
     void loadAndProcess(const std::string& path)
     {
-        RCLCPP_INFO(this->get_logger(), "Lendo PCD...");
         pcl::PointCloud<pcl::PointXYZ>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         if (pcl::io::loadPCDFile<pcl::PointXYZ>(path, *temp_cloud) == -1) 
         {
-            RCLCPP_ERROR(this->get_logger(), "Falha ao ler arquivo PCD.");
+            RCLCPP_ERROR(this->get_logger(), "Falha ao ler arquivo PCD: %s", path.c_str());
             return;
         }
+        processCloud(temp_cloud);
+    }
+
+    void processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud)
+    {
+        if (input_cloud->empty()) return;
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr voxel_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-        float voxel_size = this->get_parameter("cloud_voxel_size").as_double();
-
-        if (voxel_size > 0.0001) 
+        
+        if (cloud_voxel_size_ > 0.0001) 
         {
             pcl::VoxelGrid<pcl::PointXYZ> sor;
-            sor.setInputCloud(temp_cloud);
-            sor.setLeafSize(voxel_size, voxel_size, voxel_size);
+            sor.setInputCloud(input_cloud);
+            sor.setLeafSize(cloud_voxel_size_, cloud_voxel_size_, cloud_voxel_size_);
             sor.filter(*voxel_cloud);
         } 
         else 
         {
-            *voxel_cloud = *temp_cloud;
+            *voxel_cloud = *input_cloud;
         }
 
-        if (this->get_parameter("use_mls_smoothing").as_bool()) 
+        if (use_mls_smoothing_) 
         {
-            *stored_cloud_ = *voxel_cloud; // Fallback simples
+            RCLCPP_INFO(this->get_logger(), "Aplicando MLS...");
+            pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
+            pcl::PointCloud<pcl::PointNormal> mls_points;
+            pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointNormal> mls;
+            mls.setComputeNormals(true);
+            mls.setInputCloud(voxel_cloud);
+            mls.setPolynomialOrder(2);
+            mls.setSearchMethod(tree);
+            mls.setSearchRadius(mls_radius_);
+            mls.process(mls_points);
+            stored_cloud_->clear();
+            for (const auto& pt_n : mls_points) 
+            {
+                pcl::PointXYZ pt; pt.x = pt_n.x; pt.y = pt_n.y; pt.z = pt_n.z;
+                stored_cloud_->points.push_back(pt);
+            }
         } 
         else 
         {
@@ -167,10 +273,12 @@ private:
         }
         
         stored_cloud_->header.frame_id = "world";
+
         pcl::getMinMax3D(*stored_cloud_, min_pt_, max_pt_);
         float padding = 0.02; min_pt_.array() -= padding; max_pt_.array() += padding;
-        float grid_res = this->get_parameter("grid_res").as_double();
-        all_candidates_ = generateOrthogonalRays(min_pt_, max_pt_, grid_res);
+        
+        all_candidates_ = generateOrthogonalRays(min_pt_, max_pt_, grid_res_);
+
         evaluateGrasps();
     }
 
@@ -240,8 +348,7 @@ private:
         }
 
         result.point_count = local_cloud->size();
-        int min_pts = this->get_parameter("min_points_per_segment").as_int();
-        if (result.point_count <= min_pts) return result;
+        if (result.point_count <= min_points_per_segment_) return result;
 
         pcl::PCA<pcl::PointXYZ> pca;
         pca.setInputCloud(local_cloud);
@@ -268,10 +375,8 @@ private:
 
     Eigen::Quaternionf findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2)
     {
-        // 1. Definir o eixo Y da garra (Linha entre os dedos)
         Eigen::Vector3f finger_axis = (p_f2 - p_f1).normalized();
         
-        // 2. Criar um vetor base perpendicular
         Eigen::Vector3f base_approach;
         if (std::abs(finger_axis.dot(Eigen::Vector3f::UnitZ())) > 0.95) {
              base_approach = finger_axis.cross(Eigen::Vector3f::UnitX()).normalized();
@@ -282,8 +387,7 @@ private:
         float best_score = -1000.0;
         Eigen::Quaternionf best_q = Eigen::Quaternionf::Identity();
         
-        double step_deg = this->get_parameter("rotation_step_deg").as_double();
-        double step_rad = step_deg * M_PI / 180.0;
+        double step_rad = rotation_step_deg_ * M_PI / 180.0;
 
         for (double angle = 0; angle < 2 * M_PI; angle += step_rad) 
         {
@@ -296,7 +400,6 @@ private:
             rot_mat.col(1) = finger_axis;        
             rot_mat.col(2) = candidate_up;       
 
-            
             float score = candidate_approach.dot(-Eigen::Vector3f::UnitZ());
 
             if (score > best_score) {
@@ -304,28 +407,17 @@ private:
                 best_q = Eigen::Quaternionf(rot_mat);
             }
         }
-
-       
         return best_q;
     }
 
     void evaluateGrasps()
     {
-        float radius = this->get_parameter("cylinder_radius").as_double();
-        float max_width = this->get_parameter("max_gripper_width").as_double(); 
-        float cyl_height = this->get_parameter("cylinder_height").as_double();
-        float step_size = this->get_parameter("analysis_step_size").as_double();
-        float finger_offset = this->get_parameter("finger_offset").as_double();
-        
-        float w_orient = this->get_parameter("weight_orientation").as_double();
-        float w_sym = this->get_parameter("weight_symmetry").as_double();
-        float w_plan = this->get_parameter("weight_planarity").as_double();
-        int num_to_publish = this->get_parameter("num_best_grasps").as_int();
-
         std::vector<ScoredGrasp> initial_candidates; 
         hit_candidates_.clear(); 
 
         RCLCPP_INFO(this->get_logger(), "Fase 1: Avaliando %lu raios...", all_candidates_.size());
+
+        auto start = std::chrono::high_resolution_clock::now();
 
         for (const auto& raw_pose : all_candidates_) 
         {
@@ -336,12 +428,12 @@ private:
             float t_min = 1e6, t_max = -1e6;
             bool hit = false;
             pcl::PointCloud<pcl::PointXYZ> current_inliers;
-
+            
             for (const auto& pt : stored_cloud_->points) 
             {
                 Eigen::Vector3f p(pt.x, pt.y, pt.z);
                 float t = (p - ray_origin).dot(ray_dir);
-                if ((p - (ray_origin + t*ray_dir)).norm() < radius) 
+                if ((p - (ray_origin + t*ray_dir)).norm() < cylinder_radius_) 
                 {
                     if (t < t_min) t_min = t;
                     if (t > t_max) t_max = t;
@@ -355,10 +447,10 @@ private:
             hit_candidates_.push_back(raw_pose);
 
             std::vector<StepAnalysis> steps;
-            for (float t = t_min; t <= t_max; t += step_size) 
+            for (float t = t_min; t <= t_max; t += analysis_step_size_) 
             {
                 Eigen::Vector3f center = ray_origin + ray_dir * t;
-                StepAnalysis res = analyzeLocalCylinder(stored_cloud_, center, ray_dir, radius, cyl_height);
+                StepAnalysis res = analyzeLocalCylinder(stored_cloud_, center, ray_dir, cylinder_radius_, cylinder_height_);
                 if (res.valid) steps.push_back(res);
             }
 
@@ -368,18 +460,18 @@ private:
             StepAnalysis& exit = steps.back();
 
             float real_thickness = t_max - t_min;
-            if (real_thickness > max_width) continue; 
+            if (real_thickness > max_gripper_width_) continue; 
 
-            float current_offset = finger_offset;
+            float current_offset = finger_offset_;
             float total_width_needed = real_thickness + (2.0f * current_offset);
 
-            if (total_width_needed > max_width) 
+            if (total_width_needed > max_gripper_width_) 
             {
-                current_offset = (max_width - real_thickness) / 2.0f;
+                current_offset = (max_gripper_width_ - real_thickness) / 2.0f;
                 if (current_offset < 0.01f) current_offset = 0.01f;
             }
             total_width_needed = real_thickness + (2.0f * current_offset);
-            if(total_width_needed > max_width) continue;
+            if(total_width_needed > max_gripper_width_) continue;
 
             Eigen::Vector3f p_f1 = ray_origin + ray_dir * (t_min - current_offset);
             Eigen::Vector3f p_f2 = ray_origin + ray_dir * (t_max + current_offset);
@@ -397,8 +489,8 @@ private:
             float score_sym_entry = entry.symmetry_score;
             float score_sym_exit  = exit.symmetry_score;
 
-            double total = (score_ang_entry * w_orient * orient_factor_entry + score_sym_entry * w_sym + score_plan_entry * w_plan) * 0.5 + 
-                           (score_ang_exit * w_orient * orient_factor_exit + score_sym_exit * w_sym + score_plan_exit * w_plan) * 0.5;
+            double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + score_sym_entry * weight_symmetry_ + score_plan_entry * weight_planarity_) * 0.5 + 
+                           (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ + score_plan_exit * weight_planarity_) * 0.5;
 
             if (real_thickness < 0.015) total *= 0.1;
 
@@ -441,14 +533,23 @@ private:
         best_grasps_.clear();
         for (const auto& sg : initial_candidates) 
         {
-            if (best_grasps_.size() >= (size_t)num_to_publish) break;
+            if (best_grasps_.size() >= (size_t)num_best_grasps_) break;
             if (check_collision(sg))
             {
                 best_grasps_.push_back(sg);
             }
         }
+        auto end = std::chrono::high_resolution_clock::now();
+
         has_best_ = !best_grasps_.empty();
         RCLCPP_INFO(this->get_logger(), "Encontrados %lu grasps.", best_grasps_.size());
+        
+        
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+        auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+
+        RCLCPP_INFO(this->get_logger(), "Tempo de Processamento: %ld ms", duration);
     }
 
     void timerCallback() 
@@ -489,23 +590,13 @@ private:
     void publishBest() 
     {
         visualization_msgs::msg::MarkerArray ma; 
-        
-        
         geometry_msgs::msg::PoseArray pose_array_msg;
         pose_array_msg.header.frame_id = "world";
         pose_array_msg.header.stamp = this->now();
        
         auto t = this->now();
 
-        std::string mesh_path = this->get_parameter("gripper_mesh_path").as_string();
-        float mesh_scale = this->get_parameter("gripper_mesh_scale").as_double();
-        float off_x = this->get_parameter("mesh_offset_x").as_double();
-        float off_y = this->get_parameter("mesh_offset_y").as_double();
-        float off_z = this->get_parameter("mesh_offset_z").as_double();
-        float rot_roll = this->get_parameter("mesh_rot_roll").as_double();
-        float rot_pitch = this->get_parameter("mesh_rot_pitch").as_double();
-        float rot_yaw = this->get_parameter("mesh_rot_yaw").as_double();
-
+        std::string mesh_path = gripper_mesh_path_;
         if (mesh_path.find("package://") == std::string::npos && 
             mesh_path.find("file://") == std::string::npos) 
         {
@@ -532,10 +623,7 @@ private:
         for(size_t i = 0; i < best_grasps_.size(); i++)
         {
             const auto& grasp = best_grasps_[i];
-
-           
             pose_array_msg.poses.push_back(grasp.pose_center);
-            
 
             float r=0, g=1, b=0, alpha=0.6;
             if (i == 0) { r=0; g=0; b=1; alpha=1.0; }
@@ -565,11 +653,11 @@ private:
             Eigen::Affine3f tf_grasp = Eigen::Translation3f(grasp_pos) * grasp_rot;
 
             Eigen::Affine3f tf_offset = Eigen::Affine3f::Identity();
-            tf_offset.translate(Eigen::Vector3f(off_x, off_y, off_z));
+            tf_offset.translate(Eigen::Vector3f(mesh_offset_x_, mesh_offset_y_, mesh_offset_z_));
             Eigen::Matrix3f rotation_matrix;
-            rotation_matrix = Eigen::AngleAxisf(rot_roll, Eigen::Vector3f::UnitX())
-                            * Eigen::AngleAxisf(rot_pitch, Eigen::Vector3f::UnitY())
-                            * Eigen::AngleAxisf(rot_yaw, Eigen::Vector3f::UnitZ());
+            rotation_matrix = Eigen::AngleAxisf(mesh_rot_roll_, Eigen::Vector3f::UnitX())
+                            * Eigen::AngleAxisf(mesh_rot_pitch_, Eigen::Vector3f::UnitY())
+                            * Eigen::AngleAxisf(mesh_rot_yaw_, Eigen::Vector3f::UnitZ());
             tf_offset.rotate(rotation_matrix);
 
             Eigen::Affine3f tf_final = tf_grasp * tf_offset;
@@ -578,7 +666,7 @@ private:
 
             mesh_marker.pose.position.x = final_pos.x(); mesh_marker.pose.position.y = final_pos.y(); mesh_marker.pose.position.z = final_pos.z();
             mesh_marker.pose.orientation.x = final_rot.x(); mesh_marker.pose.orientation.y = final_rot.y(); mesh_marker.pose.orientation.z = final_rot.z(); mesh_marker.pose.orientation.w = final_rot.w();
-            mesh_marker.scale.x = mesh_scale; mesh_marker.scale.y = mesh_scale; mesh_marker.scale.z = mesh_scale;
+            mesh_marker.scale.x = gripper_mesh_scale_; mesh_marker.scale.y = gripper_mesh_scale_; mesh_marker.scale.z = gripper_mesh_scale_;
             mesh_marker.color.r = r; mesh_marker.color.g = g; mesh_marker.color.b = b; mesh_marker.color.a = alpha;
             mesh_marker.mesh_resource = mesh_path; mesh_marker.mesh_use_embedded_materials = true;
             ma.markers.push_back(mesh_marker);
@@ -595,8 +683,6 @@ private:
         }
         
         pub_markers_->publish(ma);
-        
-        
         pub_poses_->publish(pose_array_msg);
     }
 };

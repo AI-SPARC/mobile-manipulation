@@ -11,7 +11,7 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     
     parameters = [{
-        "pcd_path": "/home/momesso/toma.pcd",
+        "pcd_path": "/home/momesso/toma4.pcd",
         "gripper_mesh_path": "/home/momesso/hand_and_finger_2.stl",
         "gripper_mesh_scale": 1.0,
         "grid_res": 0.005,         
@@ -30,7 +30,7 @@ def generate_launch_description():
         "analysis_step_size": 0.01,
         "mls_radius": 0.0045,
         "use_mls_smoothing": True,
-        "num_best_grasps": 1,
+        "num_best_grasps": 20,
         "finger_offset": 0.027,
         "min_points_per_segment": 2, 
         "weight_orientation": 0.5, 
@@ -40,7 +40,7 @@ def generate_launch_description():
         "gripper_finger_depth": 0.08,
         "gripper_collision_threshold": 5,
         "gripper_structure_thickness": 0.005,
-        "num_collision_checks": 1
+        "num_collision_checks": 20
     }]
 
   
