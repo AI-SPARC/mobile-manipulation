@@ -25,8 +25,14 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(moveit_msgs REQUIRED)
-find_package(octomap_msgs REQUIRED) # Provavelmente vai precisar deste também
+find_package(octomap_msgs REQUIRED)
 find_package(octomap REQUIRED)
+
+
+find_package(geometric_shapes REQUIRED)
+find_package(fcl REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+
 
 add_library(vision_lib SHARED
   src/generate_scan_poses.cpp
@@ -37,6 +43,7 @@ target_include_directories(vision_lib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS} 
+  ${fcl_INCLUDE_DIRS} 
 )
 
 ament_target_dependencies(vision_lib
@@ -59,21 +66,18 @@ ament_target_dependencies(vision_lib
   moveit_msgs   
   octomap_msgs  
   octomap
+  geometric_shapes
+  ament_index_cpp
 )
 
 target_link_libraries(vision_lib
   ${PCL_LIBRARIES}
+  fcl 
 )
 
 
 add_executable(combined_semantic_pcl src/combined_semantic_pcl.cpp)
 target_link_libraries(combined_semantic_pcl vision_lib) 
-
-add_executable(generate_grasp_poses src/generate_grasp_poses.cpp)
-target_link_libraries(generate_grasp_poses vision_lib) 
-
-add_executable(generate_grasp_poses_test src/generate_grasp_poses_test.cpp)
-target_link_libraries(generate_grasp_poses_test vision_lib) 
 
 target_include_directories(combined_semantic_pcl PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -100,6 +104,21 @@ ament_target_dependencies(combined_semantic_pcl
   rclcpp_components
 )
 
+
+add_executable(generate_grasp_poses src/generate_grasp_poses.cpp)
+
+target_link_libraries(generate_grasp_poses 
+  vision_lib
+  fcl 
+) 
+
+target_include_directories(generate_grasp_poses PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${PCL_INCLUDE_DIRS}
+  ${fcl_INCLUDE_DIRS}
+)
+
 ament_target_dependencies(generate_grasp_poses
   rclcpp
   sensor_msgs
@@ -117,8 +136,12 @@ ament_target_dependencies(generate_grasp_poses
   PCL
   pcl_conversions
   rclcpp_components
+  geometric_shapes
+  ament_index_cpp
 )
 
+add_executable(generate_grasp_poses_test src/generate_grasp_poses_test.cpp)
+target_link_libraries(generate_grasp_poses_test vision_lib) 
 
 ament_target_dependencies(generate_grasp_poses_test
   rclcpp
@@ -138,6 +161,7 @@ ament_target_dependencies(generate_grasp_poses_test
   pcl_conversions
   rclcpp_components
 )
+
 
 install(DIRECTORY include/
   DESTINATION include
@@ -168,13 +192,13 @@ install(
 install(
   DIRECTORY
   launch
- 
   DESTINATION share/${PROJECT_NAME}
 )
 
 ament_export_targets(vision_targets HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
 ament_export_libraries(vision_lib)
+ament_export_dependencies(geometric_shapes ament_index_cpp) 
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

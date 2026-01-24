@@ -95,7 +95,8 @@ public:
         pub_markers_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("best_grasps_markers", 10);
         pub_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_poses", 10);
         pub_center_oriented_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_center_oriented", 10);
-
+        pub_z_aligned_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_z_aligned", 10);
+        
         stored_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
         
         // --- CONFIGURAÇÃO DO SUBSCRIBER E QOS ---
@@ -132,6 +133,7 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_poses_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_center_oriented_poses_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_z_aligned_poses_;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr stored_cloud_;
     std::vector<geometry_msgs::msg::Pose> all_candidates_;
@@ -604,84 +606,119 @@ private:
     }
 
     void publishBest() 
+{
+    visualization_msgs::msg::MarkerArray ma; 
+    
+    // Arrays originais
+    geometry_msgs::msg::PoseArray pose_array_msg;
+    pose_array_msg.header.frame_id = "world";
+    pose_array_msg.header.stamp = this->now();
+
+    // --- NOVO ARRAY: Poses Alinhadas em Z ---
+    geometry_msgs::msg::PoseArray z_aligned_msg;
+    z_aligned_msg.header.frame_id = "world";
+    z_aligned_msg.header.stamp = this->now();
+    // ----------------------------------------
+
+    auto t = this->now();
+
+    // Lambda para criar esferas (mantido do seu código original)
+    auto sphere = [&](int id, auto p, float r, float g, float b, float alpha) {
+        visualization_msgs::msg::Marker m; m.header.frame_id="world"; m.header.stamp=t; 
+        m.ns="fingers"; m.id=id; m.type=2; m.action=0; m.pose=p; 
+        m.scale.x=0.025; m.scale.y=0.025; m.scale.z=0.025; 
+        m.color.r=r; m.color.g=g; m.color.b=b; m.color.a=alpha; 
+        return m;
+    };
+
+    // Recupera o numero de poses desejadas pelo parametro
+    int num_to_publish = this->get_parameter("num_best_grasps").as_int();
+
+    for(size_t i = 0; i < best_grasps_.size() && i < (size_t)num_to_publish; i++)
     {
-        visualization_msgs::msg::MarkerArray ma; 
-        geometry_msgs::msg::PoseArray pose_array_msg;
-        pose_array_msg.header.frame_id = "world";
-        pose_array_msg.header.stamp = this->now();
-        auto t = this->now();
+        const auto& grasp = best_grasps_[i];
+        pose_array_msg.poses.push_back(grasp.pose_center);
 
-        auto sphere = [&](int id, auto p, float r, float g, float b, float alpha) {
-            visualization_msgs::msg::Marker m; m.header.frame_id="world"; m.header.stamp=t; 
-            m.ns="fingers"; m.id=id; m.type=2; m.action=0; m.pose=p; 
-            m.scale.x=0.025; m.scale.y=0.025; m.scale.z=0.025; 
-            m.color.r=r; m.color.g=g; m.color.b=b; m.color.a=alpha; 
-            return m;
-        };
-
-        for(size_t i = 0; i < best_grasps_.size(); i++)
-        {
-            const auto& grasp = best_grasps_[i];
-            pose_array_msg.poses.push_back(grasp.pose_center);
-
-            float r=0, g=1, b=0, alpha=0.6;
-            if (i == 0) { r=0; g=0; b=1; alpha=1.0; }
-            int base_id = i * 20;
-
-            ma.markers.push_back(sphere(base_id + 0, grasp.pose_finger1, r, g, b, alpha)); 
-            ma.markers.push_back(sphere(base_id + 1, grasp.pose_finger2, r, g, b, alpha)); 
-            
-            visualization_msgs::msg::Marker l; 
-            l.header.frame_id="world"; l.header.stamp=t; l.ns="lines"; l.id=base_id+2; l.type=5; l.action=0; 
-            l.scale.x=0.002; l.color.r=r; l.color.g=g; l.color.b=b; l.color.a=alpha;
-            l.points.push_back(grasp.pose_finger1.position); 
-            l.points.push_back(grasp.pose_finger2.position);
-            ma.markers.push_back(l);
-
-            visualization_msgs::msg::Marker struc;
-            struc.header.frame_id="world"; struc.header.stamp=t; struc.ns="structure"; struc.id=base_id+5; 
-            struc.type=visualization_msgs::msg::Marker::LINE_STRIP; struc.action=0;
-            struc.scale.x = 0.005; 
-            struc.color.r=r; struc.color.g=g; struc.color.b=b; struc.color.a=0.8;
-            
-            geometry_msgs::msg::Point p1, p1b, p2b, p2;
-            p1 = grasp.pose_finger1.position;
-            p1b.x = grasp.struct_finger1_back.x(); p1b.y = grasp.struct_finger1_back.y(); p1b.z = grasp.struct_finger1_back.z();
-            p2b.x = grasp.struct_finger2_back.x(); p2b.y = grasp.struct_finger2_back.y(); p2b.z = grasp.struct_finger2_back.z();
-            p2 = grasp.pose_finger2.position;
-
-            struc.points.push_back(p1);
-            struc.points.push_back(p1b);
-            struc.points.push_back(p2b);
-            struc.points.push_back(p2);
-            ma.markers.push_back(struc);
-
-            if (i == 0) {
-                visualization_msgs::msg::Marker nm; nm.header.frame_id="world"; nm.header.stamp=t; nm.ns="normal"; nm.id=base_id+4; nm.type=0; nm.action=0;
-                Eigen::Quaternionf q1(grasp.pose_finger1.orientation.w, grasp.pose_finger1.orientation.x, grasp.pose_finger1.orientation.y, grasp.pose_finger1.orientation.z);
-                Eigen::Vector3f ray_d = q1 * Eigen::Vector3f::UnitX();
-                Eigen::Vector3f start_n = Eigen::Vector3f(grasp.pose_finger1.position.x, grasp.pose_finger1.position.y, grasp.pose_finger1.position.z) + ray_d * 0.02;
-                nm.pose.position.x = start_n.x(); nm.pose.position.y = start_n.y(); nm.pose.position.z = start_n.z();
-                Eigen::Quaternionf q_n; q_n.setFromTwoVectors(Eigen::Vector3f::UnitX(), grasp.entry_normal);
-                nm.pose.orientation.x=q_n.x(); nm.pose.orientation.y=q_n.y(); nm.pose.orientation.z=q_n.z(); nm.pose.orientation.w=q_n.w();
-                nm.scale.x=0.05; nm.scale.y=0.005; nm.scale.z=0.005; nm.color.r=1.0; nm.color.a=1.0;
-                ma.markers.push_back(nm);
-            }
-
-            visualization_msgs::msg::Marker txt; 
-            txt.header.frame_id="world"; txt.header.stamp=t; txt.ns="txt"; txt.id=base_id+3; txt.type=9; txt.action=0; 
-            txt.pose=grasp.pose_center; txt.pose.position.z+=0.05; txt.scale.z=0.03; 
-            txt.color.r=1; txt.color.g=1; txt.color.b=1; txt.color.a=1.0;
-            char buf[128]; 
-            if (i==0) sprintf(buf, "TOP 1\nS:%.2f", grasp.total_score);
-            else sprintf(buf, "#%lu", i+1);
-            txt.text=buf; 
-            ma.markers.push_back(txt);
-        }
+        // --- LÓGICA NOVA: Ponto Médio + Orientação Z Fixa ---
+        geometry_msgs::msg::Pose z_pose;
         
-        pub_markers_->publish(ma);
-        pub_poses_->publish(pose_array_msg);
+        // 1. Ponto médio exato entre os dois dedos (finger1 e finger2)
+        z_pose.position.x = (grasp.pose_finger1.position.x + grasp.pose_finger2.position.x) / 2.0;
+        z_pose.position.y = (grasp.pose_finger1.position.y + grasp.pose_finger2.position.y) / 2.0;
+        z_pose.position.z = (grasp.pose_finger1.position.z + grasp.pose_finger2.position.z) / 2.0;
+
+        // 2. Orientação fixa apontando para +Z (Identidade alinha Z local com Z global)
+        // Se "apontar para +Z" significar alinhar verticalmente:
+        z_pose.orientation.x = 0.0;
+        z_pose.orientation.y = 0.0;
+        z_pose.orientation.z = 0.0;
+        z_pose.orientation.w = 1.0; 
+
+        z_aligned_msg.poses.push_back(z_pose);
+        // ----------------------------------------------------
+
+        // ... (Resto do código de visualização dos Markers mantido igual) ...
+        float r=0, g=1, b=0, alpha=0.6;
+        if (i == 0) { r=0; g=0; b=1; alpha=1.0; }
+        int base_id = i * 20;
+
+        ma.markers.push_back(sphere(base_id + 0, grasp.pose_finger1, r, g, b, alpha)); 
+        ma.markers.push_back(sphere(base_id + 1, grasp.pose_finger2, r, g, b, alpha)); 
+        
+        visualization_msgs::msg::Marker l; 
+        l.header.frame_id="world"; l.header.stamp=t; l.ns="lines"; l.id=base_id+2; l.type=5; l.action=0; 
+        l.scale.x=0.002; l.color.r=r; l.color.g=g; l.color.b=b; l.color.a=alpha;
+        l.points.push_back(grasp.pose_finger1.position); 
+        l.points.push_back(grasp.pose_finger2.position);
+        ma.markers.push_back(l);
+
+        visualization_msgs::msg::Marker struc;
+        struc.header.frame_id="world"; struc.header.stamp=t; struc.ns="structure"; struc.id=base_id+5; 
+        struc.type=visualization_msgs::msg::Marker::LINE_STRIP; struc.action=0;
+        struc.scale.x = 0.005; 
+        struc.color.r=r; struc.color.g=g; struc.color.b=b; struc.color.a=0.8;
+        
+        geometry_msgs::msg::Point p1, p1b, p2b, p2;
+        p1 = grasp.pose_finger1.position;
+        p1b.x = grasp.struct_finger1_back.x(); p1b.y = grasp.struct_finger1_back.y(); p1b.z = grasp.struct_finger1_back.z();
+        p2b.x = grasp.struct_finger2_back.x(); p2b.y = grasp.struct_finger2_back.y(); p2b.z = grasp.struct_finger2_back.z();
+        p2 = grasp.pose_finger2.position;
+
+        struc.points.push_back(p1);
+        struc.points.push_back(p1b);
+        struc.points.push_back(p2b);
+        struc.points.push_back(p2);
+        ma.markers.push_back(struc);
+
+        if (i == 0) {
+            visualization_msgs::msg::Marker nm; nm.header.frame_id="world"; nm.header.stamp=t; nm.ns="normal"; nm.id=base_id+4; nm.type=0; nm.action=0;
+            Eigen::Quaternionf q1(grasp.pose_finger1.orientation.w, grasp.pose_finger1.orientation.x, grasp.pose_finger1.orientation.y, grasp.pose_finger1.orientation.z);
+            Eigen::Vector3f ray_d = q1 * Eigen::Vector3f::UnitX();
+            Eigen::Vector3f start_n = Eigen::Vector3f(grasp.pose_finger1.position.x, grasp.pose_finger1.position.y, grasp.pose_finger1.position.z) + ray_d * 0.02;
+            nm.pose.position.x = start_n.x(); nm.pose.position.y = start_n.y(); nm.pose.position.z = start_n.z();
+            Eigen::Quaternionf q_n; q_n.setFromTwoVectors(Eigen::Vector3f::UnitX(), grasp.entry_normal);
+            nm.pose.orientation.x=q_n.x(); nm.pose.orientation.y=q_n.y(); nm.pose.orientation.z=q_n.z(); nm.pose.orientation.w=q_n.w();
+            nm.scale.x=0.05; nm.scale.y=0.005; nm.scale.z=0.005; nm.color.r=1.0; nm.color.a=1.0;
+            ma.markers.push_back(nm);
+        }
+
+        visualization_msgs::msg::Marker txt; 
+        txt.header.frame_id="world"; txt.header.stamp=t; txt.ns="txt"; txt.id=base_id+3; txt.type=9; txt.action=0; 
+        txt.pose=grasp.pose_center; txt.pose.position.z+=0.05; txt.scale.z=0.03; 
+        txt.color.r=1; txt.color.g=1; txt.color.b=1; txt.color.a=1.0;
+        char buf[128]; 
+        if (i==0) sprintf(buf, "TOP 1\nS:%.2f", grasp.total_score);
+        else sprintf(buf, "#%lu", i+1);
+        txt.text=buf; 
+        ma.markers.push_back(txt);
     }
+    
+    pub_markers_->publish(ma);
+    pub_poses_->publish(pose_array_msg);
+
+    // --- PUBLICA O NOVO TÓPICO ---
+    pub_z_aligned_poses_->publish(z_aligned_msg);
+}
 };
 
 int main(int argc, char ** argv) 
