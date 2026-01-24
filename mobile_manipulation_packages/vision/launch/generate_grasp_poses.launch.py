@@ -23,7 +23,7 @@ def generate_launch_description():
         "mls_radius": 0.0045,
         "use_mls_smoothing": True,
         "num_best_grasps": 1,
-        "finger_offset": 0.01,
+        "finger_offset": 0.025,
         "min_points_per_segment": 2, 
         "weight_orientation": 0.5, 
         "weight_symmetry": 0.5,
