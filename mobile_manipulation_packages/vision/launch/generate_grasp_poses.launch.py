@@ -30,7 +30,7 @@ def generate_launch_description():
         "analysis_step_size": 0.01,
         "mean_filter_k": 15,
         "use_mean_filter": True,
-        "num_best_grasps": 3,
+        "num_best_grasps": 1,
         "finger_offset": 0.027,
         "min_points_per_segment": 2, 
         "weight_orientation": 0.5, 
@@ -40,7 +40,7 @@ def generate_launch_description():
         "gripper_finger_depth": 0.08,
         "gripper_collision_threshold": 5,
         "gripper_structure_thickness": 0.005,
-        "num_collision_checks": 3
+        "num_collision_checks": 1
     }]
 
   

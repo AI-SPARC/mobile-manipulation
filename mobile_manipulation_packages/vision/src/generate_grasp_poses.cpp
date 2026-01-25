@@ -14,6 +14,9 @@
 #include <tbb/parallel_for.h>
 #include <tbb/blocked_range.h>
 #include <tbb/enumerable_thread_specific.h>
+#include <pcl/octree/octree_search.h>
+#include <pcl/io/vtk_lib_io.h>
+#include <pcl/filters/random_sample.h>
 // PCL
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -145,12 +148,17 @@ public:
         pub_markers_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("best_grasps_markers", 10);
         pub_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_poses", 10);
         pub_debug_inliers_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_ray_inliers", 10);
+        pub_gripper_model_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+            "debug_gripper_model", 10);
+        pub_debug_grasps_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_grasps_cloud", 10);
 
         stored_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
         
-    
+        loadGripperAsOctree();
+        publishGripperModel();
         RCLCPP_INFO(this->get_logger(), "MODO ARQUIVO: Carregando PCD de %s...", pcd_path_.c_str());
         loadAndProcess(pcd_path_);
+        
         
         
         timer_ = this->create_wall_timer(1000ms, std::bind(&BestGraspFinder::timerCallback, this));
@@ -199,6 +207,9 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_poses_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_inliers_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_gripper_model_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;
+    
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_input_cloud_;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr stored_cloud_;
@@ -207,6 +218,9 @@ private:
     std::vector<ScoredGrasp> best_grasps_;
     bool has_best_ = false;
     Eigen::Vector4f min_pt_, max_pt_;
+
+    pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> gripper_octree_{0.002f};
+    pcl::PointCloud<pcl::PointXYZ>::Ptr gripper_dense_cloud_;
 
     void inputCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {
@@ -406,8 +420,139 @@ private:
         return result;
     }
 
+    void publishGripperModel()
+    {
+        
+        if (!gripper_dense_cloud_ || gripper_dense_cloud_->empty()) {
+            RCLCPP_WARN(this->get_logger(), "Tentou publicar modelo da garra, mas está vazio!");
+            return;
+        }
+
+        sensor_msgs::msg::PointCloud2 msg;
+        pcl::toROSMsg(*gripper_dense_cloud_, msg);
+
+        
+        msg.header.frame_id = "world"; 
+        msg.header.stamp = this->now();
+
+        pub_gripper_model_->publish(msg);
+        
+        RCLCPP_INFO(this->get_logger(), "Modelo denso da garra publicado em '/debug_gripper_model' (%lu pontos)", gripper_dense_cloud_->size());
+    }
+
+    void loadGripperAsOctree()
+    {
+        RCLCPP_INFO(this->get_logger(), "Carregando STL, Densificando e APLICANDO OFFSETS: %s", gripper_mesh_path_.c_str());
+        
+        
+        pcl::PolygonMesh mesh;
+        if (pcl::io::loadPolygonFileSTL(gripper_mesh_path_, mesh) == 0) {
+            RCLCPP_ERROR(this->get_logger(), "ERRO CRÍTICO: STL não encontrado!");
+            return;
+        }
+
+        pcl::PointCloud<pcl::PointXYZ> mesh_verts;
+        pcl::fromPCLPointCloud2(mesh.cloud, mesh_verts);
+
+        
+        pcl::PointCloud<pcl::PointXYZ>::Ptr raw_dense_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+        
+        float density_dist = 0.002f; 
+        
+        for (const auto& poly : mesh.polygons) 
+        {
+            if (poly.vertices.size() < 3) continue;
+
+            Eigen::Vector3f v0 = mesh_verts[poly.vertices[0]].getVector3fMap();
+            Eigen::Vector3f v1 = mesh_verts[poly.vertices[1]].getVector3fMap();
+            Eigen::Vector3f v2 = mesh_verts[poly.vertices[2]].getVector3fMap();
+
+            float area = 0.5f * ((v1 - v0).cross(v2 - v0)).norm();
+            int num_points = std::max(1, (int)(area / (density_dist * density_dist)));
+            
+            
+            raw_dense_cloud->points.push_back(pcl::PointXYZ(v0.x(), v0.y(), v0.z()));
+            raw_dense_cloud->points.push_back(pcl::PointXYZ(v1.x(), v1.y(), v1.z()));
+            raw_dense_cloud->points.push_back(pcl::PointXYZ(v2.x(), v2.y(), v2.z()));
+
+            
+            for (int k = 0; k < num_points; ++k) 
+            {
+                float r1 = (float)rand() / RAND_MAX;
+                float r2 = (float)rand() / RAND_MAX;
+                float sq_r1 = std::sqrt(r1);
+                Eigen::Vector3f p = (1 - sq_r1) * v0 + (sq_r1 * (1 - r2)) * v1 + (sq_r1 * r2) * v2;
+                raw_dense_cloud->points.push_back(pcl::PointXYZ(p.x(), p.y(), p.z()));
+            }
+        }
+
+       
+        gripper_dense_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
+        
+        Eigen::Affine3f transform = Eigen::Affine3f::Identity();
+
+        
+        transform.translation() = Eigen::Vector3f(mesh_offset_x_, mesh_offset_y_, mesh_offset_z_);
+        
+        
+        Eigen::Matrix3f rot;
+        rot = Eigen::AngleAxisf(mesh_rot_roll_, Eigen::Vector3f::UnitX())
+            * Eigen::AngleAxisf(mesh_rot_pitch_, Eigen::Vector3f::UnitY())
+            * Eigen::AngleAxisf(mesh_rot_yaw_, Eigen::Vector3f::UnitZ());
+        transform.linear() = rot;
+
+        
+        transform.scale(gripper_mesh_scale_);
+
+       
+        pcl::transformPointCloud(*raw_dense_cloud, *gripper_dense_cloud_, transform);
+
+        
+        gripper_octree_.deleteTree();
+        gripper_octree_.setInputCloud(gripper_dense_cloud_);
+        gripper_octree_.addPointsFromInputCloud();
+
+        RCLCPP_INFO(this->get_logger(), "STL Processado: %lu pontos. Offsets aplicados na memória.", gripper_dense_cloud_->size());
+    }
+
     bool check_collision(const ScoredGrasp& grasp)
     {
+        if (!gripper_dense_cloud_ || gripper_dense_cloud_->empty()) return true;
+
+        Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
+        Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
+        
+        
+        Eigen::Affine3f tf_world_to_grasp = (Eigen::Translation3f(grasp_pos) * grasp_rot).inverse();
+
+        
+        float range_limit_sq = 0.15f * 0.15f; 
+
+        
+        for (const auto& pt_world : stored_cloud_->points) 
+        {
+            
+            Eigen::Vector3f p_vec(pt_world.x, pt_world.y, pt_world.z);
+            if ((p_vec - grasp_pos).squaredNorm() > range_limit_sq) continue;
+
+            
+            Eigen::Vector3f p_local = tf_world_to_grasp * p_vec;
+            
+            pcl::PointXYZ search_point;
+            search_point.x = p_local.x();
+            search_point.y = p_local.y();
+            search_point.z = p_local.z();
+
+            
+            if (gripper_octree_.isVoxelOccupiedAtPoint(search_point)) 
+            {
+                
+                return false;
+            }
+        }
+
+        
         return true; 
     }
 
@@ -706,6 +851,7 @@ private:
 
     void timerCallback() 
     {
+        publishGripperModel();
         auto t = this->now();
         sensor_msgs::msg::PointCloud2 m; 
         pcl::toROSMsg(*stored_cloud_, m); 
@@ -739,90 +885,62 @@ private:
         if(has_best_) publishBest();
     }
 
+   
+
     void publishBest() 
     {
         visualization_msgs::msg::MarkerArray ma; 
         geometry_msgs::msg::PoseArray pose_array_msg;
-        pose_array_msg.header.frame_id = "world";
-        pose_array_msg.header.stamp = this->now();
-       
         auto t = this->now();
+        pose_array_msg.header.frame_id = "world";
+        pose_array_msg.header.stamp = t;
 
-        std::string mesh_path = gripper_mesh_path_;
-        if (mesh_path.find("package://") == std::string::npos && 
-            mesh_path.find("file://") == std::string::npos) 
-        {
-            mesh_path = "file://" + mesh_path;
-        }
-
-        auto sphere = [&](int id, auto p, float r, float g, float b, float alpha, float sc) 
-        {
-            visualization_msgs::msg::Marker m; m.header.frame_id="world"; m.header.stamp=t; 
-            m.ns="fingers"; m.id=id; m.type=2; m.action=0; m.pose=p; 
-            m.scale.x=sc; m.scale.y=sc; m.scale.z=sc; 
-            m.color.r=r; m.color.g=g; m.color.b=b; m.color.a=alpha; 
-            return m;
-        };
-
-        if (!best_grasps_.empty()) {
-            sensor_msgs::msg::PointCloud2 debug_msg;
-            pcl::toROSMsg(best_grasps_[0].debug_inliers, debug_msg);
-            debug_msg.header.frame_id = "world";
-            debug_msg.header.stamp = t;
-            pub_debug_inliers_->publish(debug_msg);
-        }
+    
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+        
+        
+        bool has_dense_model = (gripper_dense_cloud_ && !gripper_dense_cloud_->empty());
 
         for(size_t i = 0; i < best_grasps_.size(); i++)
         {
             const auto& grasp = best_grasps_[i];
             pose_array_msg.poses.push_back(grasp.pose_center);
 
-            float r=0, g=1, b=0, alpha=0.6;
-            if (i == 0) { r=0; g=0; b=1; alpha=1.0; }
-            int base_id = i * 30; 
-
-            ma.markers.push_back(sphere(base_id + 0, grasp.pose_finger1, r, g, b, alpha, 0.025)); 
-            ma.markers.push_back(sphere(base_id + 1, grasp.pose_finger2, r, g, b, alpha, 0.025)); 
             
-            if (i == 0) {
-                geometry_msgs::msg::Pose p_start; 
-                p_start.position.x = grasp.debug_entry_pt.x(); p_start.position.y = grasp.debug_entry_pt.y(); p_start.position.z = grasp.debug_entry_pt.z();
-                geometry_msgs::msg::Pose p_end; 
-                p_end.position.x = grasp.debug_exit_pt.x(); p_end.position.y = grasp.debug_exit_pt.y(); p_end.position.z = grasp.debug_exit_pt.z();
+            uint8_t r=0, g=0, b=0;
+            if (i == 0) { r=0; g=255; b=0; }       
+            else        { r=100; g=100; b=255; }   
 
-                ma.markers.push_back(sphere(base_id + 10, p_start, 0.0, 1.0, 0.0, 1.0, 0.015));
-                ma.markers.push_back(sphere(base_id + 11, p_end, 1.0, 0.0, 0.0, 1.0, 0.015));
+           
+            if (has_dense_model)
+            {
+               
+                Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
+                Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
+                Eigen::Affine3f tf_grasp = Eigen::Translation3f(grasp_pos) * grasp_rot;
+
+                
+                for (const auto& pt_local : gripper_dense_cloud_->points)
+                {
+                   
+                    Eigen::Vector3f p_world = tf_grasp * Eigen::Vector3f(pt_local.x, pt_local.y, pt_local.z);
+                    
+                    pcl::PointXYZRGB p_colored;
+                    p_colored.x = p_world.x();
+                    p_colored.y = p_world.y();
+                    p_colored.z = p_world.z();
+                    p_colored.r = r;
+                    p_colored.g = g;
+                    p_colored.b = b;
+                    
+                    accumulated_cloud->points.push_back(p_colored);
+                }
             }
 
-            visualization_msgs::msg::Marker mesh_marker;
-            mesh_marker.header.frame_id = "world"; mesh_marker.header.stamp = t;
-            mesh_marker.ns = "gripper_mesh"; mesh_marker.id = base_id + 5;
-            mesh_marker.type = visualization_msgs::msg::Marker::MESH_RESOURCE;
-            mesh_marker.action = visualization_msgs::msg::Marker::ADD;
-
-            Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
-            Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
-            Eigen::Affine3f tf_grasp = Eigen::Translation3f(grasp_pos) * grasp_rot;
-
-            Eigen::Affine3f tf_offset = Eigen::Affine3f::Identity();
-            tf_offset.translate(Eigen::Vector3f(mesh_offset_x_, mesh_offset_y_, mesh_offset_z_));
-            Eigen::Matrix3f rotation_matrix;
-            rotation_matrix = Eigen::AngleAxisf(mesh_rot_roll_, Eigen::Vector3f::UnitX())
-                            * Eigen::AngleAxisf(mesh_rot_pitch_, Eigen::Vector3f::UnitY())
-                            * Eigen::AngleAxisf(mesh_rot_yaw_, Eigen::Vector3f::UnitZ());
-            tf_offset.rotate(rotation_matrix);
-
-            Eigen::Affine3f tf_final = tf_grasp * tf_offset;
-            Eigen::Vector3f final_pos = tf_final.translation();
-            Eigen::Quaternionf final_rot(tf_final.rotation());
-
-            mesh_marker.pose.position.x = final_pos.x(); mesh_marker.pose.position.y = final_pos.y(); mesh_marker.pose.position.z = final_pos.z();
-            mesh_marker.pose.orientation.x = final_rot.x(); mesh_marker.pose.orientation.y = final_rot.y(); mesh_marker.pose.orientation.z = final_rot.z(); mesh_marker.pose.orientation.w = final_rot.w();
-            mesh_marker.scale.x = gripper_mesh_scale_; mesh_marker.scale.y = gripper_mesh_scale_; mesh_marker.scale.z = gripper_mesh_scale_;
-            mesh_marker.color.r = r; mesh_marker.color.g = g; mesh_marker.color.b = b; mesh_marker.color.a = alpha;
-            mesh_marker.mesh_resource = mesh_path; mesh_marker.mesh_use_embedded_materials = true;
-            ma.markers.push_back(mesh_marker);
             
+            int base_id = i * 30; 
+            
+           
             visualization_msgs::msg::Marker txt; 
             txt.header.frame_id="world"; txt.header.stamp=t; txt.ns="txt"; txt.id=base_id+3; txt.type=9; txt.action=0; 
             txt.pose=grasp.pose_center; txt.pose.position.z+=0.05; txt.scale.z=0.03; 
@@ -834,6 +952,15 @@ private:
             ma.markers.push_back(txt);
         }
         
+        
+        if (!accumulated_cloud->empty()) {
+            sensor_msgs::msg::PointCloud2 cloud_msg;
+            pcl::toROSMsg(*accumulated_cloud, cloud_msg);
+            cloud_msg.header.frame_id = "world";
+            cloud_msg.header.stamp = t;
+            pub_debug_grasps_cloud_->publish(cloud_msg);
+        }
+
         pub_markers_->publish(ma);
         pub_poses_->publish(pose_array_msg);
     }
