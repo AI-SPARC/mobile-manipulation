@@ -17,6 +17,7 @@
 #include <pcl/octree/octree_search.h>
 #include <pcl/io/vtk_lib_io.h>
 #include <pcl/filters/random_sample.h>
+#include <pcl/common/transforms.h>
 // PCL
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -106,6 +107,8 @@ public:
         this->declare_parameter<int>("num_best_grasps", 5);
         this->declare_parameter<double>("rotation_step_deg", 30.0);
 
+        this->declare_parameter<int>("num_random_orientations", 100);
+
         subscribe_to_point_cloud_ = this->get_parameter("subscribe_to_point_cloud").as_bool();
         pcd_path_ = this->get_parameter("pcd_path").as_string();
         
@@ -140,7 +143,9 @@ public:
         mean_filter_k_ = this->get_parameter("mean_filter_k").as_int();
 
         num_best_grasps_ = this->get_parameter("num_best_grasps").as_int();
+        total_orientations_ = this->get_parameter("num_random_orientations").as_int();
         rotation_step_deg_ = static_cast<float>(this->get_parameter("rotation_step_deg").as_double());
+        
 
         pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", 10);
         pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", 10);
@@ -157,7 +162,12 @@ public:
         loadGripperAsOctree();
         publishGripperModel();
         RCLCPP_INFO(this->get_logger(), "MODO ARQUIVO: Carregando PCD de %s...", pcd_path_.c_str());
-        loadAndProcess(pcd_path_);
+
+        if(subscribe_to_point_cloud_ == false)
+        {
+            loadAndProcess(pcd_path_);
+        }
+        
         
         
         
@@ -198,6 +208,7 @@ private:
     float mean_filter_k_;
 
     int num_best_grasps_;
+    int total_orientations_;
     float rotation_step_deg_;
 
     rclcpp::TimerBase::SharedPtr timer_;
@@ -249,6 +260,36 @@ private:
         auto start = std::chrono::high_resolution_clock::now();
         if (input_cloud->empty()) return;
 
+        if (subscribe_to_point_cloud_ == false)
+        {
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_real_distribution<float> dis(0.0f, 2.0f * M_PI); 
+
+            float rot_x = dis(gen);
+            float rot_y = dis(gen);
+            float rot_z = dis(gen);
+
+            RCLCPP_INFO(this->get_logger(), "Modo Offline: Aplicando Rotação Aleatória [R:%.2f, P:%.2f, Y:%.2f]", rot_x, rot_y, rot_z);
+
+            Eigen::Vector4f centroid;
+            pcl::compute3DCentroid(*input_cloud, centroid);
+
+            Eigen::Affine3f transform = Eigen::Affine3f::Identity();
+            
+            
+            transform.translation() = centroid.head<3>();
+            
+            transform.rotate(Eigen::AngleAxisf(rot_x, Eigen::Vector3f::UnitX())); 
+            transform.rotate(Eigen::AngleAxisf(rot_y, Eigen::Vector3f::UnitY()));
+            transform.rotate(Eigen::AngleAxisf(rot_z, Eigen::Vector3f::UnitZ())); 
+
+            transform.translate(-centroid.head<3>());
+
+            pcl::transformPointCloud(*input_cloud, *input_cloud, transform);
+        }
+
+       
         pcl::PointCloud<pcl::PointXYZ>::Ptr voxel_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         
         if (cloud_voxel_size_ > 0.0001) 
@@ -277,11 +318,9 @@ private:
 
             int K = mean_filter_k_; 
 
-          
             tbb::parallel_for(tbb::blocked_range<size_t>(0, voxel_cloud->points.size()),
                 [&](const tbb::blocked_range<size_t>& range) 
                 {
-                    
                     std::vector<int> pointIdxNKNSearch(K);
                     std::vector<float> pointNKNSquaredDistance(K);
 
@@ -312,7 +351,6 @@ private:
                     }
                 }
             );
-           
         }
         else 
         {
@@ -322,9 +360,52 @@ private:
         stored_cloud_->header.frame_id = "world";
 
         pcl::getMinMax3D(*stored_cloud_, min_pt_, max_pt_);
-        float padding = 0.02; min_pt_.array() -= padding; max_pt_.array() += padding;
         
-        all_candidates_ = generateOrthogonalRays(min_pt_, max_pt_, grid_res_);
+        float padding = 0.03; 
+        min_pt_.array() -= padding; max_pt_.array() += padding;
+        
+     
+
+        if (total_orientations_ < 1) 
+        {
+            total_orientations_ = 1;
+        }
+        
+        std::vector<Eigen::Matrix3f> search_matrices;
+        search_matrices.reserve(total_orientations_);
+
+        
+        search_matrices.push_back(Eigen::Matrix3f::Identity());
+
+        
+        if (total_orientations_ > 1) 
+        {
+            std::random_device rd;  
+            std::mt19937 gen(rd()); 
+            
+            
+            std::uniform_real_distribution<float> dis(0.0f, 2.0f * M_PI);
+
+            for (int i = 0; i < total_orientations_ - 1; ++i) 
+            {
+                float roll  = dis(gen);
+                float pitch = dis(gen);
+                float yaw   = dis(gen);
+
+                
+                Eigen::Matrix3f m;
+                m = Eigen::AngleAxisf(roll,  Eigen::Vector3f::UnitX())
+                  * Eigen::AngleAxisf(pitch, Eigen::Vector3f::UnitY())
+                  * Eigen::AngleAxisf(yaw,   Eigen::Vector3f::UnitZ());
+                
+                search_matrices.push_back(m);
+            }
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "Gerando raios para %d orientações 3D distintas.", total_orientations_);
+        
+        
+        all_candidates_ = generateMultiOrientedRays(min_pt_, max_pt_, grid_res_, search_matrices);
 
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
@@ -334,33 +415,66 @@ private:
         evaluateGrasps();
     }
 
-    std::vector<geometry_msgs::msg::Pose> generateOrthogonalRays(
-        const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res) 
+   std::vector<geometry_msgs::msg::Pose> generateMultiOrientedRays(
+        const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res, 
+        const std::vector<Eigen::Matrix3f>& rotation_matrices) 
     {
         std::vector<geometry_msgs::msg::Pose> poses;
-        auto add_ray = [&](Eigen::Vector3f start, Eigen::Vector3f direction) 
+        
+        
+        Eigen::Vector3f center = (min.head<3>() + max.head<3>()) / 2.0f;
+        Eigen::Vector3f size = max.head<3>() - min.head<3>();
+
+        Eigen::Vector3f start_dims = size; 
+        
+        
+        auto add_rotated_ray = [&](Eigen::Vector3f local_pos, Eigen::Vector3f local_dir, const Eigen::Matrix3f& rot_mat) 
         {
+            
+            Eigen::Vector3f global_pos = (rot_mat * local_pos) + center;
+            
+            
+            Eigen::Vector3f global_dir = rot_mat * local_dir;
+
             geometry_msgs::msg::Pose p;
-            p.position.x = start.x(); p.position.y = start.y(); p.position.z = start.z();
-            Eigen::Quaternionf q; q.setFromTwoVectors(Eigen::Vector3f::UnitX(), direction);
-            p.orientation.x = q.x(); p.orientation.y = q.y(); p.orientation.z = q.z(); p.orientation.w = q.w();
+            p.position.x = global_pos.x(); 
+            p.position.y = global_pos.y(); 
+            p.position.z = global_pos.z();
+            
+            Eigen::Quaternionf q; 
+            q.setFromTwoVectors(Eigen::Vector3f::UnitX(), global_dir);
+            p.orientation.x = q.x(); p.orientation.y = q.y(); 
+            p.orientation.z = q.z(); p.orientation.w = q.w();
             poses.push_back(p);
         };
-        // Eixo X
-        for(float y = min[1]; y < max[1]; y += res)
-            for(float z = min[2]; z < max[2]; z += res) {
-                add_ray({max[0], y+res/2, z+res/2}, {-1, 0, 0});
-            }
-        // Eixo Y
-        for(float x = min[0]; x < max[0]; x += res)
-            for(float z = min[2]; z < max[2]; z += res) {
-                add_ray({x+res/2, max[1], z+res/2}, {0, -1, 0});
-            }
-        // Eixo Z
-        for(float x = min[0]; x < max[0]; x += res)
-            for(float y = min[1]; y < max[1]; y += res) {
-                add_ray({x+res/2, y+res/2, max[2]}, {0, 0, -1});
-            }
+
+        
+        for (const auto& R : rotation_matrices)
+        {
+            
+            float half_x = start_dims.x() / 2.0f;
+            float half_y = start_dims.y() / 2.0f;
+            float half_z = start_dims.z() / 2.0f;
+
+           
+            for(float y = -half_y; y < half_y; y += res)
+                for(float z = -half_z; z < half_z; z += res) {
+                    add_rotated_ray({half_x, y + res/2, z + res/2}, {-1, 0, 0}, R);
+                }
+
+            
+            for(float x = -half_x; x < half_x; x += res)
+                for(float z = -half_z; z < half_z; z += res) {
+                    add_rotated_ray({x + res/2, half_y, z + res/2}, {0, -1, 0}, R);
+                }
+
+            
+            for(float x = -half_x; x < half_x; x += res)
+                for(float y = -half_y; y < half_y; y += res) {
+                    add_rotated_ray({x + res/2, y + res/2, half_z}, {0, 0, -1}, R);
+                }
+        }
+        
         return poses;
     }
 
@@ -544,7 +658,6 @@ private:
             
             if (gripper_octree_.isVoxelOccupiedAtPoint(search_point)) 
             {
-                
                 return false;
             }
         }
