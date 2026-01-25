@@ -11,7 +11,7 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     
     parameters = [{
-        "pcd_path": "/home/momesso/toma2.pcd",
+        "pcd_path": "/home/momesso/toma4.pcd",
         "gripper_mesh_path": "/home/momesso/hand_and_finger_2.stl",
         "gripper_mesh_scale": 1.0,
         "grid_res": 0.005,         

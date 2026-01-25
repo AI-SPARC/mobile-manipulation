@@ -349,19 +349,16 @@ private:
         // Eixo X
         for(float y = min[1]; y < max[1]; y += res)
             for(float z = min[2]; z < max[2]; z += res) {
-                add_ray({min[0], y+res/2, z+res/2}, {1, 0, 0});
                 add_ray({max[0], y+res/2, z+res/2}, {-1, 0, 0});
             }
         // Eixo Y
         for(float x = min[0]; x < max[0]; x += res)
             for(float z = min[2]; z < max[2]; z += res) {
-                add_ray({x+res/2, min[1], z+res/2}, {0, 1, 0});
                 add_ray({x+res/2, max[1], z+res/2}, {0, -1, 0});
             }
         // Eixo Z
         for(float x = min[0]; x < max[0]; x += res)
             for(float y = min[1]; y < max[1]; y += res) {
-                add_ray({x+res/2, y+res/2, min[2]}, {0, 0, 1});
                 add_ray({x+res/2, y+res/2, max[2]}, {0, 0, -1});
             }
         return poses;
@@ -437,7 +434,7 @@ private:
 
         pub_gripper_model_->publish(msg);
         
-        RCLCPP_INFO(this->get_logger(), "Modelo denso da garra publicado em '/debug_gripper_model' (%lu pontos)", gripper_dense_cloud_->size());
+        // RCLCPP_INFO(this->get_logger(), "Modelo denso da garra publicado em '/debug_gripper_model' (%lu pontos)", gripper_dense_cloud_->size());
     }
 
     void loadGripperAsOctree()
