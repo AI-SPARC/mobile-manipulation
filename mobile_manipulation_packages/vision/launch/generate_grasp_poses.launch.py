@@ -11,10 +11,10 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     
     parameters = [{
-        "pcd_path": "/home/momesso/toma4.pcd",
+        "pcd_path": "/home/momesso/toma2.pcd",
         "gripper_mesh_path": "/home/momesso/hand_and_finger_2.stl",
         "gripper_mesh_scale": 1.0,
-        "grid_res": 0.01,         
+        "grid_res": 0.005,         
         "cloud_voxel_size": 0.001,
 
         "mesh_offset_x": 0.025,
@@ -25,8 +25,8 @@ def generate_launch_description():
         "mesh_rot_pitch": -1.57,
         "mesh_rot_yaw": 0.0, 
         
-        "cylinder_radius": 0.01,  
-        "cylinder_height": 0.01,
+        "cylinder_radius": 0.005,  
+        "cylinder_height": 0.005,
         "analysis_step_size": 0.01,
         "mean_filter_k": 15,
         "use_mean_filter": True,
