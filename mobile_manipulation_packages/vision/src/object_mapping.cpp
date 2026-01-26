@@ -14,7 +14,7 @@ ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("velocity_threshold", 0.25); 
     this->declare_parameter<double>("settlement_duration", 0.25); 
     this->declare_parameter<double>("voxel_leaf_size", 0.001); 
-    this->declare_parameter<bool>("publish_octomap_to_moveit", true);
+    this->declare_parameter<bool>("publish_octomap_to_moveit", false);
     this->declare_parameter<double>("surrounding_distance_threshold", 0.3);
 
     
@@ -77,20 +77,22 @@ void ObjectMapping::ObjectToMap(std::string id)
 std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> 
 ObjectMapping::getObjectAndEnvironment(const std::string& object_id)
 {
+    
     std::lock_guard<std::mutex> lock(data_mutex_);
     
     
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_copy(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr env_copy(new pcl::PointCloud<pcl::PointXYZ>);
+
     if (object_map_.find(object_id) != object_map_.end())
     {
         
-        return std::make_pair(object_map_[object_id].cloud, object_map_[object_id].environment);
+        *cloud_copy = *object_map_[object_id].cloud;
+        *env_copy = *object_map_[object_id].environment;
     }
-
     
-    return std::make_pair(
-        pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>),
-        pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>)
-    );
+
+    return std::make_pair(cloud_copy, env_copy);
 }
 
 void ObjectMapping::jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg)

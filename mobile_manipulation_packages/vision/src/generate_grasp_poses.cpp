@@ -38,40 +38,40 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<std::string>("pcd_path", "/home/momesso/pibic/nuvem.pcd");
     
     this->declare_parameter<std::string>("gripper_mesh_path", "/home/momesso/hand_and_finger.stl");
-    this->declare_parameter<double>("gripper_mesh_scale", 0.001);
+    this->declare_parameter<double>("gripper_mesh_scale", 1.0);
     
-    this->declare_parameter<double>("mesh_offset_x", 0.0);
+    this->declare_parameter<double>("mesh_offset_x", 0.025);
     this->declare_parameter<double>("mesh_offset_y", 0.0);
-    this->declare_parameter<double>("mesh_offset_z", -0.025);
+    this->declare_parameter<double>("mesh_offset_z", 0.0);
     
     this->declare_parameter<double>("mesh_rot_roll", 0.0);
-    this->declare_parameter<double>("mesh_rot_pitch", 0.0);
-    this->declare_parameter<double>("mesh_rot_yaw", 1.57); 
+    this->declare_parameter<double>("mesh_rot_pitch", -1.57);
+    this->declare_parameter<double>("mesh_rot_yaw", 0.0); 
 
-    this->declare_parameter<double>("grid_res", 0.02);
-    this->declare_parameter<double>("cloud_voxel_size", 0.003);
+    this->declare_parameter<double>("grid_res", 0.0075);
+    this->declare_parameter<double>("cloud_voxel_size", 0.001);
     
-    this->declare_parameter<double>("cylinder_radius", 0.02); 
-    this->declare_parameter<double>("cylinder_height", 0.015);
+    this->declare_parameter<double>("cylinder_radius", 0.005); 
+    this->declare_parameter<double>("cylinder_height", 0.005);
     this->declare_parameter<double>("analysis_step_size", 0.01);
     
-    this->declare_parameter<double>("max_gripper_width", 0.12); 
-    this->declare_parameter<double>("finger_offset", 0.03); 
+    this->declare_parameter<double>("max_gripper_width", 0.07); 
+    this->declare_parameter<double>("finger_offset", 0.027); 
     
-    this->declare_parameter<int>("min_points_per_segment", 6);
-    this->declare_parameter<double>("weight_orientation", 0.6); 
-    this->declare_parameter<double>("weight_symmetry", 0.2);
-    this->declare_parameter<double>("weight_planarity", 0.2);
+    this->declare_parameter<int>("min_points_per_segment", 2);
+    this->declare_parameter<double>("weight_orientation", 0.5); 
+    this->declare_parameter<double>("weight_symmetry", 0.5);
+    this->declare_parameter<double>("weight_planarity", 0.0);
     
     this->declare_parameter<bool>("use_mean_filter", true); 
-    this->declare_parameter<int>("mean_filter_k", 10);
+    this->declare_parameter<int>("mean_filter_k", 15);
 
-    this->declare_parameter<int>("num_best_grasps", 5);
+    this->declare_parameter<int>("num_best_grasps", 2);
     this->declare_parameter<double>("rotation_step_deg", 30.0);
 
-    this->declare_parameter<int>("num_random_orientations", 100);
+    this->declare_parameter<int>("num_random_orientations", 1);
 
-    use_pcd_file = this->get_parameter("subscribe_to_point_cloud").as_bool();
+    use_pcd_file = this->get_parameter("use_pcd_file").as_bool();
     pcd_path_ = this->get_parameter("pcd_path").as_string();
     
     gripper_mesh_path_ = this->get_parameter("gripper_mesh_path").as_string();
@@ -138,18 +138,22 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
 void GenerateGraspPoses::loadAndProcess(const std::string& path)
 {
     pcl::PointCloud<pcl::PointXYZ>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     if (pcl::io::loadPCDFile<pcl::PointXYZ>(path, *temp_cloud) == -1) 
     {
         RCLCPP_ERROR(this->get_logger(), "Falha ao ler arquivo PCD: %s", path.c_str());
         return;
     }
-    processCloud(temp_cloud);
+    processCloud(temp_cloud, cloud);
 }
 
-void GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud)
+geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
     auto start = std::chrono::high_resolution_clock::now();
-    if (input_cloud->empty()) return;
+    if (target->empty()) 
+    {
+        return geometry_msgs::msg::PoseArray();
+    }
 
     if (use_pcd_file == false)
     {
@@ -164,7 +168,7 @@ void GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_
         RCLCPP_INFO(this->get_logger(), "Modo Offline: Aplicando Rotação Aleatória [R:%.2f, P:%.2f, Y:%.2f]", rot_x, rot_y, rot_z);
 
         Eigen::Vector4f centroid;
-        pcl::compute3DCentroid(*input_cloud, centroid);
+        pcl::compute3DCentroid(*target, centroid);
 
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
         
@@ -177,7 +181,7 @@ void GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_
 
         transform.translate(-centroid.head<3>());
 
-        pcl::transformPointCloud(*input_cloud, *input_cloud, transform);
+        pcl::transformPointCloud(*target, *target, transform);
     }
 
     
@@ -186,13 +190,13 @@ void GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_
     if (cloud_voxel_size_ > 0.0001) 
     {
         pcl::VoxelGrid<pcl::PointXYZ> sor;
-        sor.setInputCloud(input_cloud);
+        sor.setInputCloud(target);
         sor.setLeafSize(cloud_voxel_size_, cloud_voxel_size_, cloud_voxel_size_);
         sor.filter(*voxel_cloud);
     } 
     else 
     {
-        *voxel_cloud = *input_cloud;
+        *voxel_cloud = *target;
     }
 
     if (mean_filter) 
@@ -303,7 +307,9 @@ void GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_
 
     RCLCPP_INFO(this->get_logger(), "Tempo Total ProcessCloud: %ld ms", duration);
     
-    evaluateGrasps();
+    geometry_msgs::msg::PoseArray best_grasps = evaluateGrasps(target_environment);
+
+    return best_grasps;
 }
 
 std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedRays(
@@ -518,7 +524,7 @@ void GenerateGraspPoses::loadGripperAsOctree()
     RCLCPP_INFO(this->get_logger(), "STL Processado: %lu pontos. Offsets aplicados na memória.", gripper_dense_cloud_->size());
 }
 
-bool GenerateGraspPoses::check_collision(const ScoredGrasp& grasp)
+bool GenerateGraspPoses::check_collision(const ScoredGrasp& grasp, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
     if (!gripper_dense_cloud_ || gripper_dense_cloud_->empty()) return true;
 
@@ -532,7 +538,7 @@ bool GenerateGraspPoses::check_collision(const ScoredGrasp& grasp)
     float range_limit_sq = 0.15f * 0.15f; 
 
     
-    for (const auto& pt_world : stored_cloud_->points) 
+    for (const auto& pt_world : target_environment->points) 
     {
         
         Eigen::Vector3f p_vec(pt_world.x, pt_world.y, pt_world.z);
@@ -594,7 +600,7 @@ Eigen::Quaternionf GenerateGraspPoses::findBestOrientation(const Eigen::Vector3f
     return best_q;
 }
 
-void GenerateGraspPoses::evaluateGrasps()
+geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
     hit_candidates_.clear(); 
 
@@ -808,7 +814,8 @@ void GenerateGraspPoses::evaluateGrasps()
 
     if (initial_candidates.empty()) 
     {
-        has_best_ = false; return;
+        has_best_ = false; 
+        return geometry_msgs::msg::PoseArray();
     }
 
     
@@ -819,7 +826,7 @@ void GenerateGraspPoses::evaluateGrasps()
     for (const auto& sg : initial_candidates) 
     {
         if (best_grasps_.size() >= (size_t)num_best_grasps_) break;
-        if (check_collision(sg))
+        if (check_collision(sg, target_environment))
         {
             best_grasps_.push_back(sg);
         }
@@ -841,6 +848,20 @@ void GenerateGraspPoses::evaluateGrasps()
     getrusage(RUSAGE_SELF, &usage);
     long max_mem_mb = usage.ru_maxrss / 1024; 
     RCLCPP_INFO(this->get_logger(), "Memória Máxima Usada (RSS): %ld MB", max_mem_mb);
+
+    geometry_msgs::msg::PoseArray pose_array;
+
+    pose_array.header.frame_id = "world"; 
+    pose_array.header.stamp = this->now(); 
+
+    
+    for(int i = 0; i < num_best_grasps_; i++)
+    {
+    
+        pose_array.poses.push_back(best_grasps_[i].pose_center);
+    }
+
+    return pose_array;
 }
 
 void GenerateGraspPoses::timerCallback() 

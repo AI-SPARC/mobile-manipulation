@@ -56,7 +56,7 @@ class GenerateGraspPoses : public rclcpp::Node
 public:
     explicit GenerateGraspPoses(const rclcpp::NodeOptions & options);
 
-    void processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud);
+    geometry_msgs::msg::PoseArray processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
 
 private:
     
@@ -134,9 +134,9 @@ private:
 
     void publishGripperModel();
     void loadGripperAsOctree();
-    bool check_collision(const ScoredGrasp& grasp);
+    bool check_collision(const ScoredGrasp& grasp, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
     Eigen::Quaternionf findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2);
-    void evaluateGrasps();
+    geometry_msgs::msg::PoseArray evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
     void timerCallback();
     void publishBest();
 
