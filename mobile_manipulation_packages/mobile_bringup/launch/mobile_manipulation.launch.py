@@ -314,6 +314,8 @@ def generate_launch_description():
             {'yaml_file': pick_place_yaml},
             {'bt_xml_path': bt_file},
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
+            {"use_graspnet": False},
+            {"ray_grasp": True},
             
             {'label_to_storage_yaml_file': label_to_storage_yaml},
             {'storage_poses_yaml_file': storage_poses_yaml},

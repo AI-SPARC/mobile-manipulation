@@ -165,7 +165,8 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
         float rot_y = dis(gen);
         float rot_z = dis(gen);
 
-        RCLCPP_INFO(this->get_logger(), "Modo Offline: Aplicando Rotação Aleatória [R:%.2f, P:%.2f, Y:%.2f]", rot_x, rot_y, rot_z);
+       
+        // RCLCPP_INFO(this->get_logger(), "Modo Offline: Aplicando Rotação Aleatória [R:%.2f, P:%.2f, Y:%.2f]", rot_x, rot_y, rot_z);
 
         Eigen::Vector4f centroid;
         pcl::compute3DCentroid(*target, centroid);
@@ -297,7 +298,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
         }
     }
     
-    RCLCPP_INFO(this->get_logger(), "Gerando raios para %d orientações 3D distintas.", total_orientations_);
+    // RCLCPP_INFO(this->get_logger(), "Gerando raios para %d orientações 3D distintas.", total_orientations_);
     
     
     all_candidates_ = generateMultiOrientedRays(min_pt_, max_pt_, grid_res_, search_matrices);
@@ -305,7 +306,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    RCLCPP_INFO(this->get_logger(), "Tempo Total ProcessCloud: %ld ms", duration);
+    // RCLCPP_INFO(this->get_logger(), "Tempo Total ProcessCloud: %ld ms", duration);
     
     geometry_msgs::msg::PoseArray best_grasps = evaluateGrasps(target_environment);
 
@@ -604,7 +605,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 {
     hit_candidates_.clear(); 
 
-    RCLCPP_INFO(this->get_logger(), "Fase 1: Avaliando %lu raios...", all_candidates_.size());
+    // RCLCPP_INFO(this->get_logger(), "Fase 1: Avaliando %lu raios...", all_candidates_.size());
 
     auto start_total = std::chrono::high_resolution_clock::now();
 
@@ -834,20 +835,20 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     auto end_total = std::chrono::high_resolution_clock::now();
 
     has_best_ = !best_grasps_.empty();
-    RCLCPP_INFO(this->get_logger(), "Encontrados %lu grasps.", best_grasps_.size());
+    // RCLCPP_INFO(this->get_logger(), "Encontrados %lu grasps.", best_grasps_.size());
     
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_total - start_total).count();
 
-    RCLCPP_INFO(this->get_logger(), "Tempo Total EvaluateGrasps: %ld ms", duration);
+    // RCLCPP_INFO(this->get_logger(), "Tempo Total EvaluateGrasps: %ld ms", duration);
     
     
-    RCLCPP_INFO(this->get_logger(), ">> Breakdown (Max Thread): Inliers: %.2f ms | Analysis: %.2f ms | Scoring: %.2f ms", 
-        max_inliers_ms, max_analysis_ms, max_scoring_ms);
+    // RCLCPP_INFO(this->get_logger(), ">> Breakdown (Max Thread): Inliers: %.2f ms | Analysis: %.2f ms | Scoring: %.2f ms", 
+    //     max_inliers_ms, max_analysis_ms, max_scoring_ms);
         
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
     long max_mem_mb = usage.ru_maxrss / 1024; 
-    RCLCPP_INFO(this->get_logger(), "Memória Máxima Usada (RSS): %ld MB", max_mem_mb);
+    // RCLCPP_INFO(this->get_logger(), "Memória Máxima Usada (RSS): %ld MB", max_mem_mb);
 
     geometry_msgs::msg::PoseArray pose_array;
 

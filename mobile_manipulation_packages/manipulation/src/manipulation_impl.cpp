@@ -362,7 +362,7 @@ bool SimpleManipulation::positions_for_arm(const geometry_msgs::msg::Pose &targe
         return false;
     }
 
-    const int MAX_PLANNING_CYCLES = 4; 
+    const int MAX_PLANNING_CYCLES = 2; 
     bool task_success = false; 
 
     if (computeCartesian)
@@ -383,7 +383,7 @@ bool SimpleManipulation::positions_for_arm(const geometry_msgs::msg::Pose &targe
     move_group_arm->setPoseTarget(target_pose, "panda_link8");
 
 
-    move_group_arm->setPlanningTime(5.0); 
+    move_group_arm->setPlanningTime(1.5); 
     move_group_arm->setNumPlanningAttempts(20); 
 
     move_group_arm->setMaxVelocityScalingFactor(maxVelocity);
