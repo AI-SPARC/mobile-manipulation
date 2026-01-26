@@ -5,7 +5,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -O3)
 endif()
 
-# --- DEPENDENCIAS ---
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -27,16 +26,14 @@ find_package(rclcpp_components REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(octomap_msgs REQUIRED)
 find_package(octomap REQUIRED)
-
-
 find_package(geometric_shapes REQUIRED)
 find_package(fcl REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
-
 add_library(vision_lib SHARED
   src/generate_scan_poses.cpp
   src/object_mapping.cpp
+  src/generate_grasp_poses.cpp
 )
 
 target_include_directories(vision_lib PUBLIC
@@ -75,7 +72,6 @@ target_link_libraries(vision_lib
   fcl 
 )
 
-
 add_executable(combined_semantic_pcl src/combined_semantic_pcl.cpp)
 target_link_libraries(combined_semantic_pcl vision_lib) 
 
@@ -104,44 +100,6 @@ ament_target_dependencies(combined_semantic_pcl
   rclcpp_components
 )
 
-
-add_executable(generate_grasp_poses src/generate_grasp_poses.cpp)
-
-target_link_libraries(generate_grasp_poses 
-  vision_lib
-  fcl 
-) 
-
-target_include_directories(generate_grasp_poses PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${PCL_INCLUDE_DIRS}
-  ${fcl_INCLUDE_DIRS}
-)
-
-ament_target_dependencies(generate_grasp_poses
-  rclcpp
-  sensor_msgs
-  std_msgs
-  vision_msgs
-  geometry_msgs
-  visualization_msgs
-  message_filters
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
-  tf2_sensor_msgs
-  tf2_eigen
-  mobile_manipulation_interfaces
-  PCL
-  pcl_conversions
-  rclcpp_components
-  geometric_shapes
-  ament_index_cpp
-)
-
-
-
 install(DIRECTORY include/
   DESTINATION include
 )
@@ -157,7 +115,6 @@ install(
 install(
   TARGETS 
   combined_semantic_pcl
-  generate_grasp_poses
   DESTINATION lib/${PROJECT_NAME}
 )
 
