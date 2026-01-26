@@ -1,6 +1,14 @@
 #ifndef VISION__OBJECT_MAPPING_HPP_
 #define VISION__OBJECT_MAPPING_HPP_
 
+// Standard Includes
+#include <mutex>
+#include <string>
+#include <map>
+#include <vector>
+#include <utility> // para std::pair
+
+// ROS 2 Includes
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -23,50 +31,62 @@
 #include <octomap_msgs/msg/octomap.h>
 #include <octomap_msgs/conversions.h>
 
-// TF2
+// TF2 Includes
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
-#include <mutex>
-#include <string>
-#include <map>
-#include <vector>
-
-namespace vision {
-
-
+namespace vision
+{
 
 class ObjectMapping : public rclcpp::Node
 {
 public:
     explicit ObjectMapping(const rclcpp::NodeOptions & options);
     
-   
+    
     void ObjectToMap(std::string id);
+
+    
+    std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> 
+    getObjectAndEnvironment(const std::string& object_id);
 
 private:
     struct MappingObjectData
     {
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;       
+        pcl::PointCloud<pcl::PointXYZ>::Ptr environment; 
         geometry_msgs::msg::Pose pose;
 
-        MappingObjectData() : cloud(new pcl::PointCloud<pcl::PointXYZ>) {}
+        MappingObjectData() 
+            : cloud(new pcl::PointCloud<pcl::PointXYZ>),
+              environment(new pcl::PointCloud<pcl::PointXYZ>) 
+        {
+        }
     };
     
+   
     void jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
     void semanticPclCallback(const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr msg);
 
-    void publishAccumulatedCloud();
-    void publishToPlanningScene();
-    void publishSemanticEnvironment(
+    
+    bool processTargetCloud(
+        const std::string& label,
+        const sensor_msgs::msg::PointCloud2& cloud_msg,
+        const geometry_msgs::msg::Pose& pose_msg
+    );
+
+    void processEnvironmentClouds(
         const mobile_manipulation_interfaces::msg::SemanticPcl::SharedPtr & input_msg, 
-        const std::string& target_label);
+        const std::string& target_label
+    );
 
     
-    bool areCloudsClose(
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_target, 
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_env, 
-        double threshold);
+    void publishAccumulatedCloud();
+    void publishToPlanningScene();
+    void publishEnvironmentVisualization(
+        const mobile_manipulation_interfaces::msg::SemanticPcl& semantic_msg,
+        const pcl::PointCloud<pcl::PointXYZRGB>& visual_cloud
+    );
 
     
     std::mutex data_mutex_;
@@ -90,8 +110,6 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_accumulated_cloud_;
     rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr pub_planning_scene_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_environment_cloud_;
-    
-    
     rclcpp::Publisher<mobile_manipulation_interfaces::msg::SemanticPcl>::SharedPtr pub_semantic_environment_;
 };
 
