@@ -15,7 +15,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/octree/octree_search.h>
-
+#include <pcl/kdtree/kdtree_flann.h> // <--- ESSE É O QUE FALTA
 namespace vision 
 {
 
@@ -94,7 +94,7 @@ private:
     int num_best_grasps_;
     int total_orientations_;
     float rotation_step_deg_;
-
+    
     
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
@@ -116,6 +116,7 @@ private:
     bool has_best_ = false;
     Eigen::Vector4f min_pt_, max_pt_;
 
+    pcl::KdTreeFLANN<pcl::PointXYZ> gripper_kdtree_;
     pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> gripper_octree_{0.002f};
     pcl::PointCloud<pcl::PointXYZ>::Ptr gripper_dense_cloud_;
 
@@ -134,7 +135,7 @@ private:
 
     void publishGripperModel();
     void loadGripperAsOctree();
-    bool check_collision(const ScoredGrasp& grasp, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
+    bool check_collision(const ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree);
     Eigen::Quaternionf findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2);
     geometry_msgs::msg::PoseArray evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
     void timerCallback();

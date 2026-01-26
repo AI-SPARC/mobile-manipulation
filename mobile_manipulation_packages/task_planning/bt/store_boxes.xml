@@ -6,7 +6,7 @@
       
         <DetectObject output_pose="{target_pose}" output_size="{target_size}" output_id="{target_id}"/>
         
-        <RetryUntilSuccessful num_attempts="30">
+        <!-- <RetryUntilSuccessful num_attempts="30">
             <Fallback name="EnsureProximity">
                  
                  <IsReachable target_pose="{target_pose}"
@@ -26,7 +26,7 @@
                   </Sequence>
     
             </Fallback>
-        </RetryUntilSuccessful>
+        </RetryUntilSuccessful> -->
           
         <PickObject object_pose="{target_pose}" object_size="{target_size}" id="{target_id}"/>
       </Sequence>

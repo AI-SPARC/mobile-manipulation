@@ -1641,7 +1641,8 @@ private:
                             }
 
                             this->send_goal(id.value(), poses, true, true); 
-                            current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
+                            // current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
+                            current_pick_phase_ = GraspPhase::WAITING;
                             return BT::NodeStatus::RUNNING;
                         }                      
                     }
@@ -1698,16 +1699,16 @@ private:
                         else
                         {
                             
-                            std::vector<geometry_msgs::msg::Pose> validated_poses = this->ik_validator_node_->find_valid_targets_from_base(
-                                std::make_tuple(pose_x, pose_y, pose_z), wrist_poses, true, cached_object_.id);
+                            // std::vector<geometry_msgs::msg::Pose> validated_poses = this->ik_validator_node_->find_valid_targets_from_base(
+                            //     std::make_tuple(pose_x, pose_y, pose_z), wrist_poses, true, cached_object_.id);
 
                                 
-                            if(validated_poses.empty())
-                            {
-                                return BT::NodeStatus::RUNNING;
-                            }
+                            // if(validated_poses.empty())
+                            // {
+                            //     return BT::NodeStatus::RUNNING;
+                            // }
                                                      
-                            this->grasp_context_.grasp_poses = validated_poses;
+                            this->grasp_context_.grasp_poses = wrist_poses;
 
                             RCLCPP_INFO(this->get_logger(), 
                             "VAI SE FERRAR -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Orient: [x: %.3f, y: %.3f, z: %.3f, w: %.3f]",
@@ -2414,11 +2415,16 @@ private:
     {
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result->success)
         {
-            if(use_graspnet == true)
+            if(use_graspnet == true || ray_grasp == true) 
             {
                 if(current_pick_phase_ == GraspPhase::SEND_GOAL)
                 {
                     current_pick_phase_ = GraspPhase::SUCCESS; 
+                }
+
+                if(current_pick_phase_ == GraspPhase::WAITING)
+                {
+                    current_pick_phase_ = GraspPhase::GRASPNET_SCAN;
                 }
             }
             else

@@ -11,6 +11,7 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     
     parameters = [{
+        "use_pcd_file": False,
         "pcd_path": "/home/momesso/pcds/toma_23.pcd",
         "gripper_mesh_path": "/home/momesso/hand_and_finger_2.stl",
         "gripper_mesh_scale": 1.0,
@@ -52,7 +53,7 @@ def generate_launch_description():
 
         Node(
             package='vision',
-            executable='generate_grasp_poses',
+            executable='generate_grasp_poses_main',
             output='screen',
             parameters=parameters,
         ),

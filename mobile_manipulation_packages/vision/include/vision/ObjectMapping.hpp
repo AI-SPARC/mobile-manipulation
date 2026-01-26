@@ -102,7 +102,7 @@ private:
     double voxel_leaf_size_;
     bool publish_octomap_to_moveit_;
     double surrounding_distance_threshold_;
-
+    double octomap_resolution_;
    
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joint_states_;
     rclcpp::Subscription<mobile_manipulation_interfaces::msg::SemanticPcl>::SharedPtr sub_semantic_pcl_;

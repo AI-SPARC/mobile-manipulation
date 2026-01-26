@@ -13,14 +13,16 @@ ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
     
     this->declare_parameter<double>("velocity_threshold", 0.25); 
     this->declare_parameter<double>("settlement_duration", 0.25); 
-    this->declare_parameter<double>("voxel_leaf_size", 0.001); 
-    this->declare_parameter<bool>("publish_octomap_to_moveit", false);
+    this->declare_parameter<double>("voxel_leaf_size", 0.005); 
+    this->declare_parameter<double>("octomap_resolution", 0.0075);
+    this->declare_parameter<bool>("publish_octomap_to_moveit", true);
     this->declare_parameter<double>("surrounding_distance_threshold", 0.3);
 
     
     velocity_threshold_ = this->get_parameter("velocity_threshold").as_double();
     settlement_duration_ = this->get_parameter("settlement_duration").as_double();
     voxel_leaf_size_ = this->get_parameter("voxel_leaf_size").as_double();
+    octomap_resolution_ = this->get_parameter("octomap_resolution").as_double();
     publish_octomap_to_moveit_ = this->get_parameter("publish_octomap_to_moveit").as_bool();
     surrounding_distance_threshold_ = this->get_parameter("surrounding_distance_threshold").as_double();
     
@@ -479,7 +481,7 @@ void ObjectMapping::publishToPlanningScene()
         return;
     }
 
-    std::shared_ptr<octomap::OcTree> tree(new octomap::OcTree(voxel_leaf_size_));
+    std::shared_ptr<octomap::OcTree> tree(new octomap::OcTree(octomap_resolution_));
 
     for (const auto& [label, data] : object_map_) 
     {

@@ -115,6 +115,7 @@ private:
     bool send_request(std::string received_obstacle_id, bool received_activate_movement);
     bool follow_path_with_consistent_ik(const std::vector<geometry_msgs::msg::Pose>& path_poses, 
         const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>>& goal_handle);
+    void allow_all_robot_collisions(const std::string& object_id, bool allow_collision);
 
 
     rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
