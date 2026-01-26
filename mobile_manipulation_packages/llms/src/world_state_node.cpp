@@ -10,7 +10,7 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 : Node("world_state_node", options), db_(nullptr)
 {
     this->declare_parameter<std::string>("database_path", "/home/momesso/pibic/src/mobile_manipulation_packages/llms/db/robot_world_data.db");
-    this->declare_parameter<int>("num_cameras", 1);
+    this->declare_parameter<int>("num_cameras", 3);
 
     std::string db_path = this->get_parameter("database_path").as_string();
     int num_cameras = this->get_parameter("num_cameras").as_int();
@@ -38,7 +38,7 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 
     for (int i = 0; i < num_cameras; ++i)
     {
-        std::string topic_name = "/bbox_3d_with_labels";
+        std::string topic_name = "/bbox_3d_with_labels_" + std::to_string(i);
 
         auto sub = this->create_subscription<vision_msgs::msg::Detection3DArray>(
             topic_name, 10, 
@@ -52,8 +52,7 @@ WorldStateNode::WorldStateNode(const rclcpp::NodeOptions & options)
 
 WorldStateNode::~WorldStateNode()
 {
-    if (db_) 
-    {
+    if (db_) {
         sqlite3_close(db_);
     }
 }
@@ -85,25 +84,15 @@ void WorldStateNode::handle_detections(const vision_msgs::msg::Detection3DArray:
 {
     for (const auto& detection : msg->detections)
     {
-        if (detection.results.empty()) 
-        {
-            continue;
-        }
+        if (detection.results.empty()) continue;
 
         std::string obj_id = detection.results[0].hypothesis.class_id;
-        if (obj_id.empty()) 
-        {
-            continue;
-        }
+        if (obj_id.empty()) continue;
 
         std::stringstream ss_pose;
         ss_pose << detection.bbox.center.position.x << ";" 
                 << detection.bbox.center.position.y << ";" 
-                << detection.bbox.center.position.z << ";"
-                << detection.bbox.center.orientation.x << ";"
-                << detection.bbox.center.orientation.y << ";"
-                << detection.bbox.center.orientation.z << ";"
-                << detection.bbox.center.orientation.w;
+                << detection.bbox.center.position.z;
         
         std::stringstream ss_size;
         ss_size << detection.bbox.size.x << ";" 
@@ -132,8 +121,7 @@ bool WorldStateNode::upsert_object(const std::string& id,
     )";
 
     sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, 0) != SQLITE_OK) 
-    {
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, 0) != SQLITE_OK) {
         RCLCPP_ERROR(this->get_logger(), "SQL Prepare Error: %s", sqlite3_errmsg(db_));
         return false;
     }
@@ -153,6 +141,6 @@ bool WorldStateNode::upsert_object(const std::string& id,
     return success;
 }
 
-} 
+} // namespace llms
 
 RCLCPP_COMPONENTS_REGISTER_NODE(llms::WorldStateNode)

@@ -140,27 +140,6 @@ ament_target_dependencies(generate_grasp_poses
   ament_index_cpp
 )
 
-add_executable(generate_grasp_poses_test src/generate_grasp_poses_test.cpp)
-target_link_libraries(generate_grasp_poses_test vision_lib) 
-
-ament_target_dependencies(generate_grasp_poses_test
-  rclcpp
-  sensor_msgs
-  std_msgs
-  vision_msgs
-  geometry_msgs
-  visualization_msgs
-  message_filters
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
-  tf2_sensor_msgs
-  tf2_eigen
-  mobile_manipulation_interfaces
-  PCL
-  pcl_conversions
-  rclcpp_components
-)
 
 
 install(DIRECTORY include/
@@ -179,7 +158,6 @@ install(
   TARGETS 
   combined_semantic_pcl
   generate_grasp_poses
-  generate_grasp_poses_test
   DESTINATION lib/${PROJECT_NAME}
 )
 
