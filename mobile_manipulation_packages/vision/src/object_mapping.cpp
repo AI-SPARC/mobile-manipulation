@@ -13,7 +13,7 @@ ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
     
     this->declare_parameter<double>("velocity_threshold", 0.25); 
     this->declare_parameter<double>("settlement_duration", 0.25); 
-    this->declare_parameter<double>("voxel_leaf_size", 0.0025); 
+    this->declare_parameter<double>("voxel_leaf_size", 0.001); 
     this->declare_parameter<double>("octomap_resolution", 0.0075);
     this->declare_parameter<bool>("publish_octomap_to_moveit", true);
     this->declare_parameter<double>("surrounding_distance_threshold", 0.3);

@@ -259,24 +259,33 @@ void SimpleManipulation::close_gripper()
         RCLCPP_ERROR(this->get_logger(), "MoveGroupInterface do GRIPPER não inicializado.");
         return;
     }
+
+   
+    toggle_gripper_collisions(true);
+
     move_group_gripper->setStartStateToCurrentState();
     
+  
     move_group_gripper->setJointValueTarget({
         {"panda_finger_joint1", 0.003},
         {"panda_finger_joint2", 0.003},
     });
 
+    
     move_group_gripper->allowReplanning(true);
+    
     
     auto result = move_group_gripper->move();
 
+
     if (result == moveit::core::MoveItErrorCode::SUCCESS) 
     {
-        RCLCPP_INFO(this->get_logger(), "Gripper fechou (MoveIt).");
+        RCLCPP_INFO(this->get_logger(), "Gripper fechou completamente (sem obstrução).");
     } 
     else 
     {
-        RCLCPP_ERROR(this->get_logger(), "Falha ao fechar o gripper.");
+       
+        RCLCPP_WARN(this->get_logger(), "Gripper parou antes do alvo (Provavelmente segurou o objeto).");
     }
 }
 
@@ -306,6 +315,82 @@ void SimpleManipulation::open_gripper()
     {
         RCLCPP_ERROR(this->get_logger(), "Falha ao abrir o gripper.");
     }
+}
+
+void SimpleManipulation::toggle_gripper_collisions(bool allow_collisions)
+{
+    // allow_collisions = TRUE  -> Ignora colisões (Pode atravessar objetos/octomap)
+    // allow_collisions = FALSE -> Respeita colisões (Para de bater)
+
+    auto request = std::make_shared<moveit_msgs::srv::GetPlanningScene::Request>();
+    request->components.components = moveit_msgs::msg::PlanningSceneComponents::ALLOWED_COLLISION_MATRIX;
+
+    if (!get_planning_scene_client_->wait_for_service(std::chrono::milliseconds(500))) 
+    {
+        RCLCPP_ERROR(this->get_logger(), "Serviço get_planning_scene indisponível.");
+        return;
+    }
+
+    auto future = get_planning_scene_client_->async_send_request(request);
+    if (future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+        RCLCPP_ERROR(this->get_logger(), "Timeout ao buscar Planning Scene.");
+        return;
+    }
+
+    auto response = future.get();
+    auto acm = response->scene.allowed_collision_matrix; 
+
+    std::vector<std::string> gripper_links = move_group_gripper->getLinkNames();
+
+   
+    auto get_default_index = [&](const std::string &name) -> int {
+        for (size_t i = 0; i < acm.default_entry_names.size(); ++i)
+            if (acm.default_entry_names[i] == name) return i;
+        return -1;
+    };
+
+    
+    auto get_entry_index = [&](const std::string &name) -> int {
+        for (size_t i = 0; i < acm.entry_names.size(); ++i)
+            if (acm.entry_names[i] == name) return i;
+        return -1;
+    };
+
+    for (const auto& link : gripper_links)
+    {
+        
+        int entry_idx = get_entry_index(link);
+        if (entry_idx != -1)
+        {
+            for (size_t i = 0; i < acm.entry_values[entry_idx].enabled.size(); ++i)
+            {
+                acm.entry_values[entry_idx].enabled[i] = allow_collisions;
+            }
+        }
+
+       
+        int def_idx = get_default_index(link);
+        
+        if (def_idx == -1)
+        {
+            acm.default_entry_names.push_back(link);
+            acm.default_entry_values.push_back(allow_collisions); 
+        }
+        else
+        {
+            acm.default_entry_values[def_idx] = allow_collisions;
+        }
+    }
+
+    moveit_msgs::msg::PlanningScene update_msg;
+    update_msg.is_diff = true;
+    update_msg.allowed_collision_matrix = acm;
+    planning_scene_publisher_->publish(update_msg);
+
+    rclcpp::sleep_for(std::chrono::milliseconds(200));
+
+    RCLCPP_INFO(this->get_logger(), "ACM Gripper Update: Colisões %s (allow=%d)", 
+        allow_collisions ? "IGNORADAS (Pode atravessar)" : "ATIVAS (Vai bater)", allow_collisions);
 }
 
 bool SimpleManipulation::attempt_cartesian_move(const geometry_msgs::msg::Pose &target_pose, float maxVelocity, bool avoid_collisions)
@@ -495,11 +580,11 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 std::vector<std::string> touch_links = move_group_gripper->getLinkNames();
                 move_group_arm->attachObject(received_id, "panda_link8", touch_links);
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(100));
+                rclcpp::sleep_for(std::chrono::milliseconds(50));
 
                 close_gripper();
                 
-                rclcpp::sleep_for(std::chrono::milliseconds(100));
+                rclcpp::sleep_for(std::chrono::milliseconds(50));
                 
                 bool picked = false;
                 int contador = 0;
@@ -552,6 +637,7 @@ bool SimpleManipulation::calculate_global_pose(std::string received_id, geometry
                 // rclcpp::sleep_for(std::chrono::milliseconds(200));
 
                 ready();
+                toggle_gripper_collisions(false);
 
                 return true;
             }
@@ -1071,7 +1157,7 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
     {
         if(goal->pick == true)
         {
-            // Verifica cancelamento antes de abrir a garra
+            
             if (goal_handle->is_canceling()) 
             {
                 result->success = false;
@@ -1081,13 +1167,13 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
             }
             open_gripper();
         }
-         // 3. Loop sobre as poses candidatas
+         
         for (const auto& target_pose : goal->poses)
         {
-            // === VERIFICAÇÃO DE CANCELAMENTO CRÍTICA ===
+            
             if (goal_handle->is_canceling()) 
             {
-                // Para qualquer movimento que esteja ocorrendo
+                
                 if (move_group_arm) 
                 {
                     move_group_arm->stop();
@@ -1127,10 +1213,10 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
     {
         for (const auto& target_pose : goal->poses)
         {
-            // === VERIFICAÇÃO DE CANCELAMENTO CRÍTICA ===
+          
             if (goal_handle->is_canceling()) 
             {
-                // Para qualquer movimento que esteja ocorrendo
+                
                 if (move_group_arm) 
                 {
                     move_group_arm->stop();
@@ -1148,12 +1234,12 @@ void SimpleManipulation::execute(const std::shared_ptr<rclcpp_action::ServerGoal
                 RCLCPP_WARN(this->get_logger(), "Action cancelada pelo usuário! Parando o robô.");
                 return;
             }
-            // ===========================================
+            
 
             RCLCPP_INFO(this->get_logger(), "Tentando pose [x: %.3f, y: %.3f, z: %.3f]...", 
                 target_pose.position.x, target_pose.position.y, target_pose.position.z);
 
-            // Chama a sua função original
+          
             bool current_attempt = positions_for_arm(target_pose, 0.7, false);
 
             rclcpp::sleep_for(std::chrono::milliseconds(600));

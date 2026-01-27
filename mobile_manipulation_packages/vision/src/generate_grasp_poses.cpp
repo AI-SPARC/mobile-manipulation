@@ -152,7 +152,7 @@ void GenerateGraspPoses::loadAndProcess(const std::string& path)
         RCLCPP_ERROR(this->get_logger(), "Falha ao ler arquivo PCD: %s", path.c_str());
         return;
     }
-    // Passa a mesma nuvem como alvo E como obstáculo
+    
     processCloud(temp_cloud, temp_cloud);
 }
 
@@ -160,11 +160,11 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
 {
     if (!target || target->empty()) return geometry_msgs::msg::PoseArray();
 
-    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-    sor.setInputCloud(target);
-    sor.setMeanK(50); 
-    sor.setStddevMulThresh(1.5); 
-    sor.filter(*target);
+    // pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+    // sor.setInputCloud(target);
+    // sor.setMeanK(50); 
+    // sor.setStddevMulThresh(2.0); 
+    // sor.filter(*target);
 
     if (use_pcd_file == true)
     {

@@ -116,7 +116,7 @@ private:
     bool follow_path_with_consistent_ik(const std::vector<geometry_msgs::msg::Pose>& path_poses, 
         const std::shared_ptr<rclcpp_action::ServerGoalHandle<mobile_manipulation_interfaces::action::PickObject>>& goal_handle);
     void allow_all_robot_collisions(const std::string& object_id, bool allow_collision);
-
+    void toggle_gripper_collisions(bool enable_collision_detection);
 
     rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid,
         std::shared_ptr<const mobile_manipulation_interfaces::action::PickObject::Goal> goal);
