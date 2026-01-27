@@ -29,6 +29,7 @@ find_package(octomap REQUIRED)
 find_package(geometric_shapes REQUIRED)
 find_package(fcl REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+find_package(assimp REQUIRED)
 
 add_library(vision_lib SHARED
   src/generate_scan_poses.cpp
@@ -41,6 +42,7 @@ target_include_directories(vision_lib PUBLIC
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS} 
   ${fcl_INCLUDE_DIRS} 
+  ${ASSIMP_INCLUDE_DIRS}
 )
 
 ament_target_dependencies(vision_lib
@@ -65,11 +67,18 @@ ament_target_dependencies(vision_lib
   octomap
   geometric_shapes
   ament_index_cpp
+  assimp
 )
 
 target_link_libraries(vision_lib
   ${PCL_LIBRARIES}
   fcl 
+  assimp
+)
+
+rclcpp_components_register_node(vision_lib
+  PLUGIN "vision::GenerateGraspPoses"
+  EXECUTABLE generate_grasp_poses_node
 )
 
 add_executable(combined_semantic_pcl src/combined_semantic_pcl.cpp)
@@ -79,6 +88,7 @@ target_include_directories(combined_semantic_pcl PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
+  ${ASSIMP_INCLUDE_DIRS}
 )
 
 ament_target_dependencies(combined_semantic_pcl
@@ -120,12 +130,12 @@ ament_target_dependencies(generate_grasp_poses_main
   PCL
   pcl_conversions
   rclcpp_components
-  rclcpp_components
   moveit_msgs   
   octomap_msgs  
   octomap
   geometric_shapes
   ament_index_cpp
+  assimp
 )
 
 install(DIRECTORY include/

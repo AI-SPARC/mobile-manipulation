@@ -7,6 +7,7 @@
 #include <map>
 #include <unordered_map>
 #include <sys/resource.h>
+#include <limits> 
 
 // TBB
 #include <tbb/parallel_for.h>
@@ -38,7 +39,7 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<bool>("use_pcd_file", false);
     this->declare_parameter<std::string>("pcd_path", "/home/momesso/pibic/nuvem.pcd");
     
-    this->declare_parameter<std::string>("gripper_mesh_path", "/home/momesso/hand_and_finger_2.stl");
+    this->declare_parameter<std::string>("gripper_mesh_path", "/home/momesso/gripper_model.obj");
     this->declare_parameter<double>("gripper_mesh_scale", 1.0);
     
     this->declare_parameter<double>("mesh_offset_x", 0.025);
@@ -116,14 +117,21 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     pub_markers_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("best_grasps_markers", 10);
     pub_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_poses", 10);
     pub_debug_inliers_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_ray_inliers", 10);
-    pub_gripper_model_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-        "debug_gripper_model", 10);
+    
+    pub_gripper_model_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_gripper_model", 10);
+    pub_gripper_boxes_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("debug_gripper_boxes", 10);
     pub_debug_grasps_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_grasps_cloud", 10);
 
     stored_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
+    gripper_dense_cloud_.reset(new pcl::PointCloud<pcl::PointXYZRGB>); 
     
-    loadGripperAsOctree();
+    
+    extractBoundingBoxesFromOBJ(); 
+    
+    
     publishGripperModel();
+    publishGripperCollisionBoxes();
+
     RCLCPP_INFO(this->get_logger(), "MODO ARQUIVO: Carregando PCD de %s...", pcd_path_.c_str());
 
     if(use_pcd_file == true)
@@ -131,7 +139,6 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
         loadAndProcess(pcd_path_);
     }
    
-    
     timer_ = this->create_wall_timer(1000ms, std::bind(&GenerateGraspPoses::timerCallback, this));
 }
 
@@ -139,197 +146,116 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
 void GenerateGraspPoses::loadAndProcess(const std::string& path)
 {
     pcl::PointCloud<pcl::PointXYZ>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    
     if (pcl::io::loadPCDFile<pcl::PointXYZ>(path, *temp_cloud) == -1) 
     {
         RCLCPP_ERROR(this->get_logger(), "Falha ao ler arquivo PCD: %s", path.c_str());
         return;
     }
-    processCloud(temp_cloud, cloud);
+    // Passa a mesma nuvem como alvo E como obstáculo
+    processCloud(temp_cloud, temp_cloud);
 }
 
 geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    
-    if (target->empty()) 
-    {
-        return geometry_msgs::msg::PoseArray();
-    }
-
-    
-    size_t original_size = target->size();
+    if (!target || target->empty()) return geometry_msgs::msg::PoseArray();
 
     pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
     sor.setInputCloud(target);
-    
-    
-    sor.setMeanK(80); 
-    
-   
-    sor.setStddevMulThresh(0.5); 
-    
+    sor.setMeanK(50); 
+    sor.setStddevMulThresh(1.5); 
     sor.filter(*target);
 
-    float removed_percentage = 1.0f - ((float)target->size() / (float)original_size);
-    if (removed_percentage > 0.2f)
-    {
-        RCLCPP_WARN(this->get_logger(), 
-            "CUIDADO: Filtro de outliers removeu %.1f%% da nuvem! (Orig: %ld, Final: %ld). Ajuste StddevMulThresh para cima.", 
-            removed_percentage * 100.0, original_size, target->size());
-    }
-    else
-    {
-        RCLCPP_INFO(this->get_logger(), "Outliers removidos: %ld pontos.", original_size - target->size());
-    }
-
-    
     if (use_pcd_file == true)
     {
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dis(0.0f, 2.0f * M_PI); 
-
-        float rot_x = dis(gen);
-        float rot_y = dis(gen);
-        float rot_z = dis(gen);
-
+        float rot_x = dis(gen); float rot_y = dis(gen); float rot_z = dis(gen);
         Eigen::Vector4f centroid;
         pcl::compute3DCentroid(*target, centroid);
-
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-        
         transform.translation() = centroid.head<3>();
         transform.rotate(Eigen::AngleAxisf(rot_x, Eigen::Vector3f::UnitX())); 
         transform.rotate(Eigen::AngleAxisf(rot_y, Eigen::Vector3f::UnitY()));
         transform.rotate(Eigen::AngleAxisf(rot_z, Eigen::Vector3f::UnitZ())); 
         transform.translate(-centroid.head<3>());
-
         pcl::transformPointCloud(*target, *target, transform);
     }
-
     
     pcl::PointCloud<pcl::PointXYZ>::Ptr voxel_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    
-    if (use_pcd_file && cloud_voxel_size_ > 0.001f) 
-    {
+    if (use_pcd_file && cloud_voxel_size_ > 0.001f) {
         pcl::VoxelGrid<pcl::PointXYZ> sor;
         sor.setInputCloud(target);
         sor.setLeafSize(cloud_voxel_size_, cloud_voxel_size_, cloud_voxel_size_);
         sor.filter(*voxel_cloud);
-    } 
-    else 
-    {
-        
+    } else {
         *voxel_cloud = *target;
     }
 
-   
     if (mean_filter) 
     {
-        
         pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
         kdtree.setInputCloud(voxel_cloud);
-
         stored_cloud_->points.resize(voxel_cloud->points.size());
         stored_cloud_->width = voxel_cloud->width;
         stored_cloud_->height = voxel_cloud->height;
         stored_cloud_->is_dense = voxel_cloud->is_dense;
         stored_cloud_->header = voxel_cloud->header; 
-
         int K = mean_filter_k_; 
 
-        
         tbb::parallel_for(tbb::blocked_range<size_t>(0, voxel_cloud->points.size()),
-            [&](const tbb::blocked_range<size_t>& range) 
-            {
+            [&](const tbb::blocked_range<size_t>& range) {
                 std::vector<int> pointIdxNKNSearch(K);
                 std::vector<float> pointNKNSquaredDistance(K);
-
-                for (size_t i = range.begin(); i != range.end(); ++i) 
-                {
-                    if (kdtree.nearestKSearch(voxel_cloud->points[i], K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0) 
-                    {
+                for (size_t i = range.begin(); i != range.end(); ++i) {
+                    if (kdtree.nearestKSearch(voxel_cloud->points[i], K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0) {
                         float sum_x = 0, sum_y = 0, sum_z = 0;
                         int valid_pts = 0;
-
-                        for (int j = 0; j < K; ++j) 
-                        {
+                        for (int j = 0; j < K; ++j) {
                             const auto& neighbor = voxel_cloud->points[pointIdxNKNSearch[j]];
-                            sum_x += neighbor.x;
-                            sum_y += neighbor.y;
-                            sum_z += neighbor.z;
-                            valid_pts++;
+                            sum_x += neighbor.x; sum_y += neighbor.y; sum_z += neighbor.z; valid_pts++;
                         }
-
                         stored_cloud_->points[i].x = sum_x / valid_pts;
                         stored_cloud_->points[i].y = sum_y / valid_pts;
                         stored_cloud_->points[i].z = sum_z / valid_pts;
-                    }
-                    else
-                    {
+                    } else {
                         stored_cloud_->points[i] = voxel_cloud->points[i];
                     }
                 }
             }
         );
-    }
-    else 
-    {
+    } else {
         *stored_cloud_ = *voxel_cloud;
     }
     
-    
     stored_cloud_->header.frame_id = "world";
-
     pcl::getMinMax3D(*stored_cloud_, min_pt_, max_pt_);
-    
     float padding = 0.03; 
     min_pt_.array() -= padding; max_pt_.array() += padding;
     
-    
-    if (total_orientations_ < 1) 
-    {
-        total_orientations_ = 1;
-    }
+    if (total_orientations_ < 1) total_orientations_ = 1;
     
     std::vector<Eigen::Matrix3f> search_matrices;
     search_matrices.reserve(total_orientations_);
-
-   
     search_matrices.push_back(Eigen::Matrix3f::Identity());
 
     if (total_orientations_ > 1) 
     {
-        std::random_device rd;  
-        std::mt19937 gen(rd()); 
+        std::random_device rd; std::mt19937 gen(rd()); 
         std::uniform_real_distribution<float> dis(0.0f, 2.0f * M_PI);
-
-        for (int i = 0; i < total_orientations_ - 1; ++i) 
-        {
-            float roll  = dis(gen);
-            float pitch = dis(gen);
-            float yaw   = dis(gen);
-
+        for (int i = 0; i < total_orientations_ - 1; ++i) {
+            float roll  = dis(gen); float pitch = dis(gen); float yaw   = dis(gen);
             Eigen::Matrix3f m;
             m = Eigen::AngleAxisf(roll,  Eigen::Vector3f::UnitX())
                 * Eigen::AngleAxisf(pitch, Eigen::Vector3f::UnitY())
                 * Eigen::AngleAxisf(yaw,   Eigen::Vector3f::UnitZ());
-            
             search_matrices.push_back(m);
         }
     }
     
     all_candidates_ = generateMultiOrientedRays(min_pt_, max_pt_, grid_res_, search_matrices);
-
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    // RCLCPP_INFO(this->get_logger(), "Tempo Total ProcessCloud: %ld ms", duration);
-    
-    geometry_msgs::msg::PoseArray best_grasps = evaluateGrasps(target_environment);
-
-    return best_grasps;
+    return evaluateGrasps(target_environment);
 }
 
 std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedRays(
@@ -337,20 +263,13 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
     const std::vector<Eigen::Matrix3f>& rotation_matrices) 
 {
     std::vector<geometry_msgs::msg::Pose> poses;
-    
-    
     Eigen::Vector3f center = (min.head<3>() + max.head<3>()) / 2.0f;
     Eigen::Vector3f size = max.head<3>() - min.head<3>();
-
     Eigen::Vector3f start_dims = size; 
-    
     
     auto add_rotated_ray = [&](Eigen::Vector3f local_pos, Eigen::Vector3f local_dir, const Eigen::Matrix3f& rot_mat) 
     {
-        
         Eigen::Vector3f global_pos = (rot_mat * local_pos) + center;
-        
-        
         Eigen::Vector3f global_dir = rot_mat * local_dir;
 
         geometry_msgs::msg::Pose p;
@@ -365,33 +284,21 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
         poses.push_back(p);
     };
 
-    
     for (const auto& R : rotation_matrices)
     {
-        
         float half_x = start_dims.x() / 2.0f;
         float half_y = start_dims.y() / 2.0f;
         float half_z = start_dims.z() / 2.0f;
 
-        
         for(float y = -half_y; y < half_y; y += res)
-            for(float z = -half_z; z < half_z; z += res) {
-                add_rotated_ray({half_x, y + res/2, z + res/2}, {-1, 0, 0}, R);
-            }
+            for(float z = -half_z; z < half_z; z += res) add_rotated_ray({half_x, y + res/2, z + res/2}, {-1, 0, 0}, R);
 
-        
         for(float x = -half_x; x < half_x; x += res)
-            for(float z = -half_z; z < half_z; z += res) {
-                add_rotated_ray({x + res/2, half_y, z + res/2}, {0, -1, 0}, R);
-            }
+            for(float z = -half_z; z < half_z; z += res) add_rotated_ray({x + res/2, half_y, z + res/2}, {0, -1, 0}, R);
 
-        
         for(float x = -half_x; x < half_x; x += res)
-            for(float y = -half_y; y < half_y; y += res) {
-                add_rotated_ray({x + res/2, y + res/2, half_z}, {0, 0, -1}, R);
-            }
+            for(float y = -half_y; y < half_y; y += res) add_rotated_ray({x + res/2, y + res/2, half_z}, {0, 0, -1}, R);
     }
-    
     return poses;
 }
 
@@ -402,10 +309,7 @@ StepAnalysis GenerateGraspPoses::analyzeLocalCylinder(
     float radius,
     float height)
 {
-    StepAnalysis result;
-    result.valid = false;
-    result.center = center;
-    
+    StepAnalysis result; result.valid = false; result.center = center;
     pcl::PointCloud<pcl::PointXYZ>::Ptr local_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     Eigen::Vector3f u = ray_dir.unitOrthogonal(); 
     Eigen::Vector3f v = ray_dir.cross(u);
@@ -448,125 +352,214 @@ StepAnalysis GenerateGraspPoses::analyzeLocalCylinder(
     return result;
 }
 
-void GenerateGraspPoses::publishGripperModel()
+
+void GenerateGraspPoses::extractBoundingBoxesFromOBJ()
 {
+    RCLCPP_INFO(this->get_logger(), "Carregando modelo 3D (Assimp) de: %s", gripper_mesh_path_.c_str());
     
-    if (!gripper_dense_cloud_ || gripper_dense_cloud_->empty()) {
-        RCLCPP_WARN(this->get_logger(), "Tentou publicar modelo da garra, mas está vazio!");
+    Assimp::Importer importer;
+    
+    const aiScene* scene = importer.ReadFile(gripper_mesh_path_, aiProcess_Triangulate);
+
+    if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+        RCLCPP_ERROR(this->get_logger(), "ERRO CRÍTICO ASSIMP: %s", importer.GetErrorString());
         return;
     }
 
-    sensor_msgs::msg::PointCloud2 msg;
-    pcl::toROSMsg(*gripper_dense_cloud_, msg);
+    gripper_boxes_.clear();
+    gripper_dense_cloud_->clear();
 
     
-    msg.header.frame_id = "world"; 
-    msg.header.stamp = this->now();
+    std::vector<std::tuple<uint8_t, uint8_t, uint8_t>> colors = {
+        {255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 0}, {0, 255, 255}, {255, 0, 255}
+    };
 
-    pub_gripper_model_->publish(msg);
+    for (unsigned int i = 0; i < scene->mNumMeshes; i++)
+    {
+        aiMesh* mesh = scene->mMeshes[i];
+        
+        float min_x = std::numeric_limits<float>::max();
+        float min_y = std::numeric_limits<float>::max();
+        float min_z = std::numeric_limits<float>::max();
+        float max_x = std::numeric_limits<float>::lowest();
+        float max_y = std::numeric_limits<float>::lowest();
+        float max_z = std::numeric_limits<float>::lowest();
+
+        auto color = colors[i % colors.size()];
+        uint8_t r = std::get<0>(color);
+        uint8_t g = std::get<1>(color);
+        uint8_t b = std::get<2>(color);
+
+        for (unsigned int v = 0; v < mesh->mNumVertices; v++) 
+        {
+            aiVector3D p_raw = mesh->mVertices[v];
+            
+           
+            Eigen::Vector3f p_local(
+                p_raw.x * gripper_mesh_scale_,
+                p_raw.y * gripper_mesh_scale_,
+                p_raw.z * gripper_mesh_scale_
+            );
+
+            
+            if (p_local.x() < min_x) min_x = p_local.x();
+            if (p_local.y() < min_y) min_y = p_local.y();
+            if (p_local.z() < min_z) min_z = p_local.z();
+            
+            if (p_local.x() > max_x) max_x = p_local.x();
+            if (p_local.y() > max_y) max_y = p_local.y();
+            if (p_local.z() > max_z) max_z = p_local.z();
+
+            
+            pcl::PointXYZRGB pt_rgb;
+            pt_rgb.x = p_local.x();
+            pt_rgb.y = p_local.y();
+            pt_rgb.z = p_local.z();
+            pt_rgb.r = r; pt_rgb.g = g; pt_rgb.b = b;
+            gripper_dense_cloud_->points.push_back(pt_rgb);
+        }
+
+        
+        LocalBox box;
+        float margin = 0.001f;
+        box.min_pt = Eigen::Vector3f(min_x - margin, min_y - margin, min_z - margin);
+        box.max_pt = Eigen::Vector3f(max_x + margin, max_y + margin, max_z + margin);
+        
+        
+        box.center = (box.min_pt + box.max_pt) / 2.0f;
+        box.dimensions = box.max_pt - box.min_pt;
+
+        gripper_boxes_.push_back(box);
+    }
     
-    // RCLCPP_INFO(this->get_logger(), "Modelo denso da garra publicado em '/debug_gripper_model' (%lu pontos)", gripper_dense_cloud_->size());
+    gripper_dense_cloud_->width = gripper_dense_cloud_->points.size();
+    gripper_dense_cloud_->height = 1;
+    gripper_dense_cloud_->is_dense = true;
+
+    RCLCPP_INFO(this->get_logger(), "Extraídas %lu caixas de colisão de %s", gripper_boxes_.size(), gripper_mesh_path_.c_str());
 }
 
-void GenerateGraspPoses::loadGripperAsOctree()
+void GenerateGraspPoses::publishGripperModel()
 {
-    RCLCPP_INFO(this->get_logger(), "Carregando STL e gerando KDTree de Colisão: %s", gripper_mesh_path_.c_str());
+    if (!gripper_dense_cloud_ || gripper_dense_cloud_->empty()) return;
+    sensor_msgs::msg::PointCloud2 msg;
+    pcl::toROSMsg(*gripper_dense_cloud_, msg);
+    msg.header.frame_id = "world"; 
+    msg.header.stamp = this->now();
+    pub_gripper_model_->publish(msg);
+}
+
+
+void GenerateGraspPoses::publishGripperCollisionBoxes()
+{
+    if (gripper_boxes_.empty()) return;
+
+    visualization_msgs::msg::MarkerArray ma;
+    auto t = this->now();
+
     
-    pcl::PolygonMesh mesh;
-    if (pcl::io::loadPolygonFileSTL(gripper_mesh_path_, mesh) == 0) {
-        RCLCPP_ERROR(this->get_logger(), "ERRO CRÍTICO: STL não encontrado!");
-        return;
-    }
-
-    pcl::PointCloud<pcl::PointXYZ> mesh_verts;
-    pcl::fromPCLPointCloud2(mesh.cloud, mesh_verts);
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr raw_dense_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    
-    float density_dist = 0.0015f; 
-    
-    for (const auto& poly : mesh.polygons) 
-    {
-        if (poly.vertices.size() < 3) continue;
-
-        Eigen::Vector3f v0 = mesh_verts[poly.vertices[0]].getVector3fMap();
-        Eigen::Vector3f v1 = mesh_verts[poly.vertices[1]].getVector3fMap();
-        Eigen::Vector3f v2 = mesh_verts[poly.vertices[2]].getVector3fMap();
-
-        float area = 0.5f * ((v1 - v0).cross(v2 - v0)).norm();
-        int num_points = std::max(1, (int)(area / (density_dist * density_dist)));
-        
-        raw_dense_cloud->points.push_back(pcl::PointXYZ(v0.x(), v0.y(), v0.z()));
-        raw_dense_cloud->points.push_back(pcl::PointXYZ(v1.x(), v1.y(), v1.z()));
-        raw_dense_cloud->points.push_back(pcl::PointXYZ(v2.x(), v2.y(), v2.z()));
-
-        for (int k = 0; k < num_points; ++k) 
-        {
-            float r1 = (float)rand() / RAND_MAX;
-            float r2 = (float)rand() / RAND_MAX;
-            float sq_r1 = std::sqrt(r1);
-            Eigen::Vector3f p = (1 - sq_r1) * v0 + (sq_r1 * (1 - r2)) * v1 + (sq_r1 * r2) * v2;
-            raw_dense_cloud->points.push_back(pcl::PointXYZ(p.x(), p.y(), p.z()));
-        }
-    }
-
-    gripper_dense_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
-    
-    Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-    transform.translation() = Eigen::Vector3f(mesh_offset_x_, mesh_offset_y_, mesh_offset_z_);
-    
+    Eigen::Affine3f visual_tf = Eigen::Affine3f::Identity();
+    visual_tf.translation() = Eigen::Vector3f(mesh_offset_x_, mesh_offset_y_, mesh_offset_z_);
     Eigen::Matrix3f rot;
     rot = Eigen::AngleAxisf(mesh_rot_roll_, Eigen::Vector3f::UnitX())
         * Eigen::AngleAxisf(mesh_rot_pitch_, Eigen::Vector3f::UnitY())
         * Eigen::AngleAxisf(mesh_rot_yaw_, Eigen::Vector3f::UnitZ());
-    transform.linear() = rot;
-    transform.scale(gripper_mesh_scale_);
+    visual_tf.linear() = rot;
+    Eigen::Quaternionf q_rot(rot);
 
-    pcl::transformPointCloud(*raw_dense_cloud, *gripper_dense_cloud_, transform);
-
-    if (!gripper_dense_cloud_->empty())
+    for(size_t i = 0; i < gripper_boxes_.size(); i++)
     {
-        gripper_kdtree_.setInputCloud(gripper_dense_cloud_);
-        RCLCPP_INFO(this->get_logger(), "KDTree da garra construída com %lu pontos.", gripper_dense_cloud_->size());
+        const auto& box = gripper_boxes_[i];
+
+        visualization_msgs::msg::Marker m;
+        m.header.frame_id = "world";
+        m.header.stamp = t;
+        m.ns = "gripper_collision_boxes";
+        m.id = i;
+        m.type = visualization_msgs::msg::Marker::CUBE;
+        m.action = visualization_msgs::msg::Marker::ADD;
+
+        Eigen::Vector3f center_transformed = visual_tf * box.center;
+
+        m.pose.position.x = center_transformed.x();
+        m.pose.position.y = center_transformed.y();
+        m.pose.position.z = center_transformed.z();
+
+        
+        m.pose.orientation.x = q_rot.x();
+        m.pose.orientation.y = q_rot.y();
+        m.pose.orientation.z = q_rot.z();
+        m.pose.orientation.w = q_rot.w();
+
+        m.scale.x = box.dimensions.x();
+        m.scale.y = box.dimensions.y();
+        m.scale.z = box.dimensions.z();
+
+        if (i == 0)      { m.color.r = 1.0; m.color.g = 0.0; m.color.b = 0.0; }
+        else if (i == 1) { m.color.r = 0.0; m.color.g = 1.0; m.color.b = 0.0; }
+        else             { m.color.r = 0.0; m.color.g = 0.0; m.color.b = 1.0; }
+        m.color.a = 0.4; 
+
+        ma.markers.push_back(m);
     }
+    pub_gripper_boxes_->publish(ma);
 }
+
 
 bool GenerateGraspPoses::check_collision(const ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree)
 {
-    
-    if (!gripper_dense_cloud_ || gripper_dense_cloud_->empty()) return true;
-    
-  
+    if (gripper_boxes_.empty()) return true; 
+    if (!env_kdtree.getInputCloud() || env_kdtree.getInputCloud()->empty()) return true;
+
+   
     Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
     Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
     
-    Eigen::Affine3f tf_grasp = Eigen::Translation3f(grasp_pos) * grasp_rot;
+    Eigen::Affine3f tf_world_to_tcp = Eigen::Translation3f(grasp_pos) * grasp_rot;
+    
+    
+    Eigen::Affine3f tf_tcp_to_geometry = Eigen::Affine3f::Identity();
+    
+    Eigen::Matrix3f rot_geom;
+    rot_geom = Eigen::AngleAxisf(mesh_rot_roll_, Eigen::Vector3f::UnitX())
+             * Eigen::AngleAxisf(mesh_rot_pitch_, Eigen::Vector3f::UnitY())
+             * Eigen::AngleAxisf(mesh_rot_yaw_, Eigen::Vector3f::UnitZ());
+    
+    tf_tcp_to_geometry.linear() = rot_geom;
+    tf_tcp_to_geometry.translation() = Eigen::Vector3f(mesh_offset_x_, mesh_offset_y_, mesh_offset_z_);
 
     
-    float collision_threshold = 0.01f; 
-    std::vector<int> pointIdxRadiusSearch(1);
-    std::vector<float> pointRadiusSquaredDistance(1);
+    Eigen::Affine3f tf_world_to_local = (tf_world_to_tcp * tf_tcp_to_geometry).inverse();
+
+    float search_radius = 0.15f; 
+    std::vector<int> pointIdx;
+    std::vector<float> pointSqDist;
+    pcl::PointXYZ searchPoint;
+    searchPoint.x = grasp_pos.x(); searchPoint.y = grasp_pos.y(); searchPoint.z = grasp_pos.z();
 
     
-    for (const auto& pt_local : gripper_dense_cloud_->points)
+    if (env_kdtree.radiusSearch(searchPoint, search_radius, pointIdx, pointSqDist) > 0)
     {
-        
-        Eigen::Vector3f p_world_vec = tf_grasp * Eigen::Vector3f(pt_local.x, pt_local.y, pt_local.z);
-        
-        pcl::PointXYZ p_check;
-        p_check.x = p_world_vec.x();
-        p_check.y = p_world_vec.y();
-        p_check.z = p_world_vec.z();
-
-        
-        if (env_kdtree.radiusSearch(p_check, collision_threshold, pointIdxRadiusSearch, pointRadiusSquaredDistance, 1) > 0)
+        for (int idx : pointIdx)
         {
+            auto pt_world = env_kdtree.getInputCloud()->points[idx];
             
-            return false; 
+           
+            Eigen::Vector3f p_w(pt_world.x, pt_world.y, pt_world.z);
+            Eigen::Vector3f p_local = tf_world_to_local * p_w;
+
+           
+            for (const auto& box : gripper_boxes_)
+            {
+                if (p_local.x() >= box.min_pt.x() && p_local.x() <= box.max_pt.x() &&
+                    p_local.y() >= box.min_pt.y() && p_local.y() <= box.max_pt.y() &&
+                    p_local.z() >= box.min_pt.z() && p_local.z() <= box.max_pt.z())
+                {
+                    return false; 
+                }
+            }
         }
     }
-
-    
     return true; 
 }
 
@@ -618,11 +611,6 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         env_kdtree.setInputCloud(target_environment);
     }
 
-    // RCLCPP_INFO(this->get_logger(), "Fase 1: Avaliando %lu raios...", all_candidates_.size());
-
-    auto start_total = std::chrono::high_resolution_clock::now();
-
-    
     float voxel_size = 0.01f;
     std::unordered_map<long, VoxelBucket> voxel_grid;
     
@@ -648,31 +636,19 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     float voxel_radius = (voxel_size * 1.73205f) / 2.0f;
     float voxel_check_threshold = cylinder_radius_ + voxel_radius; 
-
     
-    struct ThreadTimers {
-        double inliers_ms = 0.0;
-        double analysis_ms = 0.0;
-        double scoring_ms = 0.0;
-    };
-
     tbb::enumerable_thread_specific<std::vector<ScoredGrasp>> local_best_grasps;
     tbb::enumerable_thread_specific<std::vector<geometry_msgs::msg::Pose>> local_hit_candidates;
-    tbb::enumerable_thread_specific<ThreadTimers> local_timers; 
 
-    
     tbb::parallel_for(tbb::blocked_range<size_t>(0, all_candidates_.size()),
         [&](const tbb::blocked_range<size_t>& range)
         {
-            
             auto& my_scored_grasps = local_best_grasps.local();
             auto& my_hit_candidates = local_hit_candidates.local();
-            auto& my_timer = local_timers.local(); 
 
             for (size_t i = range.begin(); i != range.end(); ++i) 
             {
                 const auto& raw_pose = all_candidates_[i];
-                
                 Eigen::Quaternionf q(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
                 Eigen::Vector3f ray_origin(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
                 Eigen::Vector3f ray_dir = q * Eigen::Vector3f::UnitX(); 
@@ -683,21 +659,16 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 pcl::PointCloud<pcl::PointXYZ> current_inliers;
                 pcl::PointCloud<pcl::PointXYZ>::Ptr current_inliers_ptr(new pcl::PointCloud<pcl::PointXYZ>);
 
-                
-                auto t0 = std::chrono::high_resolution_clock::now();
-
                 for (const auto& [key, bucket] : voxel_grid) 
                 {
                     Eigen::Vector3f diff = bucket.center - ray_origin;
                     float dist_sq_to_ray = (diff.cross(ray_dir)).squaredNorm();
-
                     if (dist_sq_to_ray > (voxel_check_threshold * voxel_check_threshold)) continue;
 
                     for (const auto& pt : bucket.points) 
                     {
                         Eigen::Vector3f p(pt.x, pt.y, pt.z);
                         float t = (p - ray_origin).dot(ray_dir);
-                        
                         if ((p - (ray_origin + t*ray_dir)).norm() < cylinder_radius_) 
                         {
                             if (t < t_min) t_min = t;
@@ -709,34 +680,17 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     }
                 }
                 
-                
-                auto t1 = std::chrono::high_resolution_clock::now();
-                my_timer.inliers_ms += std::chrono::duration<double, std::milli>(t1 - t0).count();
-
                 if (!hit || (t_max - t_min) < 0.005) continue;
-                
                 my_hit_candidates.push_back(raw_pose);
 
                 std::vector<StepAnalysis> steps;
-
-                
-                auto t2 = std::chrono::high_resolution_clock::now();
-
                 for (float t = t_min; t <= t_max; t += analysis_step_size_) 
                 {
                     Eigen::Vector3f center = ray_origin + ray_dir * t;
                     StepAnalysis res = analyzeLocalCylinder(current_inliers_ptr, center, ray_dir, cylinder_radius_, cylinder_height_);
                     if (res.valid) steps.push_back(res);
                 }
-                
-                
-                auto t3 = std::chrono::high_resolution_clock::now();
-                my_timer.analysis_ms += std::chrono::duration<double, std::milli>(t3 - t2).count();
-
                 if (steps.empty()) continue;
-
-                
-                auto t4 = std::chrono::high_resolution_clock::now();
 
                 StepAnalysis& entry = steps.front();
                 StepAnalysis& exit = steps.back();
@@ -746,9 +700,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
                 float current_offset = finger_offset_;
                 float total_width_needed = real_thickness + (2.0f * current_offset);
-
-                if (total_width_needed > max_gripper_width_) 
-                {
+                if (total_width_needed > max_gripper_width_) {
                     current_offset = (max_gripper_width_ - real_thickness) / 2.0f;
                     if (current_offset < 0.01f) current_offset = 0.01f;
                 }
@@ -758,14 +710,12 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 Eigen::Vector3f p_f1 = ray_origin + ray_dir * (t_min - current_offset);
                 Eigen::Vector3f p_f2 = ray_origin + ray_dir * (t_max + current_offset);
                 Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
-
                 Eigen::Quaternionf best_orientation = findBestOrientation(p_f1, p_f2);
 
                 float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
                 float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
                 float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
                 float score_plan_exit  = std::max(0.0f, 1.0f - (exit.curvature * 20.0f));
-                
                 float orient_factor_entry = (score_plan_entry > 0.3) ? 1.0f : 0.5f;
                 float orient_factor_exit = (score_plan_exit > 0.3) ? 1.0f : 0.5f;
                 float score_sym_entry = entry.symmetry_score;
@@ -797,33 +747,16 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 sg.debug_inliers = current_inliers;
                 
                 my_scored_grasps.push_back(sg);
-
-                
-                auto t5 = std::chrono::high_resolution_clock::now();
-                my_timer.scoring_ms += std::chrono::duration<double, std::milli>(t5 - t4).count();
             }
         }
     );
 
-    
     std::vector<ScoredGrasp> initial_candidates; 
     for (const auto& local_vec : local_best_grasps) {
         initial_candidates.insert(initial_candidates.end(), local_vec.begin(), local_vec.end());
     }
-    
     for (const auto& local_hits : local_hit_candidates) {
         hit_candidates_.insert(hit_candidates_.end(), local_hits.begin(), local_hits.end());
-    }
-
-    
-    double max_inliers_ms = 0.0;
-    double max_analysis_ms = 0.0;
-    double max_scoring_ms = 0.0;
-
-    for (const auto& t : local_timers) {
-        if (t.inliers_ms > max_inliers_ms) max_inliers_ms = t.inliers_ms;
-        if (t.analysis_ms > max_analysis_ms) max_analysis_ms = t.analysis_ms;
-        if (t.scoring_ms > max_scoring_ms) max_scoring_ms = t.scoring_ms;
     }
 
     if (initial_candidates.empty()) 
@@ -832,11 +765,12 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         return geometry_msgs::msg::PoseArray();
     }
 
-    
     std::sort(initial_candidates.begin(), initial_candidates.end(), 
         [](const ScoredGrasp& a, const ScoredGrasp& b) { return a.total_score > b.total_score; });
 
     best_grasps_.clear();
+    
+    
     for (const auto& sg : initial_candidates) 
     {
         if (best_grasps_.size() >= (size_t)num_best_grasps_) break;
@@ -845,42 +779,24 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             best_grasps_.push_back(sg);
         }
     }
-    auto end_total = std::chrono::high_resolution_clock::now();
-
     has_best_ = !best_grasps_.empty();
-    // RCLCPP_INFO(this->get_logger(), "Encontrados %lu grasps.", best_grasps_.size());
     
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_total - start_total).count();
-
-    // RCLCPP_INFO(this->get_logger(), "Tempo Total EvaluateGrasps: %ld ms", duration);
-    
-    
-    // RCLCPP_INFO(this->get_logger(), ">> Breakdown (Max Thread): Inliers: %.2f ms | Analysis: %.2f ms | Scoring: %.2f ms", 
-    //     max_inliers_ms, max_analysis_ms, max_scoring_ms);
-        
-    struct rusage usage;
-    getrusage(RUSAGE_SELF, &usage);
-    long max_mem_mb = usage.ru_maxrss / 1024; 
-    // RCLCPP_INFO(this->get_logger(), "Memória Máxima Usada (RSS): %ld MB", max_mem_mb);
-
     geometry_msgs::msg::PoseArray pose_array;
-
     pose_array.header.frame_id = "world"; 
     pose_array.header.stamp = this->now(); 
 
-    
-    for(int i = 0; i < num_best_grasps_; i++)
+    for(int i = 0; i < num_best_grasps_ && i < (int)best_grasps_.size(); i++)
     {
-    
         pose_array.poses.push_back(best_grasps_[i].pose_center);
     }
-
     return pose_array;
 }
 
 void GenerateGraspPoses::timerCallback() 
 {
     publishGripperModel();
+    publishGripperCollisionBoxes();
+
     auto t = this->now();
     sensor_msgs::msg::PointCloud2 m; 
     pcl::toROSMsg(*stored_cloud_, m); 
@@ -919,57 +835,102 @@ void GenerateGraspPoses::publishBest()
     visualization_msgs::msg::MarkerArray ma; 
     geometry_msgs::msg::PoseArray pose_array_msg;
     auto t = this->now();
+    
     pose_array_msg.header.frame_id = "world";
     pose_array_msg.header.stamp = t;
 
+    
+    Eigen::Affine3f tf_geometry_to_tcp = Eigen::Affine3f::Identity();
+    
+    Eigen::Matrix3f rot_geom;
+    rot_geom = Eigen::AngleAxisf(mesh_rot_roll_, Eigen::Vector3f::UnitX())
+             * Eigen::AngleAxisf(mesh_rot_pitch_, Eigen::Vector3f::UnitY())
+             * Eigen::AngleAxisf(mesh_rot_yaw_, Eigen::Vector3f::UnitZ());
+    
+    tf_geometry_to_tcp.linear() = rot_geom;
+    tf_geometry_to_tcp.translation() = Eigen::Vector3f(mesh_offset_x_, mesh_offset_y_, mesh_offset_z_);
 
+    
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-    
-    
     bool has_dense_model = (gripper_dense_cloud_ && !gripper_dense_cloud_->empty());
 
+    
     for(size_t i = 0; i < best_grasps_.size(); i++)
     {
         const auto& grasp = best_grasps_[i];
         pose_array_msg.poses.push_back(grasp.pose_center);
+        
+        
+        Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
+        Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
+        Eigen::Affine3f tf_tcp_to_world = Eigen::Translation3f(grasp_pos) * grasp_rot;
+
+
+        Eigen::Affine3f tf_final = tf_tcp_to_world * tf_geometry_to_tcp;
+        
+        
+        Eigen::Quaternionf q_final(tf_final.rotation());
 
         
-        uint8_t r=0, g=0, b=0;
-        if (i == 0) { r=0; g=255; b=0; }       
-        else        { r=100; g=100; b=255; }   
+        for(size_t b = 0; b < gripper_boxes_.size(); b++)
+        {
+            const auto& box = gripper_boxes_[b];
+            
+            visualization_msgs::msg::Marker mk;
+            mk.header.frame_id = "world";
+            mk.header.stamp = t;
+            
+            mk.ns = "debug_boxes_grasp_" + std::to_string(i); 
+            mk.id = b;
+            mk.type = visualization_msgs::msg::Marker::CUBE;
+            mk.action = visualization_msgs::msg::Marker::ADD;
+
+            
+            Eigen::Vector3f center_world = tf_final * box.center;
+            
+            mk.pose.position.x = center_world.x();
+            mk.pose.position.y = center_world.y();
+            mk.pose.position.z = center_world.z();
+
+            
+            mk.pose.orientation.x = q_final.x();
+            mk.pose.orientation.y = q_final.y();
+            mk.pose.orientation.z = q_final.z();
+            mk.pose.orientation.w = q_final.w();
+
+            
+            mk.scale.x = box.dimensions.x();
+            mk.scale.y = box.dimensions.y();
+            mk.scale.z = box.dimensions.z();
+
+            
+            if (i == 0) { mk.color.r = 1.0; mk.color.g = 0.0; mk.color.b = 0.0; }
+            else        { mk.color.r = 0.0; mk.color.g = 0.0; mk.color.b = 1.0; }
+            mk.color.a = 0.3; 
+
+            ma.markers.push_back(mk);
+        }
 
         
         if (has_dense_model)
         {
-            
-            Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
-            Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
-            Eigen::Affine3f tf_grasp = Eigen::Translation3f(grasp_pos) * grasp_rot;
-
-            
             for (const auto& pt_local : gripper_dense_cloud_->points)
             {
                 
-                Eigen::Vector3f p_world = tf_grasp * Eigen::Vector3f(pt_local.x, pt_local.y, pt_local.z);
+                Eigen::Vector3f p_world = tf_final * Eigen::Vector3f(pt_local.x, pt_local.y, pt_local.z);
                 
-                pcl::PointXYZRGB p_colored;
+                pcl::PointXYZRGB p_colored = pt_local; 
                 p_colored.x = p_world.x();
                 p_colored.y = p_world.y();
                 p_colored.z = p_world.z();
-                p_colored.r = r;
-                p_colored.g = g;
-                p_colored.b = b;
-                
                 accumulated_cloud->points.push_back(p_colored);
             }
         }
-
-        
-        int base_id = i * 30; 
         
         
+        int base_id = i * 1000; 
         visualization_msgs::msg::Marker txt; 
-        txt.header.frame_id="world"; txt.header.stamp=t; txt.ns="txt"; txt.id=base_id+3; txt.type=9; txt.action=0; 
+        txt.header.frame_id="world"; txt.header.stamp=t; txt.ns="txt"; txt.id=base_id; txt.type=9; txt.action=0; 
         txt.pose=grasp.pose_center; txt.pose.position.z+=0.05; txt.scale.z=0.03; 
         txt.color.r=1; txt.color.g=1; txt.color.b=1; txt.color.a=1.0;
         char buf[128]; 
@@ -980,7 +941,8 @@ void GenerateGraspPoses::publishBest()
     }
     
     
-    if (!accumulated_cloud->empty()) {
+    if (!accumulated_cloud->empty()) 
+    {
         sensor_msgs::msg::PointCloud2 cloud_msg;
         pcl::toROSMsg(*accumulated_cloud, cloud_msg);
         cloud_msg.header.frame_id = "world";
@@ -989,6 +951,7 @@ void GenerateGraspPoses::publishBest()
     }
 
     pub_markers_->publish(ma);
+    
     pub_poses_->publish(pose_array_msg);
 }
 

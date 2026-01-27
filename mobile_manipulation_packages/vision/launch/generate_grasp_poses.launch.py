@@ -11,9 +11,9 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     
     parameters = [{
-        "use_pcd_file": False,
-        "pcd_path": "/home/momesso/pcds/toma_23.pcd",
-        "gripper_mesh_path": "/home/momesso/hand_and_finger_2.stl",
+        "use_pcd_file": True,
+        "pcd_path": "/home/momesso/pcds/toma_24.pcd",
+        "gripper_mesh_path": "/home/momesso/hand_and_fingers.obj",
         "gripper_mesh_scale": 1.0,
         "grid_res": 0.0075,         
         "cloud_voxel_size": 0.001,
@@ -23,8 +23,8 @@ def generate_launch_description():
         "mesh_offset_z": 0.0,
         
         "mesh_rot_roll": 0.0,
-        "mesh_rot_pitch": -1.57,
-        "mesh_rot_yaw": 0.0, 
+        "mesh_rot_pitch": 0.0,
+        "mesh_rot_yaw": 1.57, 
         
         "cylinder_radius": 0.005,  
         "cylinder_height": 0.005,
@@ -42,7 +42,7 @@ def generate_launch_description():
         "gripper_collision_threshold": 5,
         "gripper_structure_thickness": 0.005,
         "num_collision_checks": 1,
-        "num_random_orientations": 30
+        "num_random_orientations": 20
     }]
 
   
