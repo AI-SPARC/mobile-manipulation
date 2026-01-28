@@ -1654,7 +1654,7 @@ private:
                         std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> environment = 
                         this->object_mapping_node_->getObjectAndEnvironment(cached_object_.id);
 
-                        geometry_msgs::msg::PoseArray tcp_poses = this->generate_grasp_poses_node_->processCloud(std::get<0>(environment), std::get<1>(environment));
+                        geometry_msgs::msg::PoseArray tcp_poses = this->generate_grasp_poses_node_->processCloud(std::get<0>(environment), std::get<0>(environment));
 
                         std::vector<geometry_msgs::msg::Pose> wrist_poses; 
 

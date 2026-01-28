@@ -93,7 +93,7 @@ private:
 
     // --- ASSIMP & COLISÃO ---
     void extractBoundingBoxesFromOBJ(); // Substitui a função antiga de STL
-    bool check_collision(const ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree);
+    bool check_collision(const ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug);
     
     // Visualização
     void publishGripperModel();
@@ -128,6 +128,8 @@ private:
     float rotation_step_deg_;
     int total_orientations_;
 
+    pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; // Nuvem leve
+    pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;
     // Publishers
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;
@@ -135,7 +137,8 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_poses_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_inliers_;
-    
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_collision_;
+
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_gripper_model_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_gripper_boxes_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;
