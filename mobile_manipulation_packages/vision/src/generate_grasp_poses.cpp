@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <sys/resource.h>
 #include <limits> 
-
+#include <x86intrin.h>
 // TBB
 #include <tbb/parallel_for.h>
 #include <tbb/blocked_range.h>
@@ -161,14 +161,14 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
     // Verificação básica de segurança
     if (!target || target->empty()) return geometry_msgs::msg::PoseArray();
 
-    // 1. Filtro de Ruído no Objeto Alvo (Target)
-    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-    sor.setInputCloud(target);
-    sor.setMeanK(100); 
-    sor.setStddevMulThresh(1.5); 
-    sor.filter(*target);
+    // // 1. Filtro de Ruído no Objeto Alvo (Target)
+    // pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+    // sor.setInputCloud(target);
+    // sor.setMeanK(120); 
+    // sor.setStddevMulThresh(1.5); 
+    // sor.filter(*target);
 
-    // 2. Rotação Aleatória (Apenas para debug com arquivo PCD)
+    // // 2. Rotação Aleatória (Apenas para debug com arquivo PCD)
     if (use_pcd_file == true)
     {
         std::random_device rd;
@@ -699,12 +699,24 @@ Eigen::Quaternionf GenerateGraspPoses::findBestOrientation(const Eigen::Vector3f
 
 geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
-    
+    // Helper para formatar os clocks com pontos (ex: 56.321.213)
+    auto format_clocks = [](uint64_t n) -> std::string {
+        std::string s = std::to_string(n);
+        int insertPosition = static_cast<int>(s.length()) - 3;
+        while (insertPosition > 0) {
+            s.insert(insertPosition, ".");
+            insertPosition -= 3;
+        }
+        return s;
+    };
+
+    uint64_t c_func_start = __rdtsc();
     auto t_func_start = std::chrono::high_resolution_clock::now();
 
     hit_candidates_.clear(); 
 
-    
+    // --- KDTREE ---
+    uint64_t c_kdtree_start = __rdtsc();
     auto t_kdtree_start = std::chrono::high_resolution_clock::now();
     
     pcl::KdTreeFLANN<pcl::PointXYZ> env_kdtree;
@@ -715,8 +727,10 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     }
     
     auto t_kdtree_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_kdtree_end = __rdtsc();
 
-    
+    // --- VOXEL ---
+    uint64_t c_voxel_start = __rdtsc();
     auto t_voxel_start = std::chrono::high_resolution_clock::now();
 
     float voxel_size = 0.0075f;
@@ -743,188 +757,162 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     }
 
     auto t_voxel_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_voxel_end = __rdtsc();
 
     float voxel_radius = (voxel_size * 1.73205f) / 2.0f;
     float voxel_check_threshold = cylinder_radius_ + voxel_radius; 
     float voxel_check_threshold_squared = voxel_check_threshold * voxel_check_threshold;
     float cylinder_radius_sq = cylinder_radius_ * cylinder_radius_;
-    struct ThreadTimers {
-        double inliers_ms = 0.0;
-        double analysis_ms = 0.0;
-        double scoring_ms = 0.0;
-        double total_thread_ms = 0.0; 
-    };
-    std::cout << all_candidates_.size() << std::endl;
-    tbb::enumerable_thread_specific<std::vector<ScoredGrasp>> local_best_grasps;
-    tbb::enumerable_thread_specific<std::vector<geometry_msgs::msg::Pose>> local_hit_candidates;
-    tbb::enumerable_thread_specific<ThreadTimers> local_timers;
 
     
-    auto t_parallel_wall_start = std::chrono::high_resolution_clock::now();
+    double acc_inliers_ms = 0.0;   uint64_t acc_inliers_clocks = 0;
+    double acc_analysis_ms = 0.0;  uint64_t acc_analysis_clocks = 0;
+    double acc_scoring_ms = 0.0;   uint64_t acc_scoring_clocks = 0;
 
-    tbb::parallel_for(tbb::blocked_range<size_t>(0, all_candidates_.size()),
-        [&](const tbb::blocked_range<size_t>& range)
+    std::vector<ScoredGrasp> initial_candidates;
+
+    std::cout << "Candidates to check: " << all_candidates_.size() << std::endl;
+
+    
+    uint64_t c_loop_start = __rdtsc();
+    auto t_loop_start = std::chrono::high_resolution_clock::now();
+
+    for (size_t i = 0; i < all_candidates_.size(); ++i) 
+    {
+        const auto& raw_pose = all_candidates_[i]; 
+        Eigen::Quaternionf q(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
+        Eigen::Vector3f ray_origin(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
+        Eigen::Vector3f ray_dir = q * Eigen::Vector3f::UnitX(); 
+
+        
+        
+        float t_min = 1e6, t_max = -1e6;
+        bool hit = false;
+        
+        pcl::PointCloud<pcl::PointXYZ>::Ptr current_inliers_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+
+       
+        uint64_t c0 = __rdtsc();
+        auto t0 = std::chrono::high_resolution_clock::now();
+        
+        for (const auto& [key, bucket] : voxel_grid) 
         {
-            auto& my_scored_grasps = local_best_grasps.local();
-            auto& my_hit_candidates = local_hit_candidates.local();
-            auto& my_timer = local_timers.local();
+            Eigen::Vector3f diff = bucket.center - ray_origin;
+            float dist_sq_to_ray = (diff.cross(ray_dir)).squaredNorm();
+            if (dist_sq_to_ray > voxel_check_threshold_squared) continue;
 
-            
-            auto t_thread_block_start = std::chrono::high_resolution_clock::now();
-
-            for (size_t i = range.begin(); i != range.end(); ++i) 
+            for (const auto& pt : bucket.points) 
             {
-                const auto& raw_pose = all_candidates_[i];
-                Eigen::Quaternionf q(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
-                Eigen::Vector3f ray_origin(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
-                Eigen::Vector3f ray_dir = q * Eigen::Vector3f::UnitX(); 
+                Eigen::Vector3f p(pt.x, pt.y, pt.z);
+                float t = (p - ray_origin).dot(ray_dir);
+                Eigen::Vector3f dist_vec = p - (ray_origin + t * ray_dir);
 
-                float t_min = 1e6, t_max = -1e6;
-                bool hit = false;
-                
-                pcl::PointCloud<pcl::PointXYZ>::Ptr current_inliers_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-
-               
-                auto t0 = std::chrono::high_resolution_clock::now();
-                
-                for (const auto& [key, bucket] : voxel_grid) 
+                if (dist_vec.squaredNorm() < cylinder_radius_sq) 
                 {
-                    Eigen::Vector3f diff = bucket.center - ray_origin;
-                    float dist_sq_to_ray = (diff.cross(ray_dir)).squaredNorm();
-                    if (dist_sq_to_ray > voxel_check_threshold_squared) continue;
-
-                    for (const auto& pt : bucket.points) 
-                    {
-                        Eigen::Vector3f p(pt.x, pt.y, pt.z);
-                        float t = (p - ray_origin).dot(ray_dir);
-
-                        // 2. Calcule o vetor perpendicular (distância do ponto à linha do raio)
-                        Eigen::Vector3f dist_vec = p - (ray_origin + t * ray_dir);
-
-                        // 3. OTIMIZAÇÃO: Use squaredNorm() e compare com o raio ao quadrado
-                        // Isso remove a raiz quadrada implicita no .norm() antigo
-                        if (dist_vec.squaredNorm() < cylinder_radius_sq) 
-                        {
-                            if (t < t_min) t_min = t;
-                            if (t > t_max) t_max = t;
-                            hit = true;
-                            current_inliers_ptr->points.push_back(pt);
-                        }
-                    }
+                    if (t < t_min) t_min = t;
+                    if (t > t_max) t_max = t;
+                    hit = true;
+                    current_inliers_ptr->points.push_back(pt);
                 }
-                
-                auto t1 = std::chrono::high_resolution_clock::now();
-                my_timer.inliers_ms += std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-                if (!hit || (t_max - t_min) < 0.005) continue;
-                my_hit_candidates.push_back(raw_pose);
-
-                
-                auto t2 = std::chrono::high_resolution_clock::now();
-
-                std::vector<StepAnalysis> steps;
-                for (float t = t_min; t <= t_max; t += analysis_step_size_) 
-                {
-                    Eigen::Vector3f center = ray_origin + ray_dir * t;
-                    StepAnalysis res = analyzeLocalCylinder(current_inliers_ptr, center, ray_dir, cylinder_radius_, cylinder_height_);
-                    if (res.valid) steps.push_back(res);
-                }
-                
-                auto t3 = std::chrono::high_resolution_clock::now();
-                my_timer.analysis_ms += std::chrono::duration<double, std::milli>(t3 - t2).count();
-
-                if (steps.empty()) continue;
-
-               
-                auto t4 = std::chrono::high_resolution_clock::now();
-
-                StepAnalysis& entry = steps.front();
-                StepAnalysis& exit = steps.back();
-
-                float real_thickness = t_max - t_min;
-                if (real_thickness > max_gripper_width_) continue; 
-
-                float current_offset = finger_offset_;
-                float total_width_needed = real_thickness + (2.0f * current_offset);
-                if (total_width_needed > max_gripper_width_) {
-                    current_offset = (max_gripper_width_ - real_thickness) / 2.0f;
-                    if (current_offset < 0.01f) current_offset = 0.005f;
-                }
-                total_width_needed = real_thickness + (2.0f * current_offset);
-                if(total_width_needed > max_gripper_width_) continue;
-
-                Eigen::Vector3f p_f1 = ray_origin + ray_dir * (t_min - current_offset);
-                Eigen::Vector3f p_f2 = ray_origin + ray_dir * (t_max + current_offset);
-                Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
-                Eigen::Quaternionf best_orientation = findBestOrientation(p_f1, p_f2);
-
-                float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
-                float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
-                float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
-                float score_plan_exit  = std::max(0.0f, 1.0f - (exit.curvature * 20.0f));
-                float orient_factor_entry = (score_plan_entry > 0.3) ? 1.0f : 0.5f;
-                float orient_factor_exit = (score_plan_exit > 0.3) ? 1.0f : 0.5f;
-                float score_sym_entry = entry.symmetry_score;
-                float score_sym_exit  = exit.symmetry_score;
-
-                double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + score_sym_entry * weight_symmetry_ + score_plan_entry * weight_planarity_) * 0.5 + 
-                            (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ + score_plan_exit * weight_planarity_) * 0.5;
-
-                if (real_thickness < 0.015) total *= 0.1;
-
-                ScoredGrasp sg;
-                sg.pose_center.position.x = center_grasp.x(); sg.pose_center.position.y = center_grasp.y(); sg.pose_center.position.z = center_grasp.z();
-                sg.pose_center.orientation.x = best_orientation.x(); sg.pose_center.orientation.y = best_orientation.y(); sg.pose_center.orientation.z = best_orientation.z(); sg.pose_center.orientation.w = best_orientation.w();
-                sg.pose_finger1 = sg.pose_center;
-                sg.pose_finger1.position.x = p_f1.x(); sg.pose_finger1.position.y = p_f1.y(); sg.pose_finger1.position.z = p_f1.z();
-                sg.pose_finger2 = sg.pose_center;
-                sg.pose_finger2.position.x = p_f2.x(); sg.pose_finger2.position.y = p_f2.y(); sg.pose_finger2.position.z = p_f2.z();
-                sg.raw_ray_dir = ray_dir;
-                sg.raw_p_f1 = p_f1;
-                sg.raw_p_f2 = p_f2;
-                sg.total_score = total;
-                
-                
-                my_scored_grasps.push_back(sg);
-
-                auto t5 = std::chrono::high_resolution_clock::now();
-                my_timer.scoring_ms += std::chrono::duration<double, std::milli>(t5 - t4).count();
             }
-
-            auto t_thread_block_end = std::chrono::high_resolution_clock::now();
-            my_timer.total_thread_ms += std::chrono::duration<double, std::milli>(t_thread_block_end - t_thread_block_start).count();
         }
-    );
+        
+        auto t1 = std::chrono::high_resolution_clock::now();
+        uint64_t c1 = __rdtsc();
+        acc_inliers_ms += std::chrono::duration<double, std::milli>(t1 - t0).count();
+        acc_inliers_clocks += (c1 - c0);
 
-    auto t_parallel_wall_end = std::chrono::high_resolution_clock::now();
+        if (!hit || (t_max - t_min) < 0.005) continue;
+        
+        
+        hit_candidates_.push_back(raw_pose);
 
-   
-    auto t_merge_start = std::chrono::high_resolution_clock::now();
+        
+        uint64_t c2 = __rdtsc();
+        auto t2 = std::chrono::high_resolution_clock::now();
 
-    std::vector<ScoredGrasp> initial_candidates; 
-    for (const auto& local_vec : local_best_grasps) {
-        initial_candidates.insert(initial_candidates.end(), local_vec.begin(), local_vec.end());
+        std::vector<StepAnalysis> steps;
+        steps.reserve(2); 
+
+       
+        Eigen::Vector3f center_entry = ray_origin + ray_dir * t_min;
+        StepAnalysis res_entry = analyzeLocalCylinder(current_inliers_ptr, center_entry, ray_dir, cylinder_radius_, cylinder_height_);
+        if (res_entry.valid) steps.push_back(res_entry);
+
+        
+        if ((t_max - t_min) > 0.001f) { 
+            Eigen::Vector3f center_exit = ray_origin + ray_dir * t_max;
+            StepAnalysis res_exit = analyzeLocalCylinder(current_inliers_ptr, center_exit, ray_dir, cylinder_radius_, cylinder_height_);
+            if (res_exit.valid) steps.push_back(res_exit);
+        }
+        
+        auto t3 = std::chrono::high_resolution_clock::now();
+        uint64_t c3 = __rdtsc();
+        acc_analysis_ms += std::chrono::duration<double, std::milli>(t3 - t2).count();
+        acc_analysis_clocks += (c3 - c2);
+
+        if (steps.empty()) continue;
+
+        // --- SCORING ---
+        uint64_t c4 = __rdtsc();
+        auto t4 = std::chrono::high_resolution_clock::now();
+
+        StepAnalysis& entry = steps.front();
+        StepAnalysis& exit = steps.back();
+
+        float real_thickness = t_max - t_min;
+        if (real_thickness > max_gripper_width_) continue; 
+
+        float current_offset = finger_offset_;
+        float total_width_needed = real_thickness + (2.0f * current_offset);
+        if (total_width_needed > max_gripper_width_) {
+            current_offset = (max_gripper_width_ - real_thickness) / 2.0f;
+            if (current_offset < 0.01f) current_offset = 0.005f;
+        }
+        total_width_needed = real_thickness + (2.0f * current_offset);
+        if(total_width_needed > max_gripper_width_) continue;
+
+        Eigen::Vector3f p_f1 = ray_origin + ray_dir * (t_min - current_offset);
+        Eigen::Vector3f p_f2 = ray_origin + ray_dir * (t_max + current_offset);
+        Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
+        Eigen::Quaternionf best_orientation = findBestOrientation(p_f1, p_f2);
+
+        float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
+        float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
+        float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
+        float score_plan_exit  = std::max(0.0f, 1.0f - (exit.curvature * 20.0f));
+        float orient_factor_entry = (score_plan_entry > 0.3) ? 1.0f : 0.5f;
+        float orient_factor_exit = (score_plan_exit > 0.3) ? 1.0f : 0.5f;
+        float score_sym_entry = entry.symmetry_score;
+        float score_sym_exit  = exit.symmetry_score;
+
+        double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + score_sym_entry * weight_symmetry_ + score_plan_entry * weight_planarity_) * 0.5 + 
+                    (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ + score_plan_exit * weight_planarity_) * 0.5;
+
+        if (real_thickness < 0.015) total *= 0.1;
+
+        ScoredGrasp sg;
+        sg.pose_center.position.x = center_grasp.x(); sg.pose_center.position.y = center_grasp.y(); sg.pose_center.position.z = center_grasp.z();
+        sg.pose_center.orientation.x = best_orientation.x(); sg.pose_center.orientation.y = best_orientation.y(); sg.pose_center.orientation.z = best_orientation.z(); sg.pose_center.orientation.w = best_orientation.w();
+        sg.pose_finger1 = sg.pose_center;
+        sg.pose_finger1.position.x = p_f1.x(); sg.pose_finger1.position.y = p_f1.y(); sg.pose_finger1.position.z = p_f1.z();
+        sg.pose_finger2 = sg.pose_center;
+        sg.pose_finger2.position.x = p_f2.x(); sg.pose_finger2.position.y = p_f2.y(); sg.pose_finger2.position.z = p_f2.z();
+        sg.raw_ray_dir = ray_dir;
+        sg.raw_p_f1 = p_f1;
+        sg.raw_p_f2 = p_f2;
+        sg.total_score = total;
+        
+        initial_candidates.push_back(sg);
+
+        auto t5 = std::chrono::high_resolution_clock::now();
+        uint64_t c5 = __rdtsc();
+        acc_scoring_ms += std::chrono::duration<double, std::milli>(t5 - t4).count();
+        acc_scoring_clocks += (c5 - c4);
     }
-    for (const auto& local_hits : local_hit_candidates) {
-        hit_candidates_.insert(hit_candidates_.end(), local_hits.begin(), local_hits.end());
-    }
 
-    
-    double max_thread_inliers = 0.0;
-    double max_thread_analysis = 0.0;
-    double max_thread_scoring = 0.0;
-    double max_thread_total = 0.0;
-    int active_threads = 0;
-
-    for(const auto& t : local_timers) {
-        if (t.inliers_ms > max_thread_inliers) max_thread_inliers = t.inliers_ms;
-        if (t.analysis_ms > max_thread_analysis) max_thread_analysis = t.analysis_ms;
-        if (t.scoring_ms > max_thread_scoring) max_thread_scoring = t.scoring_ms;
-        if (t.total_thread_ms > max_thread_total) max_thread_total = t.total_thread_ms;
-        if (t.total_thread_ms > 0.0) active_threads++;
-    }
-
-    auto t_merge_end = std::chrono::high_resolution_clock::now();
+    auto t_loop_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_loop_end = __rdtsc();
 
     if (initial_candidates.empty()) 
     {
@@ -932,47 +920,43 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         return geometry_msgs::msg::PoseArray();
     }
 
-    
+    // --- SORT ---
+    uint64_t c_sort_start = __rdtsc();
     auto t_sort_start = std::chrono::high_resolution_clock::now();
     
     std::sort(initial_candidates.begin(), initial_candidates.end(), 
         [](const ScoredGrasp& a, const ScoredGrasp& b) { return a.total_score > b.total_score; });
         
     auto t_sort_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_sort_end = __rdtsc();
 
 
-    // 2. VERIFICAÇÃO DE COLISÃO "LAZY" (Sequencial com Early Exit)
+    // 2. VERIFICAÇÃO DE COLISÃO "LAZY"
+    uint64_t c_collision_start = __rdtsc();
     auto t_collision_start = std::chrono::high_resolution_clock::now();
 
     best_grasps_.clear();
-    best_grasps_.reserve(num_best_grasps_); // Alocação prévia para performance
+    best_grasps_.reserve(num_best_grasps_); 
     
-    int checks_count = 0; // Contador simples (não precisa ser atomic pois é sequencial)
+    int checks_count = 0; 
 
-    // Itera sobre os candidatos já ordenados (do melhor score para o pior)
     for (const auto& candidate : initial_candidates)
     {
-        // Se já encontramos a quantidade desejada de grasps válidos, PARE.
         if (best_grasps_.size() >= (size_t)num_best_grasps_) {
             break;
         }
 
         checks_count++;
-
-        // Verifica colisão
         if (check_collision(candidate, collision_kdtree_, false))
         {
-            // Se válido, adiciona. Como a lista original já estava ordenada,
-            // best_grasps_ será preenchido naturalmente em ordem decrescente.
             best_grasps_.push_back(candidate);
         }
     }
-
-    // Nota: Não precisamos mais do segundo std::sort aqui, pois inserimos em ordem.
     
     has_best_ = !best_grasps_.empty();
     
     auto t_collision_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_collision_end = __rdtsc();
     
     // 3. CONSTRUÇÃO DO RESULTADO
     geometry_msgs::msg::PoseArray pose_array;
@@ -985,35 +969,52 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     }
 
     auto t_func_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_func_end = __rdtsc();
 
     // 4. BENCHMARK E LOGS
     double d_func = std::chrono::duration<double, std::milli>(t_func_end - t_func_start).count();
     double d_kdtree = std::chrono::duration<double, std::milli>(t_kdtree_end - t_kdtree_start).count();
-    // d_voxel (se ainda existir no seu código anterior) ou 0.0 se tiver removido
     double d_voxel = std::chrono::duration<double, std::milli>(t_voxel_end - t_voxel_start).count(); 
-    double d_parallel_wall = std::chrono::duration<double, std::milli>(t_parallel_wall_end - t_parallel_wall_start).count();
-    double d_merge = std::chrono::duration<double, std::milli>(t_merge_end - t_merge_start).count();
+    double d_loop = std::chrono::duration<double, std::milli>(t_loop_end - t_loop_start).count();
     double d_sort = std::chrono::duration<double, std::milli>(t_sort_end - t_sort_start).count();
     double d_collision = std::chrono::duration<double, std::milli>(t_collision_end - t_collision_start).count();
 
-    // Denominadores seguros
-    double total_safe = (d_func > 1e-9) ? d_func : 1.0;
-    double parallel_safe = (d_parallel_wall > 1e-9) ? d_parallel_wall : 1.0;
+    // Calculo de Clocks
+    uint64_t clk_func = c_func_end - c_func_start;
+    uint64_t clk_kdtree = c_kdtree_end - c_kdtree_start;
+    uint64_t clk_voxel = c_voxel_end - c_voxel_start;
+    uint64_t clk_loop = c_loop_end - c_loop_start;
+    uint64_t clk_sort = c_sort_end - c_sort_start;
+    uint64_t clk_collision = c_collision_end - c_collision_start;
 
-    RCLCPP_INFO(this->get_logger(), "================ BENCHMARK DE GRASP ===============");
-    RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.2f ms (100.0%%)", d_func);
+    double total_safe = (d_func > 1e-9) ? d_func : 1.0;
+
+    RCLCPP_INFO(this->get_logger(), "================ BENCHMARK DE GRASP (SINGLE THREAD) ===============");
+    RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.2f ms | Clocks: %s", d_func, format_clocks(clk_func).c_str());
     
-    RCLCPP_INFO(this->get_logger(), "  -> KDTree Init:        %.2f ms (%5.1f%%)", d_kdtree, (d_kdtree / total_safe) * 100.0);
-    RCLCPP_INFO(this->get_logger(), "  -> Prep/Voxel:         %.2f ms (%5.1f%%)", d_voxel, (d_voxel / total_safe) * 100.0);
+    RCLCPP_INFO(this->get_logger(), "  -> KDTree Init:        %.2f ms (%5.1f%%) | Clocks: %s", 
+        d_kdtree, (d_kdtree / total_safe) * 100.0, format_clocks(clk_kdtree).c_str());
+        
+    RCLCPP_INFO(this->get_logger(), "  -> Prep/Voxel:         %.2f ms (%5.1f%%) | Clocks: %s", 
+        d_voxel, (d_voxel / total_safe) * 100.0, format_clocks(clk_voxel).c_str());
     
-    RCLCPP_INFO(this->get_logger(), "  -> PARALLEL Wall Time: %.2f ms (%5.1f%%) (Threads: %d)", d_parallel_wall, (d_parallel_wall / total_safe) * 100.0, active_threads);
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Inliers:    %.2f ms (%5.1f%%)", max_thread_inliers, (max_thread_inliers / total_safe) * 100.0);
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Analysis:   %.2f ms (%5.1f%%)", max_thread_analysis, (max_thread_analysis / total_safe) * 100.0);
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Scoring:    %.2f ms (%5.1f%%)", max_thread_scoring, (max_thread_scoring / total_safe) * 100.0);
+    RCLCPP_INFO(this->get_logger(), "  -> SEQUENTIAL Loop:    %.2f ms (%5.1f%%) | Clocks: %s", 
+        d_loop, (d_loop / total_safe) * 100.0, format_clocks(clk_loop).c_str());
+        
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Inliers:  %.2f ms (%5.1f%%) | Clocks: %s", 
+        acc_inliers_ms, (acc_inliers_ms / total_safe) * 100.0, format_clocks(acc_inliers_clocks).c_str());
+        
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Analysis: %.2f ms (%5.1f%%) | Clocks: %s", 
+        acc_analysis_ms, (acc_analysis_ms / total_safe) * 100.0, format_clocks(acc_analysis_clocks).c_str());
+        
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Scoring:  %.2f ms (%5.1f%%) | Clocks: %s", 
+        acc_scoring_ms, (acc_scoring_ms / total_safe) * 100.0, format_clocks(acc_scoring_clocks).c_str());
     
-    RCLCPP_INFO(this->get_logger(), "  -> Merge Vectors:      %.2f ms (%5.1f%%)", d_merge, (d_merge / total_safe) * 100.0);
-    RCLCPP_INFO(this->get_logger(), "  -> Sorting (%lu items): %.2f ms (%5.1f%%)", initial_candidates.size(), d_sort, (d_sort / total_safe) * 100.0);
-    RCLCPP_INFO(this->get_logger(), "  -> Lazy Collision:     %.2f ms (%5.1f%%) (%d checks until full)", d_collision, (d_collision / total_safe) * 100.0, checks_count);
+    RCLCPP_INFO(this->get_logger(), "  -> Sorting (%lu items): %.2f ms (%5.1f%%) | Clocks: %s", 
+        initial_candidates.size(), d_sort, (d_sort / total_safe) * 100.0, format_clocks(clk_sort).c_str());
+        
+    RCLCPP_INFO(this->get_logger(), "  -> Lazy Collision:     %.2f ms (%5.1f%%) | Clocks: %s (%d checks)", 
+        d_collision, (d_collision / total_safe) * 100.0, format_clocks(clk_collision).c_str(), checks_count);
     
     RCLCPP_INFO(this->get_logger(), "---------------------------------------------------");
     
