@@ -78,8 +78,7 @@ private:
     
     
     std::vector<geometry_msgs::msg::Pose> generateMultiOrientedRays(
-        const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res, 
-        const std::vector<Eigen::Matrix3f>& rotation_matrices);
+        const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res);
         
     StepAnalysis analyzeLocalCylinder(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,

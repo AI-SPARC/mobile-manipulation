@@ -25,7 +25,7 @@ def generate_launch_description():
         "mesh_rot_roll": 1.57,
         "mesh_rot_pitch": 0.0,
         "mesh_rot_yaw": 1.57, 
-        "rotation_step_deg": 90.0,
+        "rotation_step_deg": 25.0,
         "cylinder_radius": 0.005,  
         "cylinder_height": 0.005,
         "analysis_step_size": 0.01,
@@ -42,7 +42,7 @@ def generate_launch_description():
         "gripper_collision_threshold": 5,
         "gripper_structure_thickness": 0.005,
         "num_collision_checks": 1,
-        "num_random_orientations": 100
+        "num_random_orientations": 1
     }]
 
   
