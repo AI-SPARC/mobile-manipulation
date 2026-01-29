@@ -69,9 +69,9 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<int>("mean_filter_k", 15);
 
     this->declare_parameter<int>("num_best_grasps", 1);
-    this->declare_parameter<double>("rotation_step_deg", 30.0);
+    this->declare_parameter<double>("rotation_step_deg", 20.0);
 
-    this->declare_parameter<int>("num_random_orientations", 10);
+    this->declare_parameter<int>("num_random_orientations", 20);
 
     use_pcd_file = this->get_parameter("use_pcd_file").as_bool();
     pcd_path_ = this->get_parameter("pcd_path").as_string();
@@ -719,7 +719,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     
     auto t_voxel_start = std::chrono::high_resolution_clock::now();
 
-    float voxel_size = 0.01f;
+    float voxel_size = 0.0075f;
     std::unordered_map<long, VoxelBucket> voxel_grid;
     
     auto get_key = [&](int x, int y, int z) -> long {
@@ -746,15 +746,15 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     float voxel_radius = (voxel_size * 1.73205f) / 2.0f;
     float voxel_check_threshold = cylinder_radius_ + voxel_radius; 
-    
-    
+    float voxel_check_threshold_squared = voxel_check_threshold * voxel_check_threshold;
+    float cylinder_radius_sq = cylinder_radius_ * cylinder_radius_;
     struct ThreadTimers {
         double inliers_ms = 0.0;
         double analysis_ms = 0.0;
         double scoring_ms = 0.0;
         double total_thread_ms = 0.0; 
     };
-
+    std::cout << all_candidates_.size() << std::endl;
     tbb::enumerable_thread_specific<std::vector<ScoredGrasp>> local_best_grasps;
     tbb::enumerable_thread_specific<std::vector<geometry_msgs::msg::Pose>> local_hit_candidates;
     tbb::enumerable_thread_specific<ThreadTimers> local_timers;
@@ -782,28 +782,32 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 float t_min = 1e6, t_max = -1e6;
                 bool hit = false;
                 
-                pcl::PointCloud<pcl::PointXYZ> current_inliers;
                 pcl::PointCloud<pcl::PointXYZ>::Ptr current_inliers_ptr(new pcl::PointCloud<pcl::PointXYZ>);
 
                
                 auto t0 = std::chrono::high_resolution_clock::now();
-
+                
                 for (const auto& [key, bucket] : voxel_grid) 
                 {
                     Eigen::Vector3f diff = bucket.center - ray_origin;
                     float dist_sq_to_ray = (diff.cross(ray_dir)).squaredNorm();
-                    if (dist_sq_to_ray > (voxel_check_threshold * voxel_check_threshold)) continue;
+                    if (dist_sq_to_ray > voxel_check_threshold_squared) continue;
 
                     for (const auto& pt : bucket.points) 
                     {
                         Eigen::Vector3f p(pt.x, pt.y, pt.z);
                         float t = (p - ray_origin).dot(ray_dir);
-                        if ((p - (ray_origin + t*ray_dir)).norm() < cylinder_radius_) 
+
+                        // 2. Calcule o vetor perpendicular (distância do ponto à linha do raio)
+                        Eigen::Vector3f dist_vec = p - (ray_origin + t * ray_dir);
+
+                        // 3. OTIMIZAÇÃO: Use squaredNorm() e compare com o raio ao quadrado
+                        // Isso remove a raiz quadrada implicita no .norm() antigo
+                        if (dist_vec.squaredNorm() < cylinder_radius_sq) 
                         {
                             if (t < t_min) t_min = t;
                             if (t > t_max) t_max = t;
                             hit = true;
-                            current_inliers.points.push_back(pt);
                             current_inliers_ptr->points.push_back(pt);
                         }
                     }
@@ -844,7 +848,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 float total_width_needed = real_thickness + (2.0f * current_offset);
                 if (total_width_needed > max_gripper_width_) {
                     current_offset = (max_gripper_width_ - real_thickness) / 2.0f;
-                    if (current_offset < 0.01f) current_offset = 0.01f;
+                    if (current_offset < 0.01f) current_offset = 0.005f;
                 }
                 total_width_needed = real_thickness + (2.0f * current_offset);
                 if(total_width_needed > max_gripper_width_) continue;
@@ -930,88 +934,100 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     
     auto t_sort_start = std::chrono::high_resolution_clock::now();
+    
     std::sort(initial_candidates.begin(), initial_candidates.end(), 
         [](const ScoredGrasp& a, const ScoredGrasp& b) { return a.total_score > b.total_score; });
+        
     auto t_sort_end = std::chrono::high_resolution_clock::now();
 
-    
+
+    // 2. VERIFICAÇÃO DE COLISÃO "LAZY" (Sequencial com Early Exit)
     auto t_collision_start = std::chrono::high_resolution_clock::now();
 
-    
-    tbb::enumerable_thread_specific<std::vector<ScoredGrasp>> local_valid_grasps;
-    std::atomic<int> collision_checks_performed{0};
-
-    
-    size_t candidates_to_check = std::min(initial_candidates.size(), (size_t)2000); 
-
-    tbb::parallel_for(tbb::blocked_range<size_t>(0, candidates_to_check),
-        [&](const tbb::blocked_range<size_t>& range)
-        {
-            auto& local_vec = local_valid_grasps.local();
-            
-            for (size_t i = range.begin(); i != range.end(); ++i) 
-            {
-                
-                if (check_collision(initial_candidates[i], collision_kdtree_, false))
-                {
-                    local_vec.push_back(initial_candidates[i]);
-                }
-                collision_checks_performed++;
-            }
-        }
-    );
-
-    
     best_grasps_.clear();
-    for (const auto& local_vec : local_valid_grasps) {
-        best_grasps_.insert(best_grasps_.end(), local_vec.begin(), local_vec.end());
+    best_grasps_.reserve(num_best_grasps_); // Alocação prévia para performance
+    
+    int checks_count = 0; // Contador simples (não precisa ser atomic pois é sequencial)
+
+    // Itera sobre os candidatos já ordenados (do melhor score para o pior)
+    for (const auto& candidate : initial_candidates)
+    {
+        // Se já encontramos a quantidade desejada de grasps válidos, PARE.
+        if (best_grasps_.size() >= (size_t)num_best_grasps_) {
+            break;
+        }
+
+        checks_count++;
+
+        // Verifica colisão
+        if (check_collision(candidate, collision_kdtree_, false))
+        {
+            // Se válido, adiciona. Como a lista original já estava ordenada,
+            // best_grasps_ será preenchido naturalmente em ordem decrescente.
+            best_grasps_.push_back(candidate);
+        }
     }
 
+    // Nota: Não precisamos mais do segundo std::sort aqui, pois inserimos em ordem.
     
-    std::sort(best_grasps_.begin(), best_grasps_.end(), 
-        [](const ScoredGrasp& a, const ScoredGrasp& b) { return a.total_score > b.total_score; });
-
-    
-    if (best_grasps_.size() > (size_t)num_best_grasps_) {
-        best_grasps_.resize(num_best_grasps_);
-    }
-
     has_best_ = !best_grasps_.empty();
+    
     auto t_collision_end = std::chrono::high_resolution_clock::now();
     
+    // 3. CONSTRUÇÃO DO RESULTADO
     geometry_msgs::msg::PoseArray pose_array;
     pose_array.header.frame_id = "world"; 
     pose_array.header.stamp = this->now(); 
 
-    for(int i = 0; i < num_best_grasps_ && i < (int)best_grasps_.size(); i++)
+    for(const auto& bg : best_grasps_)
     {
-        pose_array.poses.push_back(best_grasps_[i].pose_center);
+        pose_array.poses.push_back(bg.pose_center);
     }
 
     auto t_func_end = std::chrono::high_resolution_clock::now();
 
-   
+    // 4. BENCHMARK E LOGS
     double d_func = std::chrono::duration<double, std::milli>(t_func_end - t_func_start).count();
     double d_kdtree = std::chrono::duration<double, std::milli>(t_kdtree_end - t_kdtree_start).count();
-    double d_voxel = std::chrono::duration<double, std::milli>(t_voxel_end - t_voxel_start).count();
+    // d_voxel (se ainda existir no seu código anterior) ou 0.0 se tiver removido
+    double d_voxel = std::chrono::duration<double, std::milli>(t_voxel_end - t_voxel_start).count(); 
     double d_parallel_wall = std::chrono::duration<double, std::milli>(t_parallel_wall_end - t_parallel_wall_start).count();
     double d_merge = std::chrono::duration<double, std::milli>(t_merge_end - t_merge_start).count();
     double d_sort = std::chrono::duration<double, std::milli>(t_sort_end - t_sort_start).count();
     double d_collision = std::chrono::duration<double, std::milli>(t_collision_end - t_collision_start).count();
 
-   
+    // Denominadores seguros
+    double total_safe = (d_func > 1e-9) ? d_func : 1.0;
+    double parallel_safe = (d_parallel_wall > 1e-9) ? d_parallel_wall : 1.0;
+
     RCLCPP_INFO(this->get_logger(), "================ BENCHMARK DE GRASP ===============");
-    RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.2f ms", d_func);
-    RCLCPP_INFO(this->get_logger(), "  -> KDTree Init:        %.2f ms", d_kdtree);
-    RCLCPP_INFO(this->get_logger(), "  -> Voxel Grid:         %.2f ms", d_voxel);
-    RCLCPP_INFO(this->get_logger(), "  -> PARALLEL Wall Time: %.2f ms (Threads: %d)", d_parallel_wall, active_threads);
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Inliers:    %.2f ms (Gargalo Busca)", max_thread_inliers);
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Analysis:   %.2f ms (Gargalo PCA)", max_thread_analysis);
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Scoring:    %.2f ms", max_thread_scoring);
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Thread Tot: %.2f ms", max_thread_total);
-    RCLCPP_INFO(this->get_logger(), "  -> Merge Vectors:      %.2f ms", d_merge);
-    RCLCPP_INFO(this->get_logger(), "  -> Sorting (%lu items): %.2f ms", initial_candidates.size(), d_sort);
-    RCLCPP_INFO(this->get_logger(), "  -> Collision Check:    %.2f ms (%d checks)", d_collision, collision_checks_performed.load());
+    RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.2f ms (100.0%%)", d_func);
+    
+    RCLCPP_INFO(this->get_logger(), "  -> KDTree Init:        %.2f ms (%5.1f%%)", d_kdtree, (d_kdtree / total_safe) * 100.0);
+    RCLCPP_INFO(this->get_logger(), "  -> Prep/Voxel:         %.2f ms (%5.1f%%)", d_voxel, (d_voxel / total_safe) * 100.0);
+    
+    RCLCPP_INFO(this->get_logger(), "  -> PARALLEL Wall Time: %.2f ms (%5.1f%%) (Threads: %d)", d_parallel_wall, (d_parallel_wall / total_safe) * 100.0, active_threads);
+    RCLCPP_INFO(this->get_logger(), "     |-> Max Inliers:    %.2f ms (%5.1f%%)", max_thread_inliers, (max_thread_inliers / total_safe) * 100.0);
+    RCLCPP_INFO(this->get_logger(), "     |-> Max Analysis:   %.2f ms (%5.1f%%)", max_thread_analysis, (max_thread_analysis / total_safe) * 100.0);
+    RCLCPP_INFO(this->get_logger(), "     |-> Max Scoring:    %.2f ms (%5.1f%%)", max_thread_scoring, (max_thread_scoring / total_safe) * 100.0);
+    
+    RCLCPP_INFO(this->get_logger(), "  -> Merge Vectors:      %.2f ms (%5.1f%%)", d_merge, (d_merge / total_safe) * 100.0);
+    RCLCPP_INFO(this->get_logger(), "  -> Sorting (%lu items): %.2f ms (%5.1f%%)", initial_candidates.size(), d_sort, (d_sort / total_safe) * 100.0);
+    RCLCPP_INFO(this->get_logger(), "  -> Lazy Collision:     %.2f ms (%5.1f%%) (%d checks until full)", d_collision, (d_collision / total_safe) * 100.0, checks_count);
+    
+    RCLCPP_INFO(this->get_logger(), "---------------------------------------------------");
+    
+    size_t num_to_print = std::min((size_t)10, best_grasps_.size());
+    if (num_to_print > 0) {
+        RCLCPP_INFO(this->get_logger(), ">>> TOP %lu MELHORES SCORES ENCONTRADOS <<<", num_to_print);
+        for (size_t i = 0; i < num_to_print; ++i) {
+            const auto& g = best_grasps_[i];
+            RCLCPP_INFO(this->get_logger(), "  #%02lu: Score: %.5f | Pos: [%.3f, %.3f, %.3f]", 
+                i + 1, g.total_score, g.pose_center.position.x, g.pose_center.position.y, g.pose_center.position.z);
+        }
+    } else {
+        RCLCPP_WARN(this->get_logger(), ">>> NENHUM GRASP VÁLIDO ENCONTRADO <<<");
+    }
     RCLCPP_INFO(this->get_logger(), "===================================================");
 
     return pose_array;
