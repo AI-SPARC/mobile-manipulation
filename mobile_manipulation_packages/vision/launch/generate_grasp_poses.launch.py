@@ -12,20 +12,21 @@ def generate_launch_description():
     
     parameters = [{
         "use_pcd_file": True,
-        "pcd_path": "/home/momesso/pcds/toma_36.pcd",
+        "pcd_path": "/home/momesso/pcds/toma_6.pcd",
         "gripper_mesh_path": "/home/momesso/hand_and_fingers.obj",
         "gripper_mesh_scale": 1.0,
-        "grid_res": 0.005,         
+        "grid_res": 0.0075,         
         "cloud_voxel_size": 0.0015,
 
         "mesh_offset_x": 0.025,
         "mesh_offset_y": 0.0,
         "mesh_offset_z": 0.0,
-        
+        "num_benchmark_runs": 100,
+        "enable_ray_animation": True,
         "mesh_rot_roll": 1.57,
         "mesh_rot_pitch": 0.0,
         "mesh_rot_yaw": 1.57, 
-        "rotation_step_deg": 25.0,
+        "rotation_step_deg": 55.0,
         "cylinder_radius": 0.005,  
         "cylinder_height": 0.005,
         "analysis_step_size": 0.01,

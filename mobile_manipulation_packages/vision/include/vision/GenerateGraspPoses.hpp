@@ -109,6 +109,8 @@ private:
     float mesh_offset_x_, mesh_offset_y_, mesh_offset_z_;
     float mesh_rot_roll_, mesh_rot_pitch_, mesh_rot_yaw_;
 
+    int num_benchmark_runs_, animation_delay_ms_;
+    bool enable_ray_animation_;
     float grid_res_;
     float cloud_voxel_size_;
     float cylinder_radius_;
@@ -142,6 +144,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_gripper_model_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_gripper_boxes_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
