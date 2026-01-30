@@ -229,9 +229,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
     // Verificação básica de segurança
     if (!target || target->empty()) return geometry_msgs::msg::PoseArray();
 
-    // // 1. Filtro de Ruído no Objeto Alvo (Target)
-    
-   
+
 
     // 2. Rotação Aleatória (Apenas para debug com arquivo PCD)
     if (use_pcd_file == true)
@@ -777,10 +775,15 @@ struct ThreadStats {
 geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
     
-    auto format_clocks = [](uint64_t n) -> std::string {
+    auto format_clocks = [](uint64_t n) -> std::string 
+    {
         std::string s = std::to_string(n);
         int insertPosition = static_cast<int>(s.length()) - 3;
-        while (insertPosition > 0) { s.insert(insertPosition, "."); insertPosition -= 3; }
+        while (insertPosition > 0) 
+        { 
+            s.insert(insertPosition, "."); 
+            insertPosition -= 3; 
+        }
         return s;
     };
 
@@ -794,9 +797,13 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     auto t_kdtree_start = std::chrono::high_resolution_clock::now();
     
     pcl::KdTreeFLANN<pcl::PointXYZ> env_kdtree;
-    if (target_environment->empty()) {
+    
+    if (target_environment->empty()) 
+    {
         RCLCPP_WARN(this->get_logger(), "Ambiente vazio, ignorando colisão.");
-    } else {
+    } 
+    else 
+    {
         env_kdtree.setInputCloud(target_environment);
     }
     
@@ -811,15 +818,28 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     float voxel_size = 0.0075f;
     std::unordered_map<long, VoxelBucket> voxel_grid;
     
-    auto get_key = [&](int x, int y, int z) -> long {
+    
+    auto get_key = [&](int x, int y, int z) -> long 
+    {
         return ((long)x * 73856093) ^ ((long)y * 19349663) ^ ((long)z * 83492791);
     };
     
-    for (const auto& pt : stored_cloud_->points) {
-        int ix = std::floor(pt.x / voxel_size); int iy = std::floor(pt.y / voxel_size); int iz = std::floor(pt.z / voxel_size);
+   
+    for (const auto& pt : stored_cloud_->points) 
+    {
+        int ix = std::floor(pt.x / voxel_size); 
+        int iy = std::floor(pt.y / voxel_size); 
+        int iz = std::floor(pt.z / voxel_size);
+        
         long key = get_key(ix, iy, iz);
-        if (voxel_grid.find(key) == voxel_grid.end()) {
-            voxel_grid[key].center = Eigen::Vector3f((ix + 0.5f) * voxel_size, (iy + 0.5f) * voxel_size, (iz + 0.5f) * voxel_size);
+        
+        if (voxel_grid.find(key) == voxel_grid.end()) 
+        {
+            voxel_grid[key].center = Eigen::Vector3f(
+                (ix + 0.5f) * voxel_size, 
+                (iy + 0.5f) * voxel_size, 
+                (iz + 0.5f) * voxel_size
+            );
         }
         voxel_grid[key].points.push_back(pt);
     }
@@ -835,251 +855,433 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     float cylinder_radius_sq = cylinder_radius_ * cylinder_radius_;
 
     
-    tbb::enumerable_thread_specific<ThreadStats> thread_stats;
-    
-    
-    std::atomic<int> perfect_grasps_count{0};
+    double acc_inliers_ms = 0.0;   uint64_t acc_inliers_clk = 0;
+    double acc_analysis_ms = 0.0;  uint64_t acc_analysis_clk = 0;
+    double acc_scoring_ms = 0.0;   uint64_t acc_scoring_clk = 0;
 
-    RCLCPP_INFO(this->get_logger(), "Iniciando Processamento TBB (Candidates: %lu)...", all_candidates_.size());
+    std::vector<ScoredGrasp> initial_candidates;
+    initial_candidates.reserve(all_candidates_.size());
+    int perfect_grasps_count = 0;
+
+    RCLCPP_INFO(this->get_logger(), "Iniciando Processamento SERIAL c/ Animação (Candidates: %lu)...", all_candidates_.size());
     
     uint64_t c_loop_start = __rdtsc();
     auto t_loop_start = std::chrono::high_resolution_clock::now();
 
     
-    tbb::parallel_for(tbb::blocked_range<size_t>(0, all_candidates_.size()),
-        [&](const tbb::blocked_range<size_t>& range) 
+    for (size_t i = 0; i < all_candidates_.size(); ++i) 
+    {
+        
+        if (perfect_grasps_count >= num_best_grasps_) 
         {
-            auto& stats = thread_stats.local();
+            break;
+        }
 
-            for (size_t i = range.begin(); i != range.end(); ++i) 
+        const auto& raw_pose = all_candidates_[i]; 
+        
+        Eigen::Quaternionf q_start(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
+        Eigen::Vector3f ray_origin_start(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
+        Eigen::Vector3f ray_dir_start = q_start * Eigen::Vector3f::UnitX(); 
+
+        
+        uint64_t c0 = __rdtsc(); 
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        float t_min_init = 1e6;
+        float t_max_init = -1e6;
+        bool hit_init = false;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr init_inliers(new pcl::PointCloud<pcl::PointXYZ>);
+        
+        
+        for (const auto& [key, bucket] : voxel_grid) 
+        {
+            Eigen::Vector3f diff = bucket.center - ray_origin_start;
+            
+            
+            if ((diff.cross(ray_dir_start)).squaredNorm() > voxel_check_threshold_squared) 
             {
+                continue;
+            }
+
+            
+            for (const auto& pt : bucket.points) 
+            {
+                Eigen::Vector3f p(pt.x, pt.y, pt.z);
+                float t = (p - ray_origin_start).dot(ray_dir_start);
+                Eigen::Vector3f dist_vec = p - (ray_origin_start + t * ray_dir_start);
                 
-                if (perfect_grasps_count.load() >= num_best_grasps_) continue;
-
-                const auto& raw_pose = all_candidates_[i]; 
-                Eigen::Quaternionf q_start(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
-                Eigen::Vector3f ray_origin_start(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
-                Eigen::Vector3f ray_dir_start = q_start * Eigen::Vector3f::UnitX(); 
-
-                uint64_t c0 = __rdtsc(); auto t0 = std::chrono::high_resolution_clock::now();
-
-                float t_min_init = 1e6, t_max_init = -1e6;
-                bool hit_init = false;
-                pcl::PointCloud<pcl::PointXYZ>::Ptr init_inliers(new pcl::PointCloud<pcl::PointXYZ>);
-                
-                for (const auto& [key, bucket] : voxel_grid) {
-                    Eigen::Vector3f diff = bucket.center - ray_origin_start;
-                    if ((diff.cross(ray_dir_start)).squaredNorm() > voxel_check_threshold_squared) continue;
-                    for (const auto& pt : bucket.points) {
-                        Eigen::Vector3f p(pt.x, pt.y, pt.z);
-                        float t = (p - ray_origin_start).dot(ray_dir_start);
-                        Eigen::Vector3f dist_vec = p - (ray_origin_start + t * ray_dir_start);
-                        if (dist_vec.squaredNorm() < cylinder_radius_sq) {
-                            if (t < t_min_init) t_min_init = t;
-                            if (t > t_max_init) t_max_init = t;
-                            hit_init = true;
-                            init_inliers->points.push_back(pt);
-                        }
-                    }
-                }
-
-                auto t1 = std::chrono::high_resolution_clock::now(); uint64_t c1 = __rdtsc();
-                stats.inliers_ms += std::chrono::duration<double, std::milli>(t1 - t0).count(); 
-                stats.inliers_clk += (c1 - c0);
-
-                float init_thickness = t_max_init - t_min_init;
-                if (!hit_init || init_inliers->size() < 5 || 
-                    init_thickness < 0.002 || init_thickness > max_gripper_width_) 
+                if (dist_vec.squaredNorm() < cylinder_radius_sq) 
                 {
-                    continue;
-                }
-
-                uint64_t c2_pre = __rdtsc(); auto t2_pre = std::chrono::high_resolution_clock::now();
-
-                Eigen::Vector4f centroid; Eigen::Matrix3f covariance_matrix;
-                pcl::compute3DCentroid(*init_inliers, centroid);
-                pcl::computeCovarianceMatrixNormalized(*init_inliers, centroid, covariance_matrix);
-                Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
-                
-                Eigen::Vector3f pca_normal = eigen_solver.eigenvectors().col(0);
-                if (!pca_normal.allFinite()) pca_normal = -ray_dir_start; 
-                else if (pca_normal.dot(ray_dir_start) > 0) pca_normal = -pca_normal;
-
-                const Eigen::Vector3f PIVOT_POINT = ray_origin_start + (ray_dir_start * t_min_init); 
-                const float DISTANCE_TO_PIVOT = t_min_init;                                        
-                const Eigen::Vector3f DIR_START = ray_dir_start;                                   
-                const Eigen::Vector3f DIR_TARGET = -pca_normal;                                
-
-                auto t2_post = std::chrono::high_resolution_clock::now(); uint64_t c2_post = __rdtsc();
-                stats.analysis_ms += std::chrono::duration<double, std::milli>(t2_post - t2_pre).count();
-                stats.analysis_clk += (c2_post - c2_pre);
-
-                ScoredGrasp best_iter_grasp;
-                best_iter_grasp.total_score = -1.0; 
-                bool found_valid_in_optimization = false;
-                bool perfect_candidate_found = false;                          
-
-                int max_optimization_steps = 9; 
-                
-                for (int step = 0; step < max_optimization_steps; ++step)
-                {
-                    float t_lerp = (float)step / (float)max_optimization_steps; 
-                    Eigen::Vector3f current_ray_dir = ((1.0f - t_lerp) * DIR_START + t_lerp * DIR_TARGET).normalized();
-                    Eigen::Vector3f current_ray_origin = PIVOT_POINT - (current_ray_dir * DISTANCE_TO_PIVOT);
-
-                    uint64_t c3 = __rdtsc(); auto t3 = std::chrono::high_resolution_clock::now();
-                    
-                    float t_min = 1e6, t_max = -1e6;
-                    bool hit = false;
-                    pcl::PointCloud<pcl::PointXYZ>::Ptr current_inliers_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-                    
-                    for (const auto& [key, bucket] : voxel_grid) 
-                    {
-                        Eigen::Vector3f diff = bucket.center - current_ray_origin;
-                        if ((diff.cross(current_ray_dir)).squaredNorm() > voxel_check_threshold_squared) continue;
-                        for (const auto& pt : bucket.points) {
-                            Eigen::Vector3f p(pt.x, pt.y, pt.z);
-                            float t = (p - current_ray_origin).dot(current_ray_dir);
-                            Eigen::Vector3f dist_vec = p - (current_ray_origin + t * current_ray_dir);
-                            if (dist_vec.squaredNorm() < cylinder_radius_sq) {
-                                if (t < t_min) t_min = t;
-                                if (t > t_max) t_max = t;
-                                hit = true;
-                                current_inliers_ptr->points.push_back(pt);
-                            }
-                        }
-                    }
-
-                    auto t4 = std::chrono::high_resolution_clock::now(); uint64_t c4 = __rdtsc();
-                    stats.inliers_ms += std::chrono::duration<double, std::milli>(t4 - t3).count(); 
-                    stats.inliers_clk += (c4 - c3);
-                    
-                    if (!hit || current_inliers_ptr->size() < 5) continue;
-                    float real_thickness = t_max - t_min;
-                    if (real_thickness < 0.002 || real_thickness > max_gripper_width_) continue;
-
-                    uint64_t c5 = __rdtsc(); auto t5 = std::chrono::high_resolution_clock::now();
-
-                    std::vector<StepAnalysis> steps; steps.reserve(2); 
-                    Eigen::Vector3f center_entry = current_ray_origin + current_ray_dir * t_min;
-                    StepAnalysis res_entry = analyzeLocalCylinder(current_inliers_ptr, center_entry, current_ray_dir, cylinder_radius_, cylinder_height_);
-                    if (res_entry.valid) steps.push_back(res_entry);
-
-                    if (real_thickness > 0.001f) { 
-                        Eigen::Vector3f center_exit = current_ray_origin + current_ray_dir * t_max;
-                        StepAnalysis res_exit = analyzeLocalCylinder(current_inliers_ptr, center_exit, current_ray_dir, cylinder_radius_, cylinder_height_);
-                        if (res_exit.valid) steps.push_back(res_exit);
-                    }
-                    
-                    auto t6 = std::chrono::high_resolution_clock::now(); uint64_t c6 = __rdtsc();
-                    stats.analysis_ms += std::chrono::duration<double, std::milli>(t6 - t5).count();
-                    stats.analysis_clk += (c6 - c5);
-
-                    if (steps.empty()) continue; 
-
-                    uint64_t c7 = __rdtsc(); auto t7 = std::chrono::high_resolution_clock::now();
-
-                    StepAnalysis& entry = steps.front();
-                    StepAnalysis& exit = steps.back();
-                    
-                    float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
-                    float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
-                    float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
-                    float score_plan_exit  = std::max(0.0f, 1.0f - (exit.curvature * 20.0f));
-                    float orient_factor_entry = (score_plan_entry > 0.3) ? 1.0f : 0.5f;
-                    float orient_factor_exit = (score_plan_exit > 0.3) ? 1.0f : 0.5f;
-                    float score_sym_entry = entry.symmetry_score;
-                    float score_sym_exit  = exit.symmetry_score;
-
-                    double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + score_sym_entry * weight_symmetry_ + score_plan_entry * weight_planarity_) * 0.5 + 
-                                (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ + score_plan_exit * weight_planarity_) * 0.5;
-
-                    auto t8 = std::chrono::high_resolution_clock::now(); uint64_t c8 = __rdtsc();
-                    stats.scoring_ms += std::chrono::duration<double, std::milli>(t8 - t7).count();
-                    stats.scoring_clk += (c8 - c7);
-
-                    if (total > best_iter_grasp.total_score) {
-                        found_valid_in_optimization = true;
-                        
-                        float current_offset = finger_offset_; 
-                        Eigen::Vector3f p_f1 = current_ray_origin + current_ray_dir * (t_min - current_offset);
-                        Eigen::Vector3f p_f2 = current_ray_origin + current_ray_dir * (t_max + current_offset);
-                        Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
-                        Eigen::Quaternionf best_q = findBestOrientation(p_f1, p_f2);
-
-                        best_iter_grasp.pose_center.position.x = center_grasp.x(); best_iter_grasp.pose_center.position.y = center_grasp.y(); best_iter_grasp.pose_center.position.z = center_grasp.z();
-                        best_iter_grasp.pose_center.orientation.x = best_q.x(); best_iter_grasp.pose_center.orientation.y = best_q.y(); best_iter_grasp.pose_center.orientation.z = best_q.z(); best_iter_grasp.pose_center.orientation.w = best_q.w();
-                        best_iter_grasp.total_score = total;
-                        best_iter_grasp.raw_ray_dir = current_ray_dir;
-                    }
-
-                    if (total > 0.97) { 
-                        
-                        if (perfect_grasps_count.load() >= num_best_grasps_) 
-                        {
-                             perfect_candidate_found = true; 
-                             break;
-                        }
-
-                        if (check_collision(best_iter_grasp, collision_kdtree_, false)) {
-                            stats.local_candidates.push_back(best_iter_grasp);
-                            stats.local_raw_poses.push_back(raw_pose);
-                            
-                            // Incrementa contador de forma thread-safe
-                            perfect_grasps_count.fetch_add(1);
-                            
-                            perfect_candidate_found = true;
-                            break; 
-                        }
-                    }
-                } 
-
-                if (!perfect_candidate_found && found_valid_in_optimization) {
-                    stats.local_candidates.push_back(best_iter_grasp);
-                    stats.local_raw_poses.push_back(raw_pose);
+                    if (t < t_min_init) t_min_init = t;
+                    if (t > t_max_init) t_max_init = t;
+                    hit_init = true;
+                    init_inliers->points.push_back(pt);
                 }
             }
         }
-    );
+
+        auto t1 = std::chrono::high_resolution_clock::now(); 
+        uint64_t c1 = __rdtsc();
+        acc_inliers_ms += std::chrono::duration<double, std::milli>(t1 - t0).count(); 
+        acc_inliers_clk += (c1 - c0);
+
+        
+        float init_thickness = t_max_init - t_min_init;
+        if (!hit_init || init_inliers->size() < 5 || 
+            init_thickness < 0.002 || init_thickness > max_gripper_width_) 
+        {
+            continue;
+        }
+
+        
+        uint64_t c2_pre = __rdtsc(); 
+        auto t2_pre = std::chrono::high_resolution_clock::now();
+
+        Eigen::Vector4f centroid; 
+        Eigen::Matrix3f covariance_matrix;
+        
+        pcl::compute3DCentroid(*init_inliers, centroid);
+        pcl::computeCovarianceMatrixNormalized(*init_inliers, centroid, covariance_matrix);
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
+        
+        Eigen::Vector3f pca_normal = eigen_solver.eigenvectors().col(0);
+        
+     
+        if (!pca_normal.allFinite()) 
+        {
+            pca_normal = -ray_dir_start; 
+        }
+        else if (pca_normal.dot(ray_dir_start) > 0) 
+        {
+            pca_normal = -pca_normal;
+        }
+
+        const Eigen::Vector3f PIVOT_POINT = ray_origin_start + (ray_dir_start * t_min_init); 
+        const float DISTANCE_TO_PIVOT = t_min_init;                                        
+        const Eigen::Vector3f DIR_START = ray_dir_start;                                   
+        const Eigen::Vector3f DIR_TARGET = -pca_normal;                                
+
+        auto t2_post = std::chrono::high_resolution_clock::now(); 
+        uint64_t c2_post = __rdtsc();
+        acc_analysis_ms += std::chrono::duration<double, std::milli>(t2_post - t2_pre).count();
+        acc_analysis_clk += (c2_post - c2_pre);
+
+        ScoredGrasp best_iter_grasp;
+        best_iter_grasp.total_score = -1.0; 
+        bool found_valid_in_optimization = false;
+        bool perfect_candidate_found = false;                          
+
+        
+        int max_optimization_steps = 9; 
+        
+        for (int step = 0; step < max_optimization_steps; ++step)
+        {
+            
+            float t_lerp = (float)step / (float)max_optimization_steps; 
+            Eigen::Vector3f current_ray_dir = ((1.0f - t_lerp) * DIR_START + t_lerp * DIR_TARGET).normalized();
+            Eigen::Vector3f current_ray_origin = PIVOT_POINT - (current_ray_dir * DISTANCE_TO_PIVOT);
+
+            uint64_t c3 = __rdtsc(); 
+            auto t3 = std::chrono::high_resolution_clock::now();
+            
+            
+            float t_min = 1e6;
+            float t_max = -1e6;
+            bool hit = false;
+            pcl::PointCloud<pcl::PointXYZ>::Ptr current_inliers_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+            
+            for (const auto& [key, bucket] : voxel_grid) 
+            {
+                Eigen::Vector3f diff = bucket.center - current_ray_origin;
+                if ((diff.cross(current_ray_dir)).squaredNorm() > voxel_check_threshold_squared) 
+                {
+                    continue;
+                }
+                
+                for (const auto& pt : bucket.points) 
+                {
+                    Eigen::Vector3f p(pt.x, pt.y, pt.z);
+                    float t = (p - current_ray_origin).dot(current_ray_dir);
+                    Eigen::Vector3f dist_vec = p - (current_ray_origin + t * current_ray_dir);
+                    
+                    if (dist_vec.squaredNorm() < cylinder_radius_sq) 
+                    {
+                        if (t < t_min) t_min = t;
+                        if (t > t_max) t_max = t;
+                        hit = true;
+                        current_inliers_ptr->points.push_back(pt);
+                    }
+                }
+            }
+
+            auto t4 = std::chrono::high_resolution_clock::now(); 
+            uint64_t c4 = __rdtsc();
+            acc_inliers_ms += std::chrono::duration<double, std::milli>(t4 - t3).count(); 
+            acc_inliers_clk += (c4 - c3);
+            
+            
+            if (!hit || current_inliers_ptr->size() < 5) 
+            {
+                continue;
+            }
+
+            
+            if (enable_ray_animation_ && debug_marker_pub_)
+            {
+                auto t_now = this->now();
+                visualization_msgs::msg::MarkerArray markers;
+
+                
+                sensor_msgs::msg::PointCloud2 m; 
+                pcl::toROSMsg(*stored_cloud_, m); 
+                m.header.stamp = t_now; 
+                m.header.frame_id = "world"; 
+                pub_cloud_->publish(m);
+
+                
+                visualization_msgs::msg::Marker base_marker;
+                base_marker.header.frame_id = "world";
+                base_marker.header.stamp = t_now;
+                base_marker.action = visualization_msgs::msg::Marker::ADD;
+                base_marker.lifetime = rclcpp::Duration::from_seconds(0.6);
+
+                // A. RAIO (Seta Amarela)
+                visualization_msgs::msg::Marker arrow = base_marker;
+                arrow.ns = "debug_ray_anim"; 
+                arrow.id = 0;
+                arrow.type = visualization_msgs::msg::Marker::ARROW;
+                
+                geometry_msgs::msg::Point p_start, p_end;
+                p_start.x = current_ray_origin.x(); 
+                p_start.y = current_ray_origin.y(); 
+                p_start.z = current_ray_origin.z();
+                
+                Eigen::Vector3f end_vec = current_ray_origin + (current_ray_dir * (t_max + 0.05f)); 
+                p_end.x = end_vec.x(); 
+                p_end.y = end_vec.y(); 
+                p_end.z = end_vec.z();
+                
+                arrow.points.push_back(p_start); 
+                arrow.points.push_back(p_end);
+                arrow.scale.x = 0.005; arrow.scale.y = 0.01; arrow.scale.z = 0.02;
+                arrow.color.a = 0.8; arrow.color.r = 1.0; arrow.color.g = 1.0; arrow.color.b = 0.0;
+                markers.markers.push_back(arrow);
+
+                // B. PIVÔ (Esfera Ciano)
+                visualization_msgs::msg::Marker pivot = base_marker;
+                pivot.ns = "debug_ray_anim"; 
+                pivot.id = 1;
+                pivot.type = visualization_msgs::msg::Marker::SPHERE;
+                pivot.pose.position.x = PIVOT_POINT.x(); 
+                pivot.pose.position.y = PIVOT_POINT.y(); 
+                pivot.pose.position.z = PIVOT_POINT.z();
+                pivot.scale.x = 0.005; pivot.scale.y = 0.005; pivot.scale.z = 0.005;
+                pivot.color.a = 1.0; pivot.color.r = 0.0; pivot.color.g = 1.0; pivot.color.b = 1.0;
+                markers.markers.push_back(pivot);
+
+                // C. CILINDROS DE ANÁLISE (Transparente Branco/Azulado)
+                Eigen::Quaternionf q_cyl;
+                q_cyl.setFromTwoVectors(Eigen::Vector3f::UnitZ(), current_ray_dir);
+
+                visualization_msgs::msg::Marker cyl = base_marker;
+                cyl.ns = "debug_cylinders";
+                cyl.type = visualization_msgs::msg::Marker::CYLINDER;
+                cyl.scale.x = cylinder_radius_ * 2.0; 
+                cyl.scale.y = cylinder_radius_ * 2.0;
+                cyl.scale.z = cylinder_height_;
+                cyl.color.a = 0.3; cyl.color.r = 0.8; cyl.color.g = 0.8; cyl.color.b = 1.0;
+                
+                cyl.pose.orientation.x = q_cyl.x(); cyl.pose.orientation.y = q_cyl.y();
+                cyl.pose.orientation.z = q_cyl.z(); cyl.pose.orientation.w = q_cyl.w();
+
+                // C1. Cilindro Entrada
+                cyl.id = 10;
+                Eigen::Vector3f pos_entry = current_ray_origin + current_ray_dir * t_min;
+                cyl.pose.position.x = pos_entry.x(); cyl.pose.position.y = pos_entry.y(); cyl.pose.position.z = pos_entry.z();
+                markers.markers.push_back(cyl);
+
+                // C2. Cilindro Saída
+                if ((t_max - t_min) > 0.002f) 
+                {
+                    cyl.id = 11;
+                    Eigen::Vector3f pos_exit = current_ray_origin + current_ray_dir * t_max;
+                    cyl.pose.position.x = pos_exit.x(); cyl.pose.position.y = pos_exit.y(); cyl.pose.position.z = pos_exit.z();
+                    markers.markers.push_back(cyl);
+                }
+
+                // D. INLIERS POINTS (Vermelho)
+                if (current_inliers_ptr && !current_inliers_ptr->empty()) 
+                {
+                    visualization_msgs::msg::Marker pts = base_marker;
+                    pts.ns = "debug_inliers"; 
+                    pts.id = 20;
+                    pts.type = visualization_msgs::msg::Marker::POINTS;
+                    pts.scale.x = 0.002; pts.scale.y = 0.002;
+                    pts.color.a = 1.0; pts.color.r = 1.0; pts.color.g = 0.0; pts.color.b = 0.0; 
+
+                    pts.points.reserve(current_inliers_ptr->size());
+                    for (const auto& p : current_inliers_ptr->points) 
+                    {
+                        geometry_msgs::msg::Point gp;
+                        gp.x = p.x; gp.y = p.y; gp.z = p.z;
+                        pts.points.push_back(gp);
+                    }
+                    markers.markers.push_back(pts);
+                }
+
+                // Publish & Wait
+                debug_marker_pub_->publish(markers);
+                std::this_thread::sleep_for(std::chrono::milliseconds(animation_delay_ms_));
+            }
+            
+            float real_thickness = t_max - t_min;
+            if (real_thickness < 0.002 || real_thickness > max_gripper_width_) 
+            {
+                continue;
+            }
+
+            
+            uint64_t c5 = __rdtsc(); 
+            auto t5 = std::chrono::high_resolution_clock::now();
+
+            std::vector<StepAnalysis> steps; 
+            steps.reserve(2); 
+            
+            Eigen::Vector3f center_entry = current_ray_origin + current_ray_dir * t_min;
+            StepAnalysis res_entry = analyzeLocalCylinder(current_inliers_ptr, center_entry, current_ray_dir, cylinder_radius_, cylinder_height_);
+            
+            if (res_entry.valid) 
+            {
+                steps.push_back(res_entry);
+            }
+
+            if (real_thickness > 0.001f) 
+            { 
+                Eigen::Vector3f center_exit = current_ray_origin + current_ray_dir * t_max;
+                StepAnalysis res_exit = analyzeLocalCylinder(current_inliers_ptr, center_exit, current_ray_dir, cylinder_radius_, cylinder_height_);
+                
+                if (res_exit.valid) 
+                {
+                    steps.push_back(res_exit);
+                }
+            }
+            
+            auto t6 = std::chrono::high_resolution_clock::now(); 
+            uint64_t c6 = __rdtsc();
+            acc_analysis_ms += std::chrono::duration<double, std::milli>(t6 - t5).count();
+            acc_analysis_clk += (c6 - c5);
+
+            if (steps.empty()) 
+            {
+                continue; 
+            }
+
+           
+            uint64_t c7 = __rdtsc(); 
+            auto t7 = std::chrono::high_resolution_clock::now();
+
+            StepAnalysis& entry = steps.front();
+            StepAnalysis& exit = steps.back();
+            
+            float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
+            float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
+            
+            float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
+            float score_plan_exit  = std::max(0.0f, 1.0f - (exit.curvature * 20.0f));
+            
+            float orient_factor_entry = (score_plan_entry > 0.3) ? 1.0f : 0.5f;
+            float orient_factor_exit  = (score_plan_exit > 0.3) ? 1.0f : 0.5f;
+            
+            float score_sym_entry = entry.symmetry_score;
+            float score_sym_exit  = exit.symmetry_score;
+
+            double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + 
+                            score_sym_entry * weight_symmetry_ + 
+                            score_plan_entry * weight_planarity_) * 0.5 
+                         + (score_ang_exit * weight_orientation_ * orient_factor_exit + 
+                            score_sym_exit * weight_symmetry_ + 
+                            score_plan_exit * weight_planarity_) * 0.5;
+
+            auto t8 = std::chrono::high_resolution_clock::now(); 
+            uint64_t c8 = __rdtsc();
+            acc_scoring_ms += std::chrono::duration<double, std::milli>(t8 - t7).count();
+            acc_scoring_clk += (c8 - c7);
+
+            
+            if (total > best_iter_grasp.total_score) 
+            {
+                found_valid_in_optimization = true;
+                
+                float current_offset = finger_offset_; 
+                Eigen::Vector3f p_f1 = current_ray_origin + current_ray_dir * (t_min - current_offset);
+                Eigen::Vector3f p_f2 = current_ray_origin + current_ray_dir * (t_max + current_offset);
+                Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
+                
+                Eigen::Quaternionf best_q = findBestOrientation(p_f1, p_f2);
+
+                best_iter_grasp.pose_center.position.x = center_grasp.x(); 
+                best_iter_grasp.pose_center.position.y = center_grasp.y(); 
+                best_iter_grasp.pose_center.position.z = center_grasp.z();
+                
+                best_iter_grasp.pose_center.orientation.x = best_q.x(); 
+                best_iter_grasp.pose_center.orientation.y = best_q.y(); 
+                best_iter_grasp.pose_center.orientation.z = best_q.z(); 
+                best_iter_grasp.pose_center.orientation.w = best_q.w();
+                
+                best_iter_grasp.total_score = total;
+                best_iter_grasp.raw_ray_dir = current_ray_dir;
+            }
+
+            
+            if (total > 0.97) 
+            { 
+                if (check_collision(best_iter_grasp, collision_kdtree_, enable_ray_animation_)) 
+                { 
+                    initial_candidates.push_back(best_iter_grasp);
+                    hit_candidates_.push_back(raw_pose);
+                    
+                    perfect_grasps_count++;
+                    perfect_candidate_found = true;
+                    
+                    if (enable_ray_animation_) 
+                    {
+                        RCLCPP_INFO(this->get_logger(), "GRASP PERFEITO ENCONTRADO! Score: %.4f", total);
+                    }
+                    break; 
+                }
+            }
+        } 
+
+        if (!perfect_candidate_found && found_valid_in_optimization) 
+        {
+            initial_candidates.push_back(best_iter_grasp);
+            hit_candidates_.push_back(raw_pose);
+        }
+    }
 
     auto t_loop_end = std::chrono::high_resolution_clock::now();
     uint64_t c_loop_end = __rdtsc();
 
-    
-    std::vector<ScoredGrasp> initial_candidates;
-    // Reserva espaço aproximado
-    initial_candidates.reserve(all_candidates_.size()); 
-
-    double max_thread_inliers_ms = 0;   uint64_t max_thread_inliers_clk = 0;
-    double max_thread_analysis_ms = 0;  uint64_t max_thread_analysis_clk = 0;
-    double max_thread_scoring_ms = 0;   uint64_t max_thread_scoring_clk = 0;
-
-    for (const auto& s : thread_stats) {
-        // Merge vetores
-        initial_candidates.insert(initial_candidates.end(), s.local_candidates.begin(), s.local_candidates.end());
-        hit_candidates_.insert(hit_candidates_.end(), s.local_raw_poses.begin(), s.local_raw_poses.end());
-
-        // Max Time calculation (Gargalo da pior thread)
-        if (s.inliers_ms > max_thread_inliers_ms) { max_thread_inliers_ms = s.inliers_ms; max_thread_inliers_clk = s.inliers_clk; }
-        if (s.analysis_ms > max_thread_analysis_ms) { max_thread_analysis_ms = s.analysis_ms; max_thread_analysis_clk = s.analysis_clk; }
-        if (s.scoring_ms > max_thread_scoring_ms) { max_thread_scoring_ms = s.scoring_ms; max_thread_scoring_clk = s.scoring_clk; }
-    }
-
-    if (initial_candidates.empty()) {
+    if (initial_candidates.empty()) 
+    {
         has_best_ = false; 
         return geometry_msgs::msg::PoseArray();
     }
 
+    
     uint64_t c_sort_start = __rdtsc();
     auto t_sort_start = std::chrono::high_resolution_clock::now();
     
-    tbb::parallel_sort(initial_candidates.begin(), initial_candidates.end(), 
-        [](const ScoredGrasp& a, const ScoredGrasp& b) { return a.total_score > b.total_score; });
+    std::sort(initial_candidates.begin(), initial_candidates.end(), 
+        [](const ScoredGrasp& a, const ScoredGrasp& b) 
+        { 
+            return a.total_score > b.total_score; 
+        });
         
     auto t_sort_end = std::chrono::high_resolution_clock::now();
     uint64_t c_sort_end = __rdtsc();
 
-
+    
     uint64_t c_collision_start = __rdtsc();
     auto t_collision_start = std::chrono::high_resolution_clock::now();
 
@@ -1090,9 +1292,14 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     
     for (const auto& candidate : initial_candidates)
     {
-        if (best_grasps_.size() >= (size_t)num_best_grasps_) break;
+        if (best_grasps_.size() >= (size_t)num_best_grasps_) 
+        {
+            break;
+        }
+        
         checks_count++;
-        if (check_collision(candidate, collision_kdtree_, false)) {
+        if (check_collision(candidate, collision_kdtree_, false)) 
+        {
             best_grasps_.push_back(candidate);
         }
     }
@@ -1101,10 +1308,15 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     auto t_collision_end = std::chrono::high_resolution_clock::now();
     uint64_t c_collision_end = __rdtsc();
     
+   
     geometry_msgs::msg::PoseArray pose_array;
     pose_array.header.frame_id = "world"; 
     pose_array.header.stamp = this->now(); 
-    for(const auto& bg : best_grasps_) pose_array.poses.push_back(bg.pose_center);
+    
+    for(const auto& bg : best_grasps_) 
+    {
+        pose_array.poses.push_back(bg.pose_center);
+    }
 
     auto t_func_end = std::chrono::high_resolution_clock::now();
     uint64_t c_func_end = __rdtsc();
@@ -1116,34 +1328,37 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     uint64_t clk_func = c_func_end - c_func_start;
     
-    RCLCPP_INFO(this->get_logger(), "================ BENCHMARK TBB (SINGLE PASS) ===============");
+    RCLCPP_INFO(this->get_logger(), "================ BENCHMARK SERIAL (ANIMATION MODE) ===============");
     RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.4f ms | Clocks: %s", d_func, format_clocks(clk_func).c_str());
-    RCLCPP_INFO(this->get_logger(), "  -> TBB Parallel Loop:  %.4f ms", d_loop);
+    RCLCPP_INFO(this->get_logger(), "  -> Serial Loop:        %.4f ms", d_loop);
     
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Inliers:  %.4f ms | Clocks: %s", acc_inliers_ms, format_clocks(acc_inliers_clk).c_str());
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Analysis: %.4f ms | Clocks: %s", acc_analysis_ms, format_clocks(acc_analysis_clk).c_str());
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Scoring:  %.4f ms | Clocks: %s", acc_scoring_ms, format_clocks(acc_scoring_clk).c_str());
     
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Thread Inliers:  %.4f ms | Clocks: %s", max_thread_inliers_ms, format_clocks(max_thread_inliers_clk).c_str());
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Thread Analysis: %.4f ms | Clocks: %s", max_thread_analysis_ms, format_clocks(max_thread_analysis_clk).c_str());
-    RCLCPP_INFO(this->get_logger(), "     |-> Max Thread Scoring:  %.4f ms | Clocks: %s", max_thread_scoring_ms, format_clocks(max_thread_scoring_clk).c_str());
-    
-    RCLCPP_INFO(this->get_logger(), "  -> Sort (Parallel):    %.4f ms", d_sort);
-    RCLCPP_INFO(this->get_logger(), "  -> Lazy Collision:     %.4f ms (%d checks)", d_col, checks_count);
+    RCLCPP_INFO(this->get_logger(), "  -> Sort:               %.4f ms", d_sort);
+    RCLCPP_INFO(this->get_logger(), "  -> Collision Check:    %.4f ms (%d checks)", d_col, checks_count);
     
     size_t num_to_print = std::min((size_t)5, best_grasps_.size());
-    if (num_to_print > 0) {
+    if (num_to_print > 0) 
+    {
         RCLCPP_INFO(this->get_logger(), ">>> TOP %lu SCORES <<<", num_to_print);
-        for (size_t i = 0; i < num_to_print; ++i) {
+        for (size_t i = 0; i < num_to_print; ++i) 
+        {
              RCLCPP_INFO(this->get_logger(), "  #%02lu: Score: %.4f", i+1, best_grasps_[i].total_score);
         }
-    } else {
+    } 
+    else 
+    {
         RCLCPP_WARN(this->get_logger(), ">>> NENHUM GRASP ENCONTRADO <<<");
     }
     RCLCPP_INFO(this->get_logger(), "============================================================");
 
     g_last_run_stats.total_func = d_func;
-    g_last_run_stats.loop_tbb = d_loop;
-    g_last_run_stats.max_inliers = max_thread_inliers_ms;
-    g_last_run_stats.max_analysis = max_thread_analysis_ms;
-    g_last_run_stats.max_scoring = max_thread_scoring_ms;
+    g_last_run_stats.loop_tbb = d_loop; 
+    g_last_run_stats.max_inliers = acc_inliers_ms;
+    g_last_run_stats.max_analysis = acc_analysis_ms;
+    g_last_run_stats.max_scoring = acc_scoring_ms;
     g_last_run_stats.sort = d_sort;
     g_last_run_stats.collision = d_col;
     g_last_run_stats.checks = checks_count;
@@ -1174,22 +1389,7 @@ void GenerateGraspPoses::timerCallback()
     bbox_marker.color.r = 0.8; bbox_marker.color.g = 0.8; bbox_marker.color.b = 0.8; bbox_marker.color.a = 0.2; 
     pub_bbox_->publish(bbox_marker);
 
-    if (enable_ray_animation_) 
-    {
-        visualization_msgs::msg::MarkerArray ma_rays; 
-        float ray_len = 0.15; 
-        size_t hit_lim = std::min((size_t)500, hit_candidates_.size());
-        for(size_t i=0; i<hit_lim; ++i) {
-            visualization_msgs::msg::Marker k; 
-            k.header.frame_id="world"; k.header.stamp=t; k.ns="rays_hit"; k.id=i; k.type=0; k.action=0; 
-            k.scale.x=ray_len * 0.5; k.scale.y=0.002; k.scale.z=0.002; 
-            k.color.r=0.0; k.color.g=1.0; k.color.b=1.0; k.color.a=0.5; 
-            k.pose = hit_candidates_[i];
-            ma_rays.markers.push_back(k);
-        }
-        pub_rays_->publish(ma_rays);
-    }
-    
+  
     if(has_best_) publishBest();
 }
 

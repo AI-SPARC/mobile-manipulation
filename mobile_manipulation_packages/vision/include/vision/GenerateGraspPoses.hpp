@@ -71,11 +71,10 @@ public:
     explicit GenerateGraspPoses(const rclcpp::NodeOptions & options);
 
     geometry_msgs::msg::PoseArray processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
+
 private:
     void timerCallback();
     void loadAndProcess(const std::string& path);
-    
-    
     
     std::vector<geometry_msgs::msg::Pose> generateMultiOrientedRays(
         const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res);
@@ -132,6 +131,7 @@ private:
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; // Nuvem leve
     pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;
+
     // Publishers
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;
@@ -145,6 +145,10 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_gripper_boxes_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
+
+    // --- NOVOS PUBLISHERS DE VISUALIZAÇÃO AVANÇADA (Adicionados para compilar com o novo CPP) ---
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_debug_cylinder_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_step_inliers_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
