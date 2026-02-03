@@ -11,6 +11,10 @@
 #include <x86intrin.h>
 #include <atomic>
 #include <mutex>
+#include <numeric>
+
+// Mensagens para Benchmark
+#include <std_msgs/msg/float64.hpp>
 
 // TBB
 #include <tbb/parallel_for.h>
@@ -37,7 +41,6 @@ using namespace std::chrono_literals;
 namespace vision 
 {
 
-// Estrutura estática para capturar estatísticas sem alterar o .hpp
 struct GlobalBenchStats {
     double total_func;
     double loop_tbb;
@@ -48,6 +51,31 @@ struct GlobalBenchStats {
     double collision;
     int checks;
 } g_last_run_stats;
+
+struct BenchmarkPublishers {
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr t_total;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr t_loop;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr t_inliers;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr t_analysis;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr t_scoring;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr t_sort;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr t_collision;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr n_checks;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr score_max;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr score_avg;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr mem_usage;
+};
+static std::unique_ptr<BenchmarkPublishers> g_bench_pubs;
+
+double getMemoryUsageMB() {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0) 
+    {
+        
+        return static_cast<double>(usage.ru_maxrss) / 1024.0;
+    }
+    return 0.0;
+}
 
 GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options) 
 : Node("generate_grasp_poses", options) 
@@ -131,7 +159,6 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     total_orientations_ = this->get_parameter("num_random_orientations").as_int();
     rotation_step_deg_ = static_cast<float>(this->get_parameter("rotation_step_deg").as_double());
     
-    // Leitura dos novos parametros
     num_benchmark_runs_ = this->get_parameter("num_benchmark_runs").as_int();
     enable_ray_animation_ = this->get_parameter("enable_ray_animation").as_bool();
     animation_delay_ms_ = this->get_parameter("animation_delay_ms").as_int();
@@ -147,6 +174,22 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     pub_gripper_boxes_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("debug_gripper_boxes", 10);
     pub_debug_grasps_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_grasps_cloud", 10);
     debug_marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/grasp_debug_rays", 10);
+
+    g_bench_pubs = std::make_unique<BenchmarkPublishers>();
+    g_bench_pubs->t_total = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/total_ms", 10);
+    g_bench_pubs->t_loop = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/loop_serial_ms", 10);
+    
+    g_bench_pubs->t_inliers = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/parts/inliers_ms", 10);
+    g_bench_pubs->t_analysis = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/parts/analysis_ms", 10);
+    g_bench_pubs->t_scoring = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/parts/scoring_ms", 10);
+    g_bench_pubs->t_sort = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/parts/sort_ms", 10);
+    g_bench_pubs->t_collision = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/parts/collision_ms", 10);
+    g_bench_pubs->n_checks = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/stats/collision_checks", 10);
+    
+    g_bench_pubs->score_max = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/score/max", 10);
+    g_bench_pubs->score_avg = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/score/avg", 10);
+    
+    g_bench_pubs->mem_usage = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/system/memory_mb", 10);
 
     stored_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
     gripper_dense_cloud_.reset(new pcl::PointCloud<pcl::PointXYZRGB>); 
@@ -192,7 +235,37 @@ void GenerateGraspPoses::loadAndProcess(const std::string& path)
         hit_candidates_.clear();
         best_grasps_.clear();
         
+        // Executa o algoritmo
         processCloud(temp_cloud, temp_cloud);
+
+        // --- PUBLICAR ESTATÍSTICAS NO FOXGLOVE POR EXECUÇÃO ---
+        auto msg_f64 = [](double val){ std_msgs::msg::Float64 m; m.data = val; return m; };
+        
+        // Tempos
+        g_bench_pubs->t_total->publish(msg_f64(g_last_run_stats.total_func));
+        g_bench_pubs->t_loop->publish(msg_f64(g_last_run_stats.loop_tbb));
+        g_bench_pubs->t_inliers->publish(msg_f64(g_last_run_stats.max_inliers));
+        g_bench_pubs->t_analysis->publish(msg_f64(g_last_run_stats.max_analysis));
+        g_bench_pubs->t_scoring->publish(msg_f64(g_last_run_stats.max_scoring));
+        g_bench_pubs->t_sort->publish(msg_f64(g_last_run_stats.sort));
+        g_bench_pubs->t_collision->publish(msg_f64(g_last_run_stats.collision));
+        g_bench_pubs->n_checks->publish(msg_f64((double)g_last_run_stats.checks));
+
+        // Memória
+        g_bench_pubs->mem_usage->publish(msg_f64(getMemoryUsageMB()));
+
+        // Scores (Qualidade)
+        double max_score = 0.0;
+        double avg_score = 0.0;
+        if (!best_grasps_.empty()) {
+            max_score = best_grasps_[0].total_score;
+            double sum = 0;
+            for(const auto& bg : best_grasps_) sum += bg.total_score;
+            avg_score = sum / best_grasps_.size();
+        }
+        g_bench_pubs->score_max->publish(msg_f64(max_score));
+        g_bench_pubs->score_avg->publish(msg_f64(avg_score));
+        // --------------------------------------------------------
 
         acc_stats.total_func += g_last_run_stats.total_func;
         acc_stats.loop_tbb += g_last_run_stats.loop_tbb;
