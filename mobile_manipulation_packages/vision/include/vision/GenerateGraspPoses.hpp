@@ -92,7 +92,7 @@ private:
 
     // --- ASSIMP & COLISÃO ---
     void extractBoundingBoxesFromOBJ(); // Substitui a função antiga de STL
-    bool check_collision(const ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug);
+    bool check_collision(ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug, bool try_rotations);
     
     // Visualização
     void publishGripperModel();

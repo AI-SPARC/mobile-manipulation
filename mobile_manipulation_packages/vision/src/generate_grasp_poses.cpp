@@ -164,7 +164,12 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     animation_delay_ms_ = this->get_parameter("animation_delay_ms").as_int();
 
     pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", 10);
-    pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", 10);
+
+    rclcpp::QoS qos_profile(10); // Profundidade do histórico
+    qos_profile.transient_local(); // O segredo está aqui: "latched"
+    qos_profile.reliable();
+
+    pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", qos_profile);
     pub_bbox_  = this->create_publisher<visualization_msgs::msg::Marker>("bounding_box", 10);
     pub_markers_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("best_grasps_markers", 10);
     pub_poses_ = this->create_publisher<geometry_msgs::msg::PoseArray>("best_grasps_poses", 10);
@@ -304,21 +309,30 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
 
 
 
-    // 2. Rotação Aleatória (Apenas para debug com arquivo PCD)
+    
     if (use_pcd_file == true)
     {
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dis(0.0f, 2.0f * M_PI); 
         float rot_x = dis(gen); float rot_y = dis(gen); float rot_z = dis(gen);
+
+        
         Eigen::Vector4f centroid;
         pcl::compute3DCentroid(*target, centroid);
+
+        
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-        transform.translation() = centroid.head<3>();
+
+        
         transform.rotate(Eigen::AngleAxisf(rot_x, Eigen::Vector3f::UnitX())); 
         transform.rotate(Eigen::AngleAxisf(rot_y, Eigen::Vector3f::UnitY()));
         transform.rotate(Eigen::AngleAxisf(rot_z, Eigen::Vector3f::UnitZ())); 
+
+       
         transform.translate(-centroid.head<3>());
+
+        
         pcl::transformPointCloud(*target, *target, transform);
     }
     else
@@ -433,51 +447,89 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
     const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res) 
 {
     std::vector<geometry_msgs::msg::Pose> poses;
-    
+    std::vector<float> ray_lengths; 
     
     Eigen::Vector3f center = (min.head<3>() + max.head<3>()) / 2.0f;
+    // 'size' contém a largura total, altura total e profundidade total
     Eigen::Vector3f size = max.head<3>() - min.head<3>();
     
-   
-    auto add_ray = [&](Eigen::Vector3f local_pos, Eigen::Vector3f direction) 
+    // Lambda para adicionar raio e seu comprimento específico
+    auto add_ray = [&](Eigen::Vector3f local_pos, Eigen::Vector3f direction, float length) 
     {
         geometry_msgs::msg::Pose p;
         p.position.x = local_pos.x() + center.x(); 
         p.position.y = local_pos.y() + center.y(); 
         p.position.z = local_pos.z() + center.z();
         
-        
         Eigen::Quaternionf q; 
         q.setFromTwoVectors(Eigen::Vector3f::UnitX(), direction); 
         p.orientation.x = q.x(); p.orientation.y = q.y(); 
         p.orientation.z = q.z(); p.orientation.w = q.w();
+        
         poses.push_back(p);
+        ray_lengths.push_back(length); 
     };
 
     float half_x = size.x() / 2.0f;
     float half_y = size.y() / 2.0f;
     float half_z = size.z() / 2.0f;
 
-    
+    // Face X: Varre Y e Z. O raio viaja em X, então o comprimento é size.x() (Total)
     for(float y = -half_y; y < half_y; y += res)
         for(float z = -half_z; z < half_z; z += res) {
-            add_ray({half_x, y, z}, {-1, 0, 0});  
-            // add_ray({-half_x, y, z}, {1, 0, 0});  
+            add_ray({half_x, y, z}, {-1, 0, 0}, size.x());  
+            // Se descomentar a linha abaixo, use size.x() também
+            // add_ray({-half_x, y, z}, {1, 0, 0}, size.x());  
         }
 
-    
+    // Face Y: Varre X e Z. O raio viaja em Y, então o comprimento é size.y() (Total)
     for(float x = -half_x; x < half_x; x += res)
         for(float z = -half_z; z < half_z; z += res) {
-            add_ray({x, half_y, z}, {0, -1, 0});
-            // add_ray({x, -half_y, z}, {0, 1, 0});
+            add_ray({x, half_y, z}, {0, -1, 0}, size.y());
+            // add_ray({x, -half_y, z}, {0, 1, 0}, size.y());
         }
 
-    
+    // Face Z: Varre X e Y. O raio viaja em Z, então o comprimento é size.z() (Total)
     for(float x = -half_x; x < half_x; x += res)
         for(float y = -half_y; y < half_y; y += res) {
-            add_ray({x, y, half_z}, {0, 0, -1});
-            // add_ray({x, y, -half_z}, {0, 0, 1});
+            add_ray({x, y, half_z}, {0, 0, -1}, size.z());
+            // add_ray({x, y, -half_z}, {0, 0, 1}, size.z());
         }
+
+   
+    if (pub_rays_) { 
+        visualization_msgs::msg::MarkerArray marker_array;
+
+        visualization_msgs::msg::Marker clear_marker;
+        clear_marker.action = visualization_msgs::msg::Marker::DELETEALL;
+        marker_array.markers.push_back(clear_marker);
+
+        for (size_t i = 0; i < poses.size(); ++i) {
+            visualization_msgs::msg::Marker marker;
+            marker.header.frame_id = "world"; 
+            marker.header.stamp = this->now();
+            marker.ns = "generated_rays";
+            marker.id = i;
+            marker.type = visualization_msgs::msg::Marker::ARROW;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+            marker.pose = poses[i];
+            
+            
+            marker.scale.x = ray_lengths[i]; 
+            
+            
+            marker.scale.y = 0.005; 
+            marker.scale.z = 0.005; 
+
+            marker.color.r = 1.0;
+            marker.color.a = 1.0; 
+
+            marker_array.markers.push_back(marker);
+        }
+        
+        
+        pub_rays_->publish(marker_array);
+    }
 
     return poses;
 }
@@ -686,20 +738,17 @@ void GenerateGraspPoses::publishGripperCollisionBoxes()
 }
 
 
-bool GenerateGraspPoses::check_collision(const ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug)
+bool GenerateGraspPoses::check_collision(ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug, bool try_rotations)
 {
-    
     if (gripper_boxes_.empty()) return true;
     if (!env_kdtree.getInputCloud() || env_kdtree.getInputCloud()->empty()) return true;
 
-    
     static bool tf_initialized = false;
     static Eigen::Affine3f tf_tcp_to_mesh = Eigen::Affine3f::Identity();
     static float max_search_radius = 0.0f;
 
     if (!tf_initialized) 
     {
-        
         Eigen::Matrix3f rot_geom;
         rot_geom = Eigen::AngleAxisf(mesh_rot_roll_, Eigen::Vector3f::UnitX())
                  * Eigen::AngleAxisf(mesh_rot_pitch_, Eigen::Vector3f::UnitY())
@@ -719,83 +768,99 @@ bool GenerateGraspPoses::check_collision(const ScoredGrasp& grasp, const pcl::Kd
         tf_initialized = true;
     }
 
-    
     Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
-    Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
-    
-    
-    Eigen::Affine3f tf_world_to_mesh = Eigen::Translation3f(grasp_pos) * grasp_rot * tf_tcp_to_mesh;
-    Eigen::Affine3f tf_mesh_to_world = tf_world_to_mesh.inverse();
+    Eigen::Quaternionf original_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
 
-   
     std::vector<int> pointIdx;
     std::vector<float> pointSqDist;
     pcl::PointXYZ searchPoint;
     searchPoint.x = grasp_pos.x(); searchPoint.y = grasp_pos.y(); searchPoint.z = grasp_pos.z();
 
-    
     if (env_kdtree.radiusSearch(searchPoint, max_search_radius, pointIdx, pointSqDist) == 0) {
         return true; 
     }
 
-    
     const float MARGIN = 0.002f;
-    bool collision = false;
     const auto& cloud_points = env_kdtree.getInputCloud()->points;
 
-    
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_cloud;
-    if (publish_debug) {
-        debug_cloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
-        debug_cloud->header.frame_id = "world";
-        debug_cloud->reserve(pointIdx.size());
-    }
-
-    for (int idx : pointIdx)
-    {
-        const auto& pt = cloud_points[idx];
-        
-        
-        Eigen::Vector3f p_world(pt.x, pt.y, pt.z);
-        Eigen::Vector3f p_local = tf_mesh_to_world * p_world;
-
-        bool point_is_inside = false;
-
-        for (const auto& box : gripper_boxes_)
-        {
-            if (p_local.x() >= (box.min_pt.x() - MARGIN) && p_local.x() <= (box.max_pt.x() + MARGIN) &&
-                p_local.y() >= (box.min_pt.y() - MARGIN) && p_local.y() <= (box.max_pt.y() + MARGIN) &&
-                p_local.z() >= (box.min_pt.z() - MARGIN) && p_local.z() <= (box.max_pt.z() + MARGIN))
-            {
-                point_is_inside = true;
-                collision = true;
-                break; 
-            }
-        }
-
-        
-        if (publish_debug) {
-            pcl::PointXYZRGB p_vis;
-            p_vis.x = pt.x; p_vis.y = pt.y; p_vis.z = pt.z;
-            if (point_is_inside) { p_vis.r = 255; p_vis.g = 0; p_vis.b = 0; }
-            else                 { p_vis.r = 0; p_vis.g = 255; p_vis.b = 0; }
-            debug_cloud->points.push_back(p_vis);
-        } else {
-            
-            if (collision) return false; 
-        }
-    }
-
    
-    if (publish_debug && !debug_cloud->empty())
+    const int NUM_STEPS = try_rotations ? 18 : 1; 
+    const float ANGLE_STEP = (2.0f * M_PI) / 18.0f; 
+    
+    bool final_collision_state = true; 
+
+    for (int step = 0; step < NUM_STEPS; ++step)
     {
-        sensor_msgs::msg::PointCloud2 msg;
-        pcl::toROSMsg(*debug_cloud, msg);
-        msg.header.stamp = this->now();
-        pub_debug_collision_->publish(msg);
+        float current_angle = step * ANGLE_STEP;
+        Eigen::Quaternionf rotation_offset(Eigen::AngleAxisf(current_angle, Eigen::Vector3f::UnitY()));
+
+        Eigen::Quaternionf current_rot = original_rot * rotation_offset;
+
+        Eigen::Affine3f tf_world_to_mesh = Eigen::Translation3f(grasp_pos) * current_rot * tf_tcp_to_mesh;
+        Eigen::Affine3f tf_mesh_to_world = tf_world_to_mesh.inverse();
+
+        bool collision_in_this_angle = false;
+
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_cloud;
+        if (publish_debug && step == 0) {
+            debug_cloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+            debug_cloud->header.frame_id = "world";
+            debug_cloud->reserve(pointIdx.size());
+        }
+
+        for (int idx : pointIdx)
+        {
+            const auto& pt = cloud_points[idx];
+            
+            Eigen::Vector3f p_world(pt.x, pt.y, pt.z);
+            Eigen::Vector3f p_local = tf_mesh_to_world * p_world;
+
+            bool point_is_inside = false;
+
+            for (const auto& box : gripper_boxes_)
+            {
+                if (p_local.x() >= (box.min_pt.x() - MARGIN) && p_local.x() <= (box.max_pt.x() + MARGIN) &&
+                    p_local.y() >= (box.min_pt.y() - MARGIN) && p_local.y() <= (box.max_pt.y() + MARGIN) &&
+                    p_local.z() >= (box.min_pt.z() - MARGIN) && p_local.z() <= (box.max_pt.z() + MARGIN))
+                {
+                    point_is_inside = true;
+                    collision_in_this_angle = true;
+                    break; 
+                }
+            }
+
+            if (publish_debug && debug_cloud) {
+                pcl::PointXYZRGB p_vis;
+                p_vis.x = pt.x; p_vis.y = pt.y; p_vis.z = pt.z;
+                if (point_is_inside) { p_vis.r = 255; p_vis.g = 0; p_vis.b = 0; }
+                else                 { p_vis.r = 0; p_vis.g = 255; p_vis.b = 0; }
+                debug_cloud->points.push_back(p_vis);
+            }
+
+            if (collision_in_this_angle && !publish_debug) break;
+        }
+
+        if (publish_debug && debug_cloud && !debug_cloud->empty() && step == 0)
+        {
+            sensor_msgs::msg::PointCloud2 msg;
+            pcl::toROSMsg(*debug_cloud, msg);
+            msg.header.stamp = this->now();
+            pub_debug_collision_->publish(msg);
+        }
+
+        if (!collision_in_this_angle) {
+            
+            grasp.pose_center.orientation.w = current_rot.w();
+            grasp.pose_center.orientation.x = current_rot.x();
+            grasp.pose_center.orientation.y = current_rot.y();
+            grasp.pose_center.orientation.z = current_rot.z();
+
+            final_collision_state = false; 
+            break; 
+        }
     }
 
-    return !collision;
+    return !final_collision_state;
 }
 
 Eigen::Quaternionf GenerateGraspPoses::findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2)
@@ -940,13 +1005,14 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     
     uint64_t c_loop_start = __rdtsc();
     auto t_loop_start = std::chrono::high_resolution_clock::now();
-
+    int contador = 0, contador2 = 0;
     
     for (size_t i = 0; i < all_candidates_.size(); ++i) 
     {
         
         if (perfect_grasps_count >= num_best_grasps_) 
         {
+            std::cout << "merda" << std::endl;
             break;
         }
 
@@ -1000,9 +1066,10 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
         
         float init_thickness = t_max_init - t_min_init;
-        if (!hit_init || init_inliers->size() < 5 || 
-            init_thickness < 0.002 || init_thickness > max_gripper_width_) 
+        if (!hit_init || init_inliers->size() < 3 || 
+            init_thickness < 0.0005 || init_thickness > max_gripper_width_) 
         {
+            contador2++;
             continue;
         }
 
@@ -1045,7 +1112,9 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         bool perfect_candidate_found = false;                          
 
         
-        int max_optimization_steps = 9; 
+        int max_optimization_steps = 12; 
+        
+        contador++;
         
         for (int step = 0; step < max_optimization_steps; ++step)
         {
@@ -1306,9 +1375,9 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             }
 
             
-            if (total > 0.97) 
+            if (total > 0.95) 
             { 
-                if (check_collision(best_iter_grasp, collision_kdtree_, enable_ray_animation_)) 
+                if (check_collision(best_iter_grasp, collision_kdtree_, true, false)) 
                 { 
                     initial_candidates.push_back(best_iter_grasp);
                     hit_candidates_.push_back(raw_pose);
@@ -1331,6 +1400,9 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             hit_candidates_.push_back(raw_pose);
         }
     }
+
+    std::cout << contador << std::endl;
+    std::cout << contador2 << std::endl;
 
     auto t_loop_end = std::chrono::high_resolution_clock::now();
     uint64_t c_loop_end = __rdtsc();
@@ -1363,7 +1435,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     
     int checks_count = 0; 
     
-    for (const auto& candidate : initial_candidates)
+    for (auto& candidate : initial_candidates)
     {
         if (best_grasps_.size() >= (size_t)num_best_grasps_) 
         {
@@ -1371,10 +1443,12 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         }
         
         checks_count++;
-        if (check_collision(candidate, collision_kdtree_, false)) 
+        if (check_collision(candidate, collision_kdtree_, false, true)) 
         {
             best_grasps_.push_back(candidate);
         }
+        
+        
     }
     has_best_ = !best_grasps_.empty();
     
