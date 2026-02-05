@@ -100,6 +100,12 @@ private:
     void publishBest();
 
     // Params
+    // [NOVO] Parâmetros da Mesh do Objeto
+    std::string object_mesh_path_;
+    std::string gripper_glb_path_;
+    bool publish_object_mesh_;
+    bool publish_gripper_mesh_;
+    // -----------------------------------
     bool use_pcd_file;
     std::string pcd_path_;
     std::string gripper_mesh_path_;
@@ -141,6 +147,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_inliers_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_collision_;
 
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_object_mesh_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_gripper_model_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_gripper_boxes_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;

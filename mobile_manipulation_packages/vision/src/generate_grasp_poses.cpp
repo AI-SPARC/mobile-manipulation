@@ -83,8 +83,14 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<bool>("use_pcd_file", false);
     this->declare_parameter<std::string>("pcd_path", "/home/momesso/pibic/nuvem.pcd");
     
+    this->declare_parameter<std::string>("object_mesh_path", "/home/momesso/pibic/objeto.obj");
+    this->declare_parameter<bool>("publish_object_mesh", false);
+
     this->declare_parameter<std::string>("gripper_mesh_path", "/home/momesso/hand_and_fingers.obj");
     this->declare_parameter<double>("gripper_mesh_scale", 1.0);
+    
+    this->declare_parameter<std::string>("gripper_glb_path", "/home/momesso/hand_and_fingers.glb");
+    this->declare_parameter<bool>("publish_gripper_mesh", false);
     
     this->declare_parameter<double>("mesh_offset_x", 0.025);
     this->declare_parameter<double>("mesh_offset_y", 0.0);
@@ -117,7 +123,6 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
 
     this->declare_parameter<int>("num_random_orientations", 20);
 
-    // --- NOVOS PARAMETROS ---
     this->declare_parameter<int>("num_benchmark_runs", 10);
     this->declare_parameter<bool>("enable_ray_animation", true);
     this->declare_parameter<int>("animation_delay_ms", 20);
@@ -125,8 +130,14 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     use_pcd_file = this->get_parameter("use_pcd_file").as_bool();
     pcd_path_ = this->get_parameter("pcd_path").as_string();
     
+    object_mesh_path_ = this->get_parameter("object_mesh_path").as_string();
+    publish_object_mesh_ = this->get_parameter("publish_object_mesh").as_bool();
+
     gripper_mesh_path_ = this->get_parameter("gripper_mesh_path").as_string();
     gripper_mesh_scale_ = static_cast<float>(this->get_parameter("gripper_mesh_scale").as_double());
+
+    gripper_glb_path_ = this->get_parameter("gripper_glb_path").as_string();
+    publish_gripper_mesh_ = this->get_parameter("publish_gripper_mesh").as_bool();
 
     mesh_offset_x_ = static_cast<float>(this->get_parameter("mesh_offset_x").as_double());
     mesh_offset_y_ = static_cast<float>(this->get_parameter("mesh_offset_y").as_double());
@@ -165,8 +176,8 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
 
     pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", 10);
 
-    rclcpp::QoS qos_profile(10); // Profundidade do histórico
-    qos_profile.transient_local(); // O segredo está aqui: "latched"
+    rclcpp::QoS qos_profile(10);
+    qos_profile.transient_local(); 
     qos_profile.reliable();
 
     pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", qos_profile);
@@ -179,6 +190,8 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     pub_gripper_boxes_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("debug_gripper_boxes", 10);
     pub_debug_grasps_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_grasps_cloud", 10);
     debug_marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/grasp_debug_rays", 10);
+    
+    pub_object_mesh_ = this->create_publisher<visualization_msgs::msg::Marker>("debug_object_mesh", qos_profile);
 
     g_bench_pubs = std::make_unique<BenchmarkPublishers>();
     g_bench_pubs->t_total = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/time/total_ms", 10);
@@ -228,25 +241,24 @@ void GenerateGraspPoses::loadAndProcess(const std::string& path)
         return;
     }
     
-   
     GlobalBenchStats acc_stats = {0,0,0,0,0,0,0,0};
     int runs = std::max(1, num_benchmark_runs_);
 
     RCLCPP_INFO(this->get_logger(), ">>> INICIANDO BENCHMARK LOOP: %d execuções <<<", runs);
 
+
     for(int i = 0; i < runs; ++i)
     {
-        
         hit_candidates_.clear();
         best_grasps_.clear();
         
-        // Executa o algoritmo
+        
         processCloud(temp_cloud, temp_cloud);
 
-        // --- PUBLICAR ESTATÍSTICAS NO FOXGLOVE POR EXECUÇÃO ---
+        
         auto msg_f64 = [](double val){ std_msgs::msg::Float64 m; m.data = val; return m; };
         
-        // Tempos
+        
         g_bench_pubs->t_total->publish(msg_f64(g_last_run_stats.total_func));
         g_bench_pubs->t_loop->publish(msg_f64(g_last_run_stats.loop_tbb));
         g_bench_pubs->t_inliers->publish(msg_f64(g_last_run_stats.max_inliers));
@@ -256,10 +268,10 @@ void GenerateGraspPoses::loadAndProcess(const std::string& path)
         g_bench_pubs->t_collision->publish(msg_f64(g_last_run_stats.collision));
         g_bench_pubs->n_checks->publish(msg_f64((double)g_last_run_stats.checks));
 
-        // Memória
+       
         g_bench_pubs->mem_usage->publish(msg_f64(getMemoryUsageMB()));
 
-        // Scores (Qualidade)
+        
         double max_score = 0.0;
         double avg_score = 0.0;
         if (!best_grasps_.empty()) {
@@ -270,7 +282,7 @@ void GenerateGraspPoses::loadAndProcess(const std::string& path)
         }
         g_bench_pubs->score_max->publish(msg_f64(max_score));
         g_bench_pubs->score_avg->publish(msg_f64(avg_score));
-        // --------------------------------------------------------
+    
 
         acc_stats.total_func += g_last_run_stats.total_func;
         acc_stats.loop_tbb += g_last_run_stats.loop_tbb;
@@ -285,7 +297,7 @@ void GenerateGraspPoses::loadAndProcess(const std::string& path)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    // Calcula Médias
+    
     double div = static_cast<double>(runs);
     
     RCLCPP_INFO(this->get_logger(), " ");
@@ -304,11 +316,7 @@ void GenerateGraspPoses::loadAndProcess(const std::string& path)
 
 geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
-    // Verificação básica de segurança
     if (!target || target->empty()) return geometry_msgs::msg::PoseArray();
-
-
-
     
     if (use_pcd_file == true)
     {
@@ -321,19 +329,58 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
         Eigen::Vector4f centroid;
         pcl::compute3DCentroid(*target, centroid);
 
-        
+       
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
-        
+       
         transform.rotate(Eigen::AngleAxisf(rot_x, Eigen::Vector3f::UnitX())); 
         transform.rotate(Eigen::AngleAxisf(rot_y, Eigen::Vector3f::UnitY()));
         transform.rotate(Eigen::AngleAxisf(rot_z, Eigen::Vector3f::UnitZ())); 
 
-       
         transform.translate(-centroid.head<3>());
 
         
         pcl::transformPointCloud(*target, *target, transform);
+
+        
+        if (publish_object_mesh_)
+        {
+            visualization_msgs::msg::Marker mesh_marker;
+            mesh_marker.header.frame_id = "world";
+            mesh_marker.header.stamp = this->now();
+            mesh_marker.ns = "object_mesh_aligned";
+            mesh_marker.id = 0;
+            mesh_marker.type = visualization_msgs::msg::Marker::MESH_RESOURCE;
+            mesh_marker.action = visualization_msgs::msg::Marker::ADD;
+            mesh_marker.mesh_resource = "file://" + object_mesh_path_; 
+            
+            
+            mesh_marker.scale.x = 1.0;
+            mesh_marker.scale.y = 1.0;
+            mesh_marker.scale.z = 1.0;
+            
+            
+            Eigen::Vector3f t = transform.translation();
+            Eigen::Quaternionf q(transform.rotation());
+
+            mesh_marker.pose.position.x = t.x();
+            mesh_marker.pose.position.y = t.y();
+            mesh_marker.pose.position.z = t.z();
+            
+            mesh_marker.pose.orientation.x = q.x();
+            mesh_marker.pose.orientation.y = q.y();
+            mesh_marker.pose.orientation.z = q.z();
+            mesh_marker.pose.orientation.w = q.w();
+
+            
+            mesh_marker.color.r = 0.8;
+            mesh_marker.color.g = 0.8;
+            mesh_marker.color.b = 0.8;
+            mesh_marker.color.a = 1.0; 
+
+            pub_object_mesh_->publish(mesh_marker);
+        }
+        
     }
     else
     {
@@ -479,21 +526,21 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
         for(float z = -half_z; z < half_z; z += res) {
             add_ray({half_x, y, z}, {-1, 0, 0}, size.x());  
             // Se descomentar a linha abaixo, use size.x() também
-            // add_ray({-half_x, y, z}, {1, 0, 0}, size.x());  
+            add_ray({-half_x, y, z}, {1, 0, 0}, size.x());  
         }
 
     // Face Y: Varre X e Z. O raio viaja em Y, então o comprimento é size.y() (Total)
     for(float x = -half_x; x < half_x; x += res)
         for(float z = -half_z; z < half_z; z += res) {
             add_ray({x, half_y, z}, {0, -1, 0}, size.y());
-            // add_ray({x, -half_y, z}, {0, 1, 0}, size.y());
+            add_ray({x, -half_y, z}, {0, 1, 0}, size.y());
         }
 
     // Face Z: Varre X e Y. O raio viaja em Z, então o comprimento é size.z() (Total)
     for(float x = -half_x; x < half_x; x += res)
         for(float y = -half_y; y < half_y; y += res) {
             add_ray({x, y, half_z}, {0, 0, -1}, size.z());
-            // add_ray({x, y, -half_z}, {0, 0, 1}, size.z());
+            add_ray({x, y, -half_z}, {0, 0, 1}, size.z());
         }
 
    
@@ -1573,15 +1620,15 @@ void GenerateGraspPoses::publishBest()
         
         Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
         Eigen::Quaternionf grasp_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
+        
+        
         Eigen::Affine3f tf_tcp_to_world = Eigen::Translation3f(grasp_pos) * grasp_rot;
 
+        
+        Eigen::Affine3f tf_collision_final = tf_tcp_to_world * tf_geometry_to_tcp;
+        Eigen::Quaternionf q_coll(tf_collision_final.rotation());
 
-        Eigen::Affine3f tf_final = tf_tcp_to_world * tf_geometry_to_tcp;
-        
-        
-        Eigen::Quaternionf q_final(tf_final.rotation());
-
-        
+       
         for(size_t b = 0; b < gripper_boxes_.size(); b++)
         {
             const auto& box = gripper_boxes_[b];
@@ -1589,65 +1636,94 @@ void GenerateGraspPoses::publishBest()
             visualization_msgs::msg::Marker mk;
             mk.header.frame_id = "world";
             mk.header.stamp = t;
-            
             mk.ns = "debug_boxes_grasp_" + std::to_string(i); 
             mk.id = b;
             mk.type = visualization_msgs::msg::Marker::CUBE;
             mk.action = visualization_msgs::msg::Marker::ADD;
 
-            
-            Eigen::Vector3f center_world = tf_final * box.center;
+            Eigen::Vector3f center_world = tf_collision_final * box.center;
             
             mk.pose.position.x = center_world.x();
             mk.pose.position.y = center_world.y();
             mk.pose.position.z = center_world.z();
 
-            
-            mk.pose.orientation.x = q_final.x();
-            mk.pose.orientation.y = q_final.y();
-            mk.pose.orientation.z = q_final.z();
-            mk.pose.orientation.w = q_final.w();
+            mk.pose.orientation.x = q_coll.x();
+            mk.pose.orientation.y = q_coll.y();
+            mk.pose.orientation.z = q_coll.z();
+            mk.pose.orientation.w = q_coll.w();
 
-            
             mk.scale.x = box.dimensions.x();
             mk.scale.y = box.dimensions.y();
             mk.scale.z = box.dimensions.z();
 
+            if (i == 0) { mk.color.r = 0.0; mk.color.g = 1.0; mk.color.b = 0.0; mk.color.a = 0.6; }
+            else        { mk.color.r = 0.0; mk.color.g = 1.0; mk.color.b = 1.0; mk.color.a = 0.3; }
             
-            if (i == 0) { mk.color.r = 1.0; mk.color.g = 0.0; mk.color.b = 0.0; }
-            else        { mk.color.r = 0.0; mk.color.g = 0.0; mk.color.b = 1.0; }
-            mk.color.a = 0.3; 
-
             ma.markers.push_back(mk);
         }
 
         
-        if (has_dense_model)
+        if (publish_gripper_mesh_)
         {
-            for (const auto& pt_local : gripper_dense_cloud_->points)
-            {
-                
-                Eigen::Vector3f p_world = tf_final * Eigen::Vector3f(pt_local.x, pt_local.y, pt_local.z);
-                
-                pcl::PointXYZRGB p_colored = pt_local; 
-                p_colored.x = p_world.x();
-                p_colored.y = p_world.y();
-                p_colored.z = p_world.z();
-                accumulated_cloud->points.push_back(p_colored);
+            
+            Eigen::Affine3f visual_tf = Eigen::Affine3f::Identity();
+            visual_tf.translation() = Eigen::Vector3f(-0.015, mesh_offset_y_, mesh_offset_z_);
+            
+            Eigen::Matrix3f rot;
+            rot = Eigen::AngleAxisf(0.0, Eigen::Vector3f::UnitX())
+                * Eigen::AngleAxisf(M_PI/2, Eigen::Vector3f::UnitY())
+                * Eigen::AngleAxisf(0.0, Eigen::Vector3f::UnitZ());
+            visual_tf.linear() = rot;
+
+            
+            Eigen::Affine3f tf_mesh_final = tf_tcp_to_world * visual_tf;
+            
+            Eigen::Vector3f t_mesh = tf_mesh_final.translation();
+            Eigen::Quaternionf q_mesh(tf_mesh_final.rotation());
+
+            
+            visualization_msgs::msg::Marker mesh_mk;
+            mesh_mk.header.frame_id = "world";
+            mesh_mk.header.stamp = t;
+            
+            mesh_mk.ns = "gripper_mesh_visual_" + std::to_string(i);
+            mesh_mk.id = i;
+            mesh_mk.type = visualization_msgs::msg::Marker::MESH_RESOURCE;
+            mesh_mk.action = visualization_msgs::msg::Marker::ADD;
+            mesh_mk.mesh_resource = "file://" + gripper_glb_path_;
+            
+            mesh_mk.pose.position.x = t_mesh.x();
+            mesh_mk.pose.position.y = t_mesh.y();
+            mesh_mk.pose.position.z = t_mesh.z();
+            
+            mesh_mk.pose.orientation.x = q_mesh.x();
+            mesh_mk.pose.orientation.y = q_mesh.y();
+            mesh_mk.pose.orientation.z = q_mesh.z();
+            mesh_mk.pose.orientation.w = q_mesh.w();
+
+            mesh_mk.scale.x = gripper_mesh_scale_;
+            mesh_mk.scale.y = gripper_mesh_scale_;
+            mesh_mk.scale.z = gripper_mesh_scale_;
+
+            if (i == 0) 
+            { 
+                mesh_mk.color.r = 0.0; 
+                mesh_mk.color.g = 1.0;
+                mesh_mk.color.b = 0.0; 
+                mesh_mk.color.a = 0.7; 
             }
+            else        
+            { 
+                mesh_mk.color.r = 0.0; 
+                mesh_mk.color.g = 1.0; 
+                mesh_mk.color.b = 1.0; 
+                mesh_mk.color.a = 0.4; 
+            }
+
+            mesh_mk.mesh_use_embedded_materials = true;
+
+            ma.markers.push_back(mesh_mk);
         }
-        
-        
-        int base_id = i * 1000; 
-        visualization_msgs::msg::Marker txt; 
-        txt.header.frame_id="world"; txt.header.stamp=t; txt.ns="txt"; txt.id=base_id; txt.type=9; txt.action=0; 
-        txt.pose=grasp.pose_center; txt.pose.position.z+=0.05; txt.scale.z=0.03; 
-        txt.color.r=1; txt.color.g=1; txt.color.b=1; txt.color.a=1.0;
-        char buf[128]; 
-        if (i==0) sprintf(buf, "TOP 1\nS:%.2f", grasp.total_score);
-        else sprintf(buf, "#%lu", i+1);
-        txt.text=buf; 
-        ma.markers.push_back(txt);
     }
     
     
