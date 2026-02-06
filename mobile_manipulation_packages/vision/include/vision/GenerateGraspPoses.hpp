@@ -52,12 +52,11 @@ struct StepAnalysis {
     Eigen::Vector3f normal_vector;
 };
 
-// Caixa definida no frame LOCAL da mesh (sem offset)
 struct LocalBox {
     Eigen::Vector3f min_pt;
     Eigen::Vector3f max_pt;
-    Eigen::Vector3f center;     // Auxiliar para visualização
-    Eigen::Vector3f dimensions; // Auxiliar para visualização
+    Eigen::Vector3f center;     
+    Eigen::Vector3f dimensions; 
 };
 
 struct VoxelBucket {
@@ -90,22 +89,18 @@ private:
     
     geometry_msgs::msg::PoseArray evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
 
-    // --- ASSIMP & COLISÃO ---
-    void extractBoundingBoxesFromOBJ(); // Substitui a função antiga de STL
+    void extractBoundingBoxesFromOBJ(); 
     bool check_collision(ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug, bool try_rotations);
     
-    // Visualização
     void publishGripperModel();
     void publishGripperCollisionBoxes();
     void publishBest();
 
-    // Params
-    // [NOVO] Parâmetros da Mesh do Objeto
+  
     std::string object_mesh_path_;
     std::string gripper_glb_path_;
     bool publish_object_mesh_;
     bool publish_gripper_mesh_;
-    // -----------------------------------
     bool use_pcd_file;
     std::string pcd_path_;
     std::string gripper_mesh_path_;
@@ -126,7 +121,7 @@ private:
     int min_points_per_segment_;
     float weight_orientation_;
     float weight_symmetry_;
-    float weight_planarity_;
+    std::vector<float> ray_lengths;
     
     bool mean_filter;
     int mean_filter_k_;
@@ -135,10 +130,9 @@ private:
     float rotation_step_deg_;
     int total_orientations_;
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; // Nuvem leve
+    pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; 
     pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;
 
-    // Publishers
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_bbox_;
@@ -153,7 +147,6 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
 
-    // --- NOVOS PUBLISHERS DE VISUALIZAÇÃO AVANÇADA (Adicionados para compilar com o novo CPP) ---
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_debug_cylinder_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_step_inliers_;
 

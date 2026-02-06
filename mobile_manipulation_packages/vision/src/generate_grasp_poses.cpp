@@ -113,7 +113,6 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<int>("min_points_per_segment", 2);
     this->declare_parameter<double>("weight_orientation", 0.5); 
     this->declare_parameter<double>("weight_symmetry", 0.5);
-    this->declare_parameter<double>("weight_planarity", 0.0);
     
     this->declare_parameter<bool>("use_mean_filter", true); 
     this->declare_parameter<int>("mean_filter_k", 15);
@@ -161,7 +160,6 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     
     weight_orientation_ = static_cast<float>(this->get_parameter("weight_orientation").as_double());
     weight_symmetry_ = static_cast<float>(this->get_parameter("weight_symmetry").as_double());
-    weight_planarity_ = static_cast<float>(this->get_parameter("weight_planarity").as_double());
 
     mean_filter = this->get_parameter("use_mean_filter").as_bool();
     mean_filter_k_ = this->get_parameter("mean_filter_k").as_int();
@@ -174,11 +172,13 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     enable_ray_animation_ = this->get_parameter("enable_ray_animation").as_bool();
     animation_delay_ms_ = this->get_parameter("animation_delay_ms").as_int();
 
-    pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", 10);
+    
 
     rclcpp::QoS qos_profile(10);
     qos_profile.transient_local(); 
     qos_profile.reliable();
+
+    pub_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("input_cloud", qos_profile);
 
     pub_rays_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("candidate_rays", qos_profile);
     pub_bbox_  = this->create_publisher<visualization_msgs::msg::Marker>("bounding_box", 10);
@@ -384,7 +384,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
     }
     else
     {
-         pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
         sor.setInputCloud(target);
         sor.setMeanK(120); 
         sor.setStddevMulThresh(1.5); 
@@ -458,7 +458,8 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
     auto t = this->now();
     sensor_msgs::msg::PointCloud2 m; 
     pcl::toROSMsg(*stored_cloud_, m); 
-    m.header.stamp = t; m.header.frame_id = "world"; 
+    m.header.stamp = t; 
+    m.header.frame_id = "world"; 
     pub_cloud_->publish(m);
     
     all_candidates_ = generateMultiOrientedRays(min_pt_, max_pt_, grid_res_);
@@ -494,7 +495,6 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
     const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res) 
 {
     std::vector<geometry_msgs::msg::Pose> poses;
-    std::vector<float> ray_lengths; 
     
     Eigen::Vector3f center = (min.head<3>() + max.head<3>()) / 2.0f;
     // 'size' contém a largura total, altura total e profundidade total
@@ -1052,14 +1052,12 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     
     uint64_t c_loop_start = __rdtsc();
     auto t_loop_start = std::chrono::high_resolution_clock::now();
-    int contador = 0, contador2 = 0;
-    
+  
     for (size_t i = 0; i < all_candidates_.size(); ++i) 
     {
         
         if (perfect_grasps_count >= num_best_grasps_) 
         {
-            std::cout << "merda" << std::endl;
             break;
         }
 
@@ -1075,6 +1073,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
         float t_min_init = 1e6;
         float t_max_init = -1e6;
+        Eigen::Vector3f PIVOT_POINT = {0.0, 0.0, 0.0}; 
         bool hit_init = false;
         pcl::PointCloud<pcl::PointXYZ>::Ptr init_inliers(new pcl::PointCloud<pcl::PointXYZ>);
         
@@ -1098,7 +1097,11 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 
                 if (dist_vec.squaredNorm() < cylinder_radius_sq) 
                 {
-                    if (t < t_min_init) t_min_init = t;
+                    if (t < t_min_init) 
+                    {
+                        t_min_init = t;
+                        PIVOT_POINT = p;
+                    }
                     if (t > t_max_init) t_max_init = t;
                     hit_init = true;
                     init_inliers->points.push_back(pt);
@@ -1116,7 +1119,6 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         if (!hit_init || init_inliers->size() < 3 || 
             init_thickness < 0.0005 || init_thickness > max_gripper_width_) 
         {
-            contador2++;
             continue;
         }
 
@@ -1143,7 +1145,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             pca_normal = -pca_normal;
         }
 
-        const Eigen::Vector3f PIVOT_POINT = ray_origin_start + (ray_dir_start * t_min_init); 
+        // const Eigen::Vector3f PIVOT_POINT = ray_origin_start + (ray_dir_start * t_min_init); 
         const float DISTANCE_TO_PIVOT = t_min_init;                                        
         const Eigen::Vector3f DIR_START = ray_dir_start;                                   
         const Eigen::Vector3f DIR_TARGET = -pca_normal;                                
@@ -1161,8 +1163,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         
         int max_optimization_steps = 12; 
         
-        contador++;
-        
+
         for (int step = 0; step < max_optimization_steps; ++step)
         {
             
@@ -1217,109 +1218,232 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             
             if (enable_ray_animation_ && debug_marker_pub_)
             {
+                
                 auto t_now = this->now();
                 visualization_msgs::msg::MarkerArray markers;
 
-                
                 sensor_msgs::msg::PointCloud2 m; 
                 pcl::toROSMsg(*stored_cloud_, m); 
                 m.header.stamp = t_now; 
                 m.header.frame_id = "world"; 
                 pub_cloud_->publish(m);
 
-                
+                // Configuração base para NÃO PISCAR (Lifetime = 0)
                 visualization_msgs::msg::Marker base_marker;
                 base_marker.header.frame_id = "world";
                 base_marker.header.stamp = t_now;
                 base_marker.action = visualization_msgs::msg::Marker::ADD;
-                base_marker.lifetime = rclcpp::Duration::from_seconds(0.6);
+                base_marker.lifetime = rclcpp::Duration::from_seconds(0); 
 
-                // A. RAIO (Seta Amarela)
-                visualization_msgs::msg::Marker arrow = base_marker;
-                arrow.ns = "debug_ray_anim"; 
-                arrow.id = 0;
-                arrow.type = visualization_msgs::msg::Marker::ARROW;
+                // -----------------------------------------------------------------
+                // 1. PIVÔ ESTÁTICO (Esfera Ciano no Ponto de Contato)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker pivot_mk = base_marker;
+                pivot_mk.ns = "debug_anim_pivot"; 
+                pivot_mk.id = 1;
+                pivot_mk.type = visualization_msgs::msg::Marker::SPHERE;
                 
+                pivot_mk.pose.position.x = PIVOT_POINT.x(); 
+                pivot_mk.pose.position.y = PIVOT_POINT.y(); 
+                pivot_mk.pose.position.z = PIVOT_POINT.z();
+                
+                pivot_mk.pose.orientation.w = 1.0;
+
+                pivot_mk.scale.x = 0.005; 
+                pivot_mk.scale.y = 0.005; 
+                pivot_mk.scale.z = 0.005;
+                
+                pivot_mk.color.a = 1.0; pivot_mk.color.r = 0.0; pivot_mk.color.g = 1.0; pivot_mk.color.b = 1.0; 
+                markers.markers.push_back(pivot_mk);
+
+                // -----------------------------------------------------------------
+                // 2. CILINDROS DE ANÁLISE (Entry & Exit)
+                // -----------------------------------------------------------------
+                Eigen::Quaternionf q_cyl = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitZ(), current_ray_dir);
+                Eigen::Vector3f pos_entry = current_ray_origin + current_ray_dir * t_min;
+                Eigen::Vector3f pos_exit  = current_ray_origin + current_ray_dir * t_max;
+
+                // --- Cilindro de Entrada (ENTRY) ---
+                visualization_msgs::msg::Marker cyl_entry = base_marker;
+                cyl_entry.ns = "debug_anim_cyl_entry";
+                cyl_entry.id = 6;
+                cyl_entry.type = visualization_msgs::msg::Marker::CYLINDER;
+
+                cyl_entry.pose.position.x = pos_entry.x();
+                cyl_entry.pose.position.y = pos_entry.y();
+                cyl_entry.pose.position.z = pos_entry.z();
+                
+                cyl_entry.pose.orientation.w = q_cyl.w();
+                cyl_entry.pose.orientation.x = q_cyl.x();
+                cyl_entry.pose.orientation.y = q_cyl.y();
+                cyl_entry.pose.orientation.z = q_cyl.z();
+
+                cyl_entry.scale.x = cylinder_radius_ * 2.0; 
+                cyl_entry.scale.y = cylinder_radius_ * 2.0; 
+                cyl_entry.scale.z = cylinder_height_;
+
+                cyl_entry.color.a = 0.3; cyl_entry.color.r = 0.0; cyl_entry.color.g = 0.5; cyl_entry.color.b = 1.0;
+                markers.markers.push_back(cyl_entry);
+
+                // --- Cilindro de Saída (EXIT) ---
+                if ((t_max - t_min) > 0.005) 
+                {
+                    visualization_msgs::msg::Marker cyl_exit = cyl_entry; 
+                    cyl_exit.ns = "debug_anim_cyl_exit";
+                    cyl_exit.id = 7;
+                    
+                    cyl_exit.pose.position.x = pos_exit.x();
+                    cyl_exit.pose.position.y = pos_exit.y();
+                    cyl_exit.pose.position.z = pos_exit.z();
+
+                    cyl_exit.color.r = 1.0; cyl_exit.color.g = 0.5; cyl_exit.color.b = 0.0;
+                    markers.markers.push_back(cyl_exit);
+                }
+
+                // -----------------------------------------------------------------
+                // [PREPARAÇÃO] CÁLCULO DOS VETORES ORIGINAIS (Necessário para os Markers abaixo)
+                // -----------------------------------------------------------------
+                // Correção: Calculamos aqui para usar tanto no Cilindro quanto na Seta
+                Eigen::Quaternionf q_orig(
+                    all_candidates_[i].orientation.w,
+                    all_candidates_[i].orientation.x,
+                    all_candidates_[i].orientation.y,
+                    all_candidates_[i].orientation.z
+                );
+                Eigen::Vector3f dir_orig = q_orig * Eigen::Vector3f::UnitX();
+                Eigen::Vector3f v_start(
+                    all_candidates_[i].position.x, 
+                    all_candidates_[i].position.y, 
+                    all_candidates_[i].position.z
+                );
+
+                // -----------------------------------------------------------------
+                // 3. CILINDRO DO RAIO ORIGINAL (Envolvendo a seta roxa)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker orig_cyl_mk = base_marker;
+                orig_cyl_mk.ns = "debug_anim_cyl_original";
+                orig_cyl_mk.id = 8; // ID Único
+                orig_cyl_mk.type = visualization_msgs::msg::Marker::CYLINDER;
+
+                // Centro = Inicio + (Direção * Metade do Comprimento)
+                Eigen::Vector3f center_cyl_orig = v_start + (dir_orig * (ray_lengths[i] / 2.0f));
+
+                orig_cyl_mk.pose.position.x = center_cyl_orig.x();
+                orig_cyl_mk.pose.position.y = center_cyl_orig.y();
+                orig_cyl_mk.pose.position.z = center_cyl_orig.z();
+
+                // Rotacionar eixo Z (cilindro) para dir_orig
+                Eigen::Quaternionf q_cyl_orig = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitZ(), dir_orig);
+
+                orig_cyl_mk.pose.orientation.w = q_cyl_orig.w();
+                orig_cyl_mk.pose.orientation.x = q_cyl_orig.x();
+                orig_cyl_mk.pose.orientation.y = q_cyl_orig.y();
+                orig_cyl_mk.pose.orientation.z = q_cyl_orig.z();
+
+                orig_cyl_mk.scale.x = cylinder_radius_ * 2.0f; 
+                orig_cyl_mk.scale.y = cylinder_radius_ * 2.0f; 
+                orig_cyl_mk.scale.z = ray_lengths[i];
+
+                orig_cyl_mk.color.a = 0.2; orig_cyl_mk.color.r = 1.0; orig_cyl_mk.color.g = 0.0; orig_cyl_mk.color.b = 1.0;
+                markers.markers.push_back(orig_cyl_mk);
+
+                // -----------------------------------------------------------------
+                // 4. RAIO ORIGINAL (Seta Magenta)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker orig_ray_mk = base_marker;
+                orig_ray_mk.ns = "debug_anim_ray_original"; 
+                orig_ray_mk.id = 5;
+                orig_ray_mk.type = visualization_msgs::msg::Marker::ARROW;
+
+                geometry_msgs::msg::Point p_orig_start, p_orig_end;
+                p_orig_start.x = v_start.x(); 
+                p_orig_start.y = v_start.y(); 
+                p_orig_start.z = v_start.z();
+
+                Eigen::Vector3f v_end = v_start + (dir_orig * ray_lengths[i]);
+
+                p_orig_end.x = v_end.x(); 
+                p_orig_end.y = v_end.y(); 
+                p_orig_end.z = v_end.z();
+
+                orig_ray_mk.points.push_back(p_orig_start); 
+                orig_ray_mk.points.push_back(p_orig_end);
+                
+                orig_ray_mk.scale.x = 0.002; orig_ray_mk.scale.y = 0.004; orig_ray_mk.scale.z = 0.0;  
+                orig_ray_mk.color.a = 0.6; orig_ray_mk.color.r = 1.0; orig_ray_mk.color.g = 0.0; orig_ray_mk.color.b = 1.0;
+                markers.markers.push_back(orig_ray_mk);
+
+                // -----------------------------------------------------------------
+                // 5. RAIO DA GARRA ATUAL (Seta Amarela)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker ray_mk = base_marker;
+                ray_mk.ns = "debug_anim_ray"; 
+                ray_mk.id = 2;
+                ray_mk.type = visualization_msgs::msg::Marker::ARROW;
+
                 geometry_msgs::msg::Point p_start, p_end;
                 p_start.x = current_ray_origin.x(); 
                 p_start.y = current_ray_origin.y(); 
                 p_start.z = current_ray_origin.z();
+
+                Eigen::Vector3f visual_end = current_ray_origin + (current_ray_dir * (DISTANCE_TO_PIVOT + 0.05f));
+                p_end.x = visual_end.x(); 
+                p_end.y = visual_end.y(); 
+                p_end.z = visual_end.z();
+
+                ray_mk.points.push_back(p_start); 
+                ray_mk.points.push_back(p_end);
                 
-                Eigen::Vector3f end_vec = current_ray_origin + (current_ray_dir * (t_max + 0.05f)); 
-                p_end.x = end_vec.x(); 
-                p_end.y = end_vec.y(); 
-                p_end.z = end_vec.z();
-                
-                arrow.points.push_back(p_start); 
-                arrow.points.push_back(p_end);
-                arrow.scale.x = 0.005; arrow.scale.y = 0.01; arrow.scale.z = 0.02;
-                arrow.color.a = 0.8; arrow.color.r = 1.0; arrow.color.g = 1.0; arrow.color.b = 0.0;
-                markers.markers.push_back(arrow);
+                ray_mk.scale.x = 0.003; ray_mk.scale.y = 0.006; ray_mk.scale.z = 0.01;  
+                ray_mk.color.a = 0.8; ray_mk.color.r = 1.0; ray_mk.color.g = 1.0; ray_mk.color.b = 0.0;
+                markers.markers.push_back(ray_mk);
 
-                // B. PIVÔ (Esfera Ciano)
-                visualization_msgs::msg::Marker pivot = base_marker;
-                pivot.ns = "debug_ray_anim"; 
-                pivot.id = 1;
-                pivot.type = visualization_msgs::msg::Marker::SPHERE;
-                pivot.pose.position.x = PIVOT_POINT.x(); 
-                pivot.pose.position.y = PIVOT_POINT.y(); 
-                pivot.pose.position.z = PIVOT_POINT.z();
-                pivot.scale.x = 0.005; pivot.scale.y = 0.005; pivot.scale.z = 0.005;
-                pivot.color.a = 1.0; pivot.color.r = 0.0; pivot.color.g = 1.0; pivot.color.b = 1.0;
-                markers.markers.push_back(pivot);
+                // -----------------------------------------------------------------
+                // 6. NORMAL DA SUPERFÍCIE (Seta Vermelha)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker norm_mk = base_marker;
+                norm_mk.ns = "debug_anim_normal";
+                norm_mk.id = 3;
+                norm_mk.type = visualization_msgs::msg::Marker::ARROW;
 
-                // C. CILINDROS DE ANÁLISE (Transparente Branco/Azulado)
-                Eigen::Quaternionf q_cyl;
-                q_cyl.setFromTwoVectors(Eigen::Vector3f::UnitZ(), current_ray_dir);
+                geometry_msgs::msg::Point p_piv_geom;
+                p_piv_geom.x = PIVOT_POINT.x(); p_piv_geom.y = PIVOT_POINT.y(); p_piv_geom.z = PIVOT_POINT.z();
 
-                visualization_msgs::msg::Marker cyl = base_marker;
-                cyl.ns = "debug_cylinders";
-                cyl.type = visualization_msgs::msg::Marker::CYLINDER;
-                cyl.scale.x = cylinder_radius_ * 2.0; 
-                cyl.scale.y = cylinder_radius_ * 2.0;
-                cyl.scale.z = cylinder_height_;
-                cyl.color.a = 0.3; cyl.color.r = 0.8; cyl.color.g = 0.8; cyl.color.b = 1.0;
-                
-                cyl.pose.orientation.x = q_cyl.x(); cyl.pose.orientation.y = q_cyl.y();
-                cyl.pose.orientation.z = q_cyl.z(); cyl.pose.orientation.w = q_cyl.w();
+                Eigen::Vector3f norm_end = PIVOT_POINT + (pca_normal * 0.04f);
+                geometry_msgs::msg::Point p_norm_end;
+                p_norm_end.x = norm_end.x(); p_norm_end.y = norm_end.y(); p_norm_end.z = norm_end.z();
 
-                // C1. Cilindro Entrada
-                cyl.id = 10;
-                Eigen::Vector3f pos_entry = current_ray_origin + current_ray_dir * t_min;
-                cyl.pose.position.x = pos_entry.x(); cyl.pose.position.y = pos_entry.y(); cyl.pose.position.z = pos_entry.z();
-                markers.markers.push_back(cyl);
+                norm_mk.points.push_back(p_piv_geom);
+                norm_mk.points.push_back(p_norm_end);
 
-                // C2. Cilindro Saída
-                if ((t_max - t_min) > 0.002f) 
-                {
-                    cyl.id = 11;
-                    Eigen::Vector3f pos_exit = current_ray_origin + current_ray_dir * t_max;
-                    cyl.pose.position.x = pos_exit.x(); cyl.pose.position.y = pos_exit.y(); cyl.pose.position.z = pos_exit.z();
-                    markers.markers.push_back(cyl);
-                }
+                norm_mk.scale.x = 0.002; norm_mk.scale.y = 0.004; norm_mk.scale.z = 0.0;
+                norm_mk.color.a = 1.0; norm_mk.color.r = 1.0; norm_mk.color.g = 0.0; norm_mk.color.b = 0.0;
+                markers.markers.push_back(norm_mk);
 
-                // D. INLIERS POINTS (Vermelho)
+                // -----------------------------------------------------------------
+                // 7. INLIERS (Pontos Brancos)
+                // -----------------------------------------------------------------
                 if (current_inliers_ptr && !current_inliers_ptr->empty()) 
                 {
-                    visualization_msgs::msg::Marker pts = base_marker;
-                    pts.ns = "debug_inliers"; 
-                    pts.id = 20;
-                    pts.type = visualization_msgs::msg::Marker::POINTS;
-                    pts.scale.x = 0.002; pts.scale.y = 0.002;
-                    pts.color.a = 1.0; pts.color.r = 1.0; pts.color.g = 0.0; pts.color.b = 0.0; 
+                    visualization_msgs::msg::Marker pts_mk = base_marker;
+                    pts_mk.ns = "debug_anim_inliers"; 
+                    pts_mk.id = 4;
+                    pts_mk.type = visualization_msgs::msg::Marker::POINTS;
+                    pts_mk.scale.x = 0.0015; pts_mk.scale.y = 0.0015;
+                    pts_mk.color.a = 1.0; pts_mk.color.r = 1.0; pts_mk.color.g = 0.0; pts_mk.color.b = 0.0;
 
-                    pts.points.reserve(current_inliers_ptr->size());
+                    pts_mk.points.reserve(current_inliers_ptr->size());
                     for (const auto& p : current_inliers_ptr->points) 
                     {
                         geometry_msgs::msg::Point gp;
                         gp.x = p.x; gp.y = p.y; gp.z = p.z;
-                        pts.points.push_back(gp);
+                        pts_mk.points.push_back(gp);
                     }
-                    markers.markers.push_back(pts);
+                    markers.markers.push_back(pts_mk);
                 }
 
-                // Publish & Wait
                 debug_marker_pub_->publish(markers);
+                
                 std::this_thread::sleep_for(std::chrono::milliseconds(animation_delay_ms_));
             }
             
@@ -1384,12 +1508,8 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             float score_sym_entry = entry.symmetry_score;
             float score_sym_exit  = exit.symmetry_score;
 
-            double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + 
-                            score_sym_entry * weight_symmetry_ + 
-                            score_plan_entry * weight_planarity_) * 0.5 
-                         + (score_ang_exit * weight_orientation_ * orient_factor_exit + 
-                            score_sym_exit * weight_symmetry_ + 
-                            score_plan_exit * weight_planarity_) * 0.5;
+            double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + score_sym_entry * weight_symmetry_ ) * 0.5 
+                         + (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ ) * 0.5;
 
             auto t8 = std::chrono::high_resolution_clock::now(); 
             uint64_t c8 = __rdtsc();
@@ -1448,8 +1568,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         }
     }
 
-    std::cout << contador << std::endl;
-    std::cout << contador2 << std::endl;
+
 
     auto t_loop_end = std::chrono::high_resolution_clock::now();
     uint64_t c_loop_end = __rdtsc();
