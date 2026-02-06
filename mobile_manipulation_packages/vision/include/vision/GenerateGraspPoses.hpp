@@ -129,6 +129,7 @@ private:
     int num_best_grasps_;
     float rotation_step_deg_;
     int total_orientations_;
+    double target_score_;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; 
     pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;

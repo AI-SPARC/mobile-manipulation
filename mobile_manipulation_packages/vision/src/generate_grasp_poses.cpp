@@ -113,6 +113,7 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<int>("min_points_per_segment", 2);
     this->declare_parameter<double>("weight_orientation", 0.5); 
     this->declare_parameter<double>("weight_symmetry", 0.5);
+    this->declare_parameter<double>("target_score", 0.95);
     
     this->declare_parameter<bool>("use_mean_filter", true); 
     this->declare_parameter<int>("mean_filter_k", 15);
@@ -160,6 +161,8 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     
     weight_orientation_ = static_cast<float>(this->get_parameter("weight_orientation").as_double());
     weight_symmetry_ = static_cast<float>(this->get_parameter("weight_symmetry").as_double());
+
+    target_score_ = static_cast<float>(this->get_parameter("target_score").as_double());
 
     mean_filter = this->get_parameter("use_mean_filter").as_bool();
     mean_filter_k_ = this->get_parameter("mean_filter_k").as_int();
@@ -464,6 +467,11 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
     
     all_candidates_ = generateMultiOrientedRays(min_pt_, max_pt_, grid_res_);
     
+    std::random_device rd;
+    std::mt19937 g(rd());
+ 
+    std::shuffle(all_candidates_.begin(), all_candidates_.end(), g);
+
     if (target_environment && !target_environment->empty()) 
     {
         
@@ -1542,7 +1550,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             }
 
             
-            if (total > 0.95) 
+            if (total >= target_score_) 
             { 
                 if (check_collision(best_iter_grasp, collision_kdtree_, true, false)) 
                 { 
