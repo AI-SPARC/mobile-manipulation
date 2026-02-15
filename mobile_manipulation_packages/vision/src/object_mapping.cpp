@@ -16,9 +16,8 @@ ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("voxel_leaf_size", 0.001); 
     this->declare_parameter<double>("octomap_resolution", 0.005);
     this->declare_parameter<bool>("publish_octomap_to_moveit", true);
-    this->declare_parameter<double>("surrounding_distance_threshold", 0.3);
+    this->declare_parameter<double>("surrounding_distance_threshold", 0.75);
 
-    
     velocity_threshold_ = this->get_parameter("velocity_threshold").as_double();
     settlement_duration_ = this->get_parameter("settlement_duration").as_double();
     voxel_leaf_size_ = this->get_parameter("voxel_leaf_size").as_double();
@@ -29,6 +28,16 @@ ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
     last_motion_time_ = this->now();
 
     
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+    
+    internal_octree_ = std::make_shared<octomap::OcTree>(octomap_resolution_);
+    internal_octree_->setProbHit(0.7);
+    internal_octree_->setProbMiss(0.4);
+    internal_octree_->setClampingThresMin(0.12);
+    internal_octree_->setClampingThresMax(0.97);
+
     sub_joint_states_ = this->create_subscription<sensor_msgs::msg::JointState>(
         "/isaac_joint_states", 
         rclcpp::SensorDataQoS(), 
@@ -41,32 +50,16 @@ ObjectMapping::ObjectMapping(const rclcpp::NodeOptions & options)
         std::bind(&ObjectMapping::semanticPclCallback, this, std::placeholders::_1)
     );
 
-    pub_accumulated_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-        "/mapped_object", 
-       10
+    pub_accumulated_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/mapped_object", 10);
+    pub_planning_scene_ = this->create_publisher<moveit_msgs::msg::PlanningScene>("/planning_scene", 10);
+    pub_semantic_environment_ = this->create_publisher<mobile_manipulation_interfaces::msg::SemanticPcl>("/mapped_environment_semantic", 10);
+    pub_environment_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/mapped_environment_cloud", 10);
+    pub_internal_octomap_ = this->create_publisher<octomap_msgs::msg::Octomap>(
+        "/debug/internal_octomap", 
+        rclcpp::QoS(1).transient_local()
     );
 
-    pub_planning_scene_ = this->create_publisher<moveit_msgs::msg::PlanningScene>(
-        "/planning_scene", 
-        10
-    );
-
-    pub_semantic_environment_ = this->create_publisher<mobile_manipulation_interfaces::msg::SemanticPcl>(
-        "/mapped_environment_semantic", 
-        10
-    );
-
-    pub_environment_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-        "/mapped_environment_cloud", 
-        10
-    );
-
-    RCLCPP_INFO(
-        this->get_logger(), 
-        "ObjectMapping iniciado. Voxel: %.3fm | Raio Ambiente: %.2fm", 
-        voxel_leaf_size_, 
-        surrounding_distance_threshold_
-    );
+    RCLCPP_INFO(this->get_logger(), "ObjectMapping iniciado.");
 }
 
 void ObjectMapping::ObjectToMap(std::string id)
@@ -253,30 +246,22 @@ void ObjectMapping::processEnvironmentClouds(
 {
     std::lock_guard<std::mutex> lock(data_mutex_);
 
-
-    if (object_map_.find(target_label) == object_map_.end())
-    {
-        return;
-    }
+    
+    if (object_map_.find(target_label) == object_map_.end()) return;
     
     MappingObjectData& target_data = object_map_.at(target_label);
-    
-    if (target_data.cloud->empty())
-    {
-        return;
-    }
+    if (target_data.cloud->empty()) return;
 
-    
     target_data.environment->clear();
 
-    
+
     pcl::KdTreeFLANN<pcl::PointXYZ> kdtree_target;
     kdtree_target.setInputCloud(target_data.cloud);
 
     std::vector<int> pointIdxRadiusSearch;
     std::vector<float> pointRadiusSquaredDistance;
 
-   
+    
     mobile_manipulation_interfaces::msg::SemanticPcl output_semantic_msg;
     output_semantic_msg.header.frame_id = "world";
     output_semantic_msg.header.stamp = this->now();
@@ -296,27 +281,62 @@ void ObjectMapping::processEnvironmentClouds(
     {
         std::string current_env_label = input_msg->labels[i];
         
-        if (current_env_label == target_label)
-        {
-            continue;
-        }
+        
+        if (current_env_label == target_label) continue;
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr env_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(input_msg->clouds[i], *env_cloud_ptr);
 
-        if (env_cloud_ptr->empty())
-        {
-            continue;
-        }
+        if (env_cloud_ptr->empty()) continue;
 
-        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_env_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         
+        if (internal_octree_) 
+        {
+            
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_for_octomap(new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::VoxelGrid<pcl::PointXYZ> sor;
+            sor.setInputCloud(env_cloud_ptr);
+            sor.setLeafSize(0.05f, 0.05f, 0.05f); 
+            sor.filter(*cloud_for_octomap);
+
+            if (!cloud_for_octomap->empty()) 
+            {
+                octomap::Pointcloud octo_cloud;
+                octo_cloud.reserve(cloud_for_octomap->size());
+
+                for (const auto& p : *cloud_for_octomap) {
+                    if (std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z)) {
+                        octo_cloud.push_back(p.x, p.y, p.z);
+                    }
+                }
+
+                geometry_msgs::msg::TransformStamped tf_cam;
+                bool tf_success = false;
+                try {
+                    // ATENÇÃO: Verifique se "Camera_02" é o frame correto
+                    tf_cam = tf_buffer_->lookupTransform("world", "Camera_02", 
+                                                        input_msg->header.stamp, 
+                                                        rclcpp::Duration::from_seconds(0.1));
+                    tf_success = true;
+                } catch (tf2::TransformException &ex) {
+                    // RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "TF Error Octomap: %s", ex.what());
+                }
+
+                if (tf_success) {
+                    octomap::point3d sensor_origin(
+                        tf_cam.transform.translation.x,
+                        tf_cam.transform.translation.y,
+                        tf_cam.transform.translation.z
+                    );
+
+                    
+                    internal_octree_->insertPointCloud(octo_cloud, sensor_origin, 500.0, true, true);
+                }
+            }
+        }
         
-        Eigen::Vector4f min_t;
-        Eigen::Vector4f max_t;
-        Eigen::Vector4f min_e;
-        Eigen::Vector4f max_e;
-        
+
+        Eigen::Vector4f min_t, max_t, min_e, max_e;
         pcl::getMinMax3D(*target_data.cloud, min_t, max_t);
         pcl::getMinMax3D(*env_cloud_ptr, min_e, max_e);
         
@@ -327,12 +347,14 @@ void ObjectMapping::processEnvironmentClouds(
         double dist_sq = dx*dx + dy*dy + dz*dz;
         double thresh_sq = surrounding_distance_threshold_ * surrounding_distance_threshold_;
 
+        
         if (dist_sq > thresh_sq) 
         {
             continue; 
         }
+       
 
-        
+        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_env_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         for (const auto& pt : *env_cloud_ptr)
         {
             if (kdtree_target.radiusSearch(pt, surrounding_distance_threshold_, pointIdxRadiusSearch, pointRadiusSquaredDistance, 1) > 0)
@@ -347,10 +369,8 @@ void ObjectMapping::processEnvironmentClouds(
             filtered_env_cloud->height = 1;
             filtered_env_cloud->is_dense = true;
 
-           
             *target_data.environment += *filtered_env_cloud;
 
-           
             sensor_msgs::msg::PointCloud2 filtered_cloud_msg;
             pcl::toROSMsg(*filtered_env_cloud, filtered_cloud_msg);
             filtered_cloud_msg.header = input_msg->clouds[i].header; 
@@ -362,39 +382,31 @@ void ObjectMapping::processEnvironmentClouds(
         }
     }
 
-    
-    pcl::PointCloud<pcl::PointXYZRGB> combined_visual_cloud;
+    if (internal_octree_) 
+    {
+        internal_octree_->updateInnerOccupancy();
+        publishInternalOctomap();
+    }
 
-    
+    pcl::PointCloud<pcl::PointXYZRGB> combined_visual_cloud;
     for (const auto& pt : *target_data.cloud) 
     {
         pcl::PointXYZRGB p;
-        p.x = pt.x; 
-        p.y = pt.y; 
-        p.z = pt.z;
-        p.r = 0; 
-        p.g = 255; 
-        p.b = 0; 
+        p.x = pt.x; p.y = pt.y; p.z = pt.z;
+        p.r = 0; p.g = 255; p.b = 0;
         combined_visual_cloud.push_back(p);
     }
-
-   
     if (!target_data.environment->empty())
     {
         for (const auto& pt : *target_data.environment)
         {
             pcl::PointXYZRGB p_vis;
-            p_vis.x = pt.x; 
-            p_vis.y = pt.y; 
-            p_vis.z = pt.z;
-            p_vis.r = 255; 
-            p_vis.g = 0; 
-            p_vis.b = 0; 
+            p_vis.x = pt.x; p_vis.y = pt.y; p_vis.z = pt.z;
+            p_vis.r = 255; p_vis.g = 0; p_vis.b = 0; 
             combined_visual_cloud.push_back(p_vis);
         }
     }
-    
-    
+
     publishEnvironmentVisualization(output_semantic_msg, combined_visual_cloud);
 }
 
@@ -518,6 +530,29 @@ void ObjectMapping::publishToPlanningScene()
     scene_msg.world.octomap.octomap = octomap_msg;
     
     pub_planning_scene_->publish(scene_msg);
+}
+void ObjectMapping::publishInternalOctomap()
+{
+    // Verifica se temos inscritos (para não gastar CPU convertendo mapa à toa)
+    if (pub_internal_octomap_->get_subscription_count() == 0) {
+        return;
+    }
+
+    if (!internal_octree_) return;
+
+    octomap_msgs::msg::Octomap msg;
+    msg.header.frame_id = "world";
+    msg.header.stamp = this->now();
+
+    // binaryMapToMsg: Mais leve (só Ocupado/Livre)
+    // fullMapToMsg: Mais pesado (inclui probabilidades), use se quiser ver degradê de cores
+    bool success = octomap_msgs::binaryMapToMsg(*internal_octree_, msg);
+
+    if (success) {
+        pub_internal_octomap_->publish(msg);
+    } else {
+        RCLCPP_WARN(this->get_logger(), "Falha ao serializar Octomap interno.");
+    }
 }
 
 } // namespace vision

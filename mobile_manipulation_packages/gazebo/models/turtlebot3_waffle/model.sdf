@@ -1,7 +1,7 @@
 <?xml version="1.0" ?>
-<sdf version="1.5">
+<sdf version="1.8">
   <model name="turtlebot3_waffle">  
-  <pose>0.0 0.0 0.0 0.0 0.0 0.0</pose>
+    <pose>0.0 0.0 0.0 0.0 0.0 0.0</pose>
 
     <link name="base_footprint"/>
 
@@ -18,7 +18,6 @@
         </inertia>
         <mass>1.3729096e+00</mass>
       </inertial>
-
       <collision name="base_collision">
         <pose>-0.064 0 0.048 0 0 0</pose>
         <geometry>
@@ -27,7 +26,6 @@
           </box>
         </geometry>
       </collision>
-
       <visual name="base_visual">
         <pose>-0.064 0 0 0 0 0</pose>
         <geometry>
@@ -102,7 +100,6 @@
         </inertia>
         <mass>0.114</mass>
       </inertial>
-
       <collision name="lidar_sensor_collision">
         <pose>-0.052 0 0.111 0 0 0</pose>
         <geometry>
@@ -112,7 +109,6 @@
           </cylinder>
         </geometry>
       </collision>
-
       <visual name="lidar_sensor_visual">
         <pose>-0.064 0 0.121 0 0 0</pose>
         <geometry>
@@ -122,7 +118,6 @@
           </mesh>
         </geometry>
       </visual>
-
       <sensor name="hls_lfcd_lds" type="gpu_lidar">
         <topic>scan</topic>
         <always_on>true</always_on>
@@ -279,7 +274,8 @@
     </link>
 
     <link name="camera_link"/>
-<link name="camera_rgb_frame">
+    
+    <link name="camera_rgb_frame">
       <inertial>
         <pose>0.069 -0.047 0.107 0 0 0</pose>
         <inertia>
@@ -295,11 +291,9 @@
       <pose>0.069 -0.047 0.107 0 0 0</pose>
       
       <sensor name="intel_realsense_r200" type="rgbd_camera">
-      <frame_id>camera_rgb_frame</frame_id>
         <always_on>true</always_on>
         <visualize>true</visualize>
         <update_rate>30</update_rate>
-        
         <topic>camera</topic> 
         
         <camera name="intel_realsense_r200">
@@ -406,6 +400,17 @@
 
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
       <topic>joint_states</topic>
+    </plugin>
+    
+    <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+      <publish_link_pose>true</publish_link_pose>
+      <publish_sensor_pose>true</publish_sensor_pose>
+      <publish_collision_pose>false</publish_collision_pose>
+      <publish_visual_pose>false</publish_visual_pose>
+      <publish_nested_model_pose>true</publish_nested_model_pose>
+      <use_pose_vector_msg>true</use_pose_vector_msg>
+      <static_publisher>true</static_publisher>
+      <static_update_frequency>1</static_update_frequency>
     </plugin>
     
   </model>

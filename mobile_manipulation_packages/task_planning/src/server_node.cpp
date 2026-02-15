@@ -1654,7 +1654,7 @@ private:
                         std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> environment = 
                         this->object_mapping_node_->getObjectAndEnvironment(cached_object_.id);
 
-                        geometry_msgs::msg::PoseArray tcp_poses = this->generate_grasp_poses_node_->processCloud(std::get<0>(environment), std::get<0>(environment));
+                        geometry_msgs::msg::PoseArray tcp_poses = this->generate_grasp_poses_node_->processCloud(std::get<0>(environment), std::get<1>(environment));
 
                         std::vector<geometry_msgs::msg::Pose> wrist_poses; 
 
@@ -1802,33 +1802,33 @@ private:
                         return BT::NodeStatus::RUNNING;
                     }
 
-                    if (current_pick_phase_ == GraspPhase::SEND_GOAL)
-                    {
-                        this->grasp_context_.graspnet_attempts += 1;
+                    // if (current_pick_phase_ == GraspPhase::SEND_GOAL)
+                    // {
+                    //     this->grasp_context_.graspnet_attempts += 1;
 
-                        // std::cout << "ALOOOOOO" << std::endl;
-                        if(!this->grasp_context_.grasp_poses.empty() && this->active_arm_handle_ == nullptr)
-                        {
-                            std::cout << cached_object_.id << std::endl;
-                             RCLCPP_INFO(this->get_logger(), 
-                            "MERDA DO CARAMBA -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Orient: [x: %.3f, y: %.3f, z: %.3f, w: %.3f]",
-                            this->grasp_context_.grasp_poses[0].position.x, 
-                            this->grasp_context_.grasp_poses[0].position.y, 
-                            this->grasp_context_.grasp_poses[0].position.z,
-                            this->grasp_context_.grasp_poses[0].orientation.x,
-                            this->grasp_context_.grasp_poses[0].orientation.y,
-                            this->grasp_context_.grasp_poses[0].orientation.z,
-                            this->grasp_context_.grasp_poses[0].orientation.w);
+                    //     // std::cout << "ALOOOOOO" << std::endl;
+                    //     if(!this->grasp_context_.grasp_poses.empty() && this->active_arm_handle_ == nullptr)
+                    //     {
+                    //         std::cout << cached_object_.id << std::endl;
+                    //          RCLCPP_INFO(this->get_logger(), 
+                    //         "MERDA DO CARAMBA -> Pose: [x: %.3f, y: %.3f, z: %.3f] | Orient: [x: %.3f, y: %.3f, z: %.3f, w: %.3f]",
+                    //         this->grasp_context_.grasp_poses[0].position.x, 
+                    //         this->grasp_context_.grasp_poses[0].position.y, 
+                    //         this->grasp_context_.grasp_poses[0].position.z,
+                    //         this->grasp_context_.grasp_poses[0].orientation.x,
+                    //         this->grasp_context_.grasp_poses[0].orientation.y,
+                    //         this->grasp_context_.grasp_poses[0].orientation.z,
+                    //         this->grasp_context_.grasp_poses[0].orientation.w);
 
-                            if (std::isnan(this->grasp_context_.grasp_poses[0].position.x) || std::isnan(this->grasp_context_.grasp_poses[0].orientation.w)) {
-                                RCLCPP_ERROR(this->get_logger(), "ERRO CRÍTICO: Tentativa de enviar Pose com NaN!");
-                                return BT::NodeStatus::RUNNING;
-                            }
-                            this->send_goal(id.value(),{this->grasp_context_.grasp_poses[0]}, true, false);
-                            current_pick_phase_ = GraspPhase::WAITING;
-                        }
-                        return BT::NodeStatus::RUNNING;
-                    }
+                    //         if (std::isnan(this->grasp_context_.grasp_poses[0].position.x) || std::isnan(this->grasp_context_.grasp_poses[0].orientation.w)) {
+                    //             RCLCPP_ERROR(this->get_logger(), "ERRO CRÍTICO: Tentativa de enviar Pose com NaN!");
+                    //             return BT::NodeStatus::RUNNING;
+                    //         }
+                    //         this->send_goal(id.value(),{this->grasp_context_.grasp_poses[0]}, true, false);
+                    //         current_pick_phase_ = GraspPhase::WAITING;
+                    //     }
+                    //     return BT::NodeStatus::RUNNING;
+                    // }
                     
                    return BT::NodeStatus::RUNNING;
                 }

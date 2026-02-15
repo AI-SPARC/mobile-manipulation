@@ -9,6 +9,10 @@
       <render_engine>ogre2</render_engine>
     </plugin>
 
+    <frame name="map" attached_to="world">
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
       <pose>0 0 10 0 0 0</pose>
@@ -57,21 +61,10 @@
       <pose>0 0 0 0 0 0</pose>
     </include>
 
-
     <include>
-      <uri>
-        https://fuel.gazebosim.org/1.0/OpenRobotics/models/Coke Can
-      </uri>
-      <name>fuel_coke_can</name>
-      <pose>1.0 -1.0 0 0 0 0</pose> 
-    </include>
-
-    <include>
-      <uri>
-        https://fuel.gazebosim.org/1.0/OpenRobotics/models/Construction Cone
-      </uri>
-      <name>fuel_cone</name>
-      <pose>1.0 -2.0 0 0 0 0</pose>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Casual Female</uri>
+      <name>person_female</name>
+      <pose>2.5 -1.5 0 0 0 -1.57</pose> 
     </include>
 
   </world>

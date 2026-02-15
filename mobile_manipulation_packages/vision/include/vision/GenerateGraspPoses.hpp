@@ -32,6 +32,12 @@ struct ScoredGrasp {
     Eigen::Vector3f raw_p_f1;
     Eigen::Vector3f raw_p_f2;
     double total_score;
+    float score_symmetry;   
+    float score_orientation_entry = 0.0f; 
+    float score_orientation_exit = 0.0f;
+    float score_symmetry_entry = 0.0f; 
+    float score_symmetry_exit = 0.0f;
+    float score_orientation;
     float entry_angle;
     float exit_angle;
     float entry_planarity;
@@ -81,9 +87,7 @@ private:
     StepAnalysis analyzeLocalCylinder(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
         const Eigen::Vector3f& center,
-        const Eigen::Vector3f& ray_dir,
-        float radius,
-        float height);
+        const Eigen::Vector3f& ray_dir);
         
     Eigen::Quaternionf findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2);
     
@@ -133,6 +137,7 @@ private:
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; 
     pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;
+    std::mutex toma;
 
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;

@@ -31,6 +31,9 @@
 #include <octomap_msgs/msg/octomap.h>
 #include <octomap_msgs/conversions.h>
 
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+
 // TF2 Includes
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -88,6 +91,13 @@ private:
         const pcl::PointCloud<pcl::PointXYZRGB>& visual_cloud
     );
 
+    void publishInternalOctomap();
+
+    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
+    // O Mapa interno
+    std::shared_ptr<octomap::OcTree> internal_octree_;
     
     std::mutex data_mutex_;
     std::string object_to_map_;
@@ -111,6 +121,7 @@ private:
     rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr pub_planning_scene_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_environment_cloud_;
     rclcpp::Publisher<mobile_manipulation_interfaces::msg::SemanticPcl>::SharedPtr pub_semantic_environment_;
+    rclcpp::Publisher<octomap_msgs::msg::Octomap>::SharedPtr pub_internal_octomap_;
 };
 
 } // namespace vision

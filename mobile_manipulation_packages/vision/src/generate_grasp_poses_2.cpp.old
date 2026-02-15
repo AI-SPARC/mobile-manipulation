@@ -393,9 +393,9 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
        
-        transform.rotate(Eigen::AngleAxisf(rot_x, Eigen::Vector3f::UnitX())); 
-        transform.rotate(Eigen::AngleAxisf(rot_y, Eigen::Vector3f::UnitY()));
-        transform.rotate(Eigen::AngleAxisf(rot_z, Eigen::Vector3f::UnitZ())); 
+        // transform.rotate(Eigen::AngleAxisf(rot_x, Eigen::Vector3f::UnitX())); 
+        // transform.rotate(Eigen::AngleAxisf(rot_y, Eigen::Vector3f::UnitY()));
+        // transform.rotate(Eigen::AngleAxisf(rot_z, Eigen::Vector3f::UnitZ())); 
 
         transform.translate(-centroid.head<3>());
 
@@ -444,16 +444,17 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
         }
         
     }
-    
-    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-    sor.setInputCloud(target);
-    sor.setMeanK(200); 
-    sor.setStddevMulThresh(1.5); 
-    sor.filter(*target);
-    
+    else
+    {
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+        sor.setInputCloud(target);
+        sor.setMeanK(120); 
+        sor.setStddevMulThresh(1.5); 
+        sor.filter(*target);
+    }
     
     pcl::PointCloud<pcl::PointXYZ>::Ptr voxel_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    if (use_pcd_file && cloud_voxel_size_ >= 0.001f) 
+    if (use_pcd_file && cloud_voxel_size_ > 0.001f) 
     {
         pcl::VoxelGrid<pcl::PointXYZ> sor_tgt;
         sor_tgt.setInputCloud(target);
@@ -525,10 +526,10 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
     
     all_candidates_ = generateMultiOrientedRays(min_pt_, max_pt_, grid_res_);
     
-    std::random_device rd;
-    std::mt19937 g(rd());
+    // std::random_device rd;
+    // std::mt19937 g(rd());
  
-    std::shuffle(all_candidates_.begin(), all_candidates_.end(), g);
+    // std::shuffle(all_candidates_.begin(), all_candidates_.end(), g);
 
     if (target_environment && !target_environment->empty()) 
     {
@@ -715,97 +716,63 @@ StepAnalysis GenerateGraspPoses::analyzeLocalCylinder(
     result.valid = false; 
     result.center = center;
 
-    size_t N = cloud->size();
-    if (!cloud || N <= min_points_per_segment_) return result;
-    result.point_count = N;
-
-    // =========================================================================
-    // 1. ESTATÍSTICAS (Manual - Otimizado)
-    // =========================================================================
-    const pcl::PointXYZ* points_ptr = cloud->points.data();
-    
-    // Média
-    float sx = 0.0f, sy = 0.0f, sz = 0.0f;
-    for (size_t i = 0; i < N; ++i) {
-        sx += points_ptr[i].x; sy += points_ptr[i].y; sz += points_ptr[i].z;
+    // 1. Check Rápido
+    if (!cloud || cloud->size() <= min_points_per_segment_) 
+    {
+        return result;
     }
-    float inv_N = 1.0f / static_cast<float>(N);
-    float mean_x = sx * inv_N; float mean_y = sy * inv_N; float mean_z = sz * inv_N;
-    Eigen::Vector3f centroid(mean_x, mean_y, mean_z);
+    result.point_count = cloud->size();
 
-    // Covariância
-    float acc_xx = 0.0f, acc_xy = 0.0f, acc_xz = 0.0f;
-    float acc_yy = 0.0f, acc_yz = 0.0f, acc_zz = 0.0f;
-
-    for (size_t i = 0; i < N; ++i) {
-        float dx = points_ptr[i].x - mean_x; float dy = points_ptr[i].y - mean_y; float dz = points_ptr[i].z - mean_z;
-        acc_xx += dx * dx; acc_xy += dx * dy; acc_xz += dx * dz;
-        acc_yy += dy * dy; acc_yz += dy * dz; acc_zz += dz * dz;
-    }
-
-    Eigen::Matrix3f covariance_matrix;
-    covariance_matrix(0, 0) = acc_xx * inv_N; covariance_matrix(0, 1) = acc_xy * inv_N; covariance_matrix(0, 2) = acc_xz * inv_N;
-    covariance_matrix(1, 0) = covariance_matrix(0, 1); covariance_matrix(1, 1) = acc_yy * inv_N; covariance_matrix(1, 2) = acc_yz * inv_N;
-    covariance_matrix(2, 0) = covariance_matrix(0, 2); covariance_matrix(2, 1) = covariance_matrix(1, 2); covariance_matrix(2, 2) = acc_zz * inv_N;
-
-    // =========================================================================
-    // 2. SOLVER E SELEÇÃO INTELIGENTE DE EIXO
-    // =========================================================================
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
+    // 2. PCA Completo (Covariância + Centroide + Autovetores)
+    // O custo aqui é dominado pela iteração única sobre os pontos (O(N)) para montar a matriz.
+    pcl::PCA<pcl::PointXYZ> pca;
+    pca.setInputCloud(cloud); 
     
-    // Autovetores: [0]=Menor var (Espessura), [1]=Média, [2]=Maior (Comprimento ou Largura)
-    Eigen::Vector3f axis_candidate_A = eigen_solver.eigenvectors().col(1); // Médio
-    Eigen::Vector3f axis_candidate_B = eigen_solver.eigenvectors().col(2); // Maior
-
-    // --- HEURÍSTICA DO ATAQUE PERPENDICULAR ---
-    // Qual candidato é o eixo do cilindro? Aquele que é mais PERPENDICULAR ao raio.
-    // Se o raio for paralelo ao eixo, dot_product é 1.0. Se for perpendicular, é 0.0.
-    // Queremos o MENOR dot product absoluto.
+    // -------------------------------------------------------------------
+    // SIMETRIA VIA CENTROIDE (Penalidade Linear)
+    // -------------------------------------------------------------------
     
-    float dot_A = std::abs(ray_dir.dot(axis_candidate_A));
-    float dot_B = std::abs(ray_dir.dot(axis_candidate_B));
+    // O PCA já calculou a média (centroide da nuvem)
+    Eigen::Vector4f mean_4f = pca.getMean();
+    Eigen::Vector3f centroid(mean_4f[0], mean_4f[1], mean_4f[2]);
 
-    Eigen::Vector3f cylinder_axis;
-    if (dot_A < dot_B) {
-        cylinder_axis = axis_candidate_A; // O eixo médio é o eixo do cilindro (Cilindro curto/deitado)
-    } else {
-        cylinder_axis = axis_candidate_B; // O eixo maior é o eixo do cilindro (Cilindro longo/em pé)
-    }
-
-    // --- CÁLCULO DA NORMAL GEOMÉTRICA ---
-    // Normal = Componente do Raio perpendicular ao Eixo Escolhido
-    float ray_on_axis = ray_dir.dot(cylinder_axis);
-    Eigen::Vector3f normal_geom = ray_dir - (ray_on_axis * cylinder_axis);
-    
-    if (normal_geom.squaredNorm() > 1e-6f) {
-        normal_geom.normalize();
-        normal_geom = -normal_geom; // Apontar para fora (contra o raio)
-    } else {
-        normal_geom = -ray_dir; // Fallback
-    }
-
-    result.normal_vector = normal_geom;
-
-    // Curvatura
-    Eigen::Vector3f values = eigen_solver.eigenvalues();
-    float sum = values.sum();
-    result.curvature = (sum > 1e-6f) ? std::abs(values[0]) / sum : 0.0f; 
-
-    // =========================================================================
-    // 3. SCORING
-    // =========================================================================
+    // Vetor do eixo do raio (center) até o centroide da nuvem
     Eigen::Vector3f diff = centroid - center;
+
+    // Removemos a componente paralela ao raio (queremos apenas o desvio lateral/radial)
+    // Projeção: V_perp = V - (V . N) * N
     float parallel_comp = diff.dot(ray_dir);
     Eigen::Vector3f radial_offset_vec = diff - (parallel_comp * ray_dir);
+    
+    // Distância absoluta do centroide ao eixo central
     float radial_offset = radial_offset_vec.norm();
 
-    float safe_radius = (cylinder_radius_ > 1e-4f) ? cylinder_radius_ : 0.02f;
+    // PENALIDADE LINEAR:
+    // Score = 1.0 - (Desvio / Raio_de_Referencia)
+    // Se o centroide estiver desviado mais que o raio do objeto, o score zera.
+    float safe_radius = (cylinder_radius_ > 1e-4f) ? cylinder_radius_ : 0.02f; // Fallback de segurança
+    
     float linear_score = 1.0f - (radial_offset / safe_radius);
+    
+    // Clamp entre [0.0, 1.0]
     result.symmetry_score = std::max(0.0f, linear_score);
 
-    // Scoring de Alinhamento
-    float dot = std::abs(ray_dir.dot(result.normal_vector));
+    // -------------------------------------------------------------------
+
+    // Extração de Propriedades Geométricas (Sem custo extra)
+    Eigen::Vector3f ev = pca.getEigenValues();
+    float sum = ev.sum();
+    result.curvature = (sum > 1e-6f) ? ev[2] / sum : 0.0f;
+
+    // Normal = vetor associado ao menor autovalor (coluna 2)
+    Eigen::Vector3f normal = pca.getEigenVectors().col(2);
+    result.normal_vector = normal;
+
+    // Alinhamento com a Normal
+    float dot = std::abs(ray_dir.dot(normal));
     if (dot > 1.0f) dot = 1.0f; 
+    
+    // Otimização: rad_to_deg constante
     result.angle_to_normal_deg = std::acos(dot) * 57.2957795f; 
     
     result.valid = true;
@@ -1139,62 +1106,64 @@ struct ThreadStats {
 };
 
 
-
-// Certifique-se de que sua classe tenha os headers necessários do ROS 2, PCL e Eigen incluídos no .hpp
-
 geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
-    // =================================================================================
-    // 1. ESTRUTURAS DE DADOS E HELPER FUNCTIONS
-    // =================================================================================
-    
+    // [MODIFIED START] --- Estrutura Otimizada para Grid Linear ---
     struct VoxelBucket {
         std::vector<pcl::PointXYZ> points;
         Eigen::Vector3f center;
         bool has_points = false; 
         bool is_near_surface = false;
+        
+        // NOVO: Guarda os índices dos voxels CHEIOS que estão na vizinhança.
+        // Isso evita ter que calcular offsets durante o raio.
         std::vector<uint32_t> nearby_filled_indices; 
     };
+    // [MODIFIED END]
 
-    auto format_clocks = [](uint64_t n) -> std::string {
+    auto format_clocks = [](uint64_t n) -> std::string 
+    {
         std::string s = std::to_string(n);
         int insertPosition = static_cast<int>(s.length()) - 3;
-        while (insertPosition > 0) { 
+        while (insertPosition > 0) 
+        { 
             s.insert(insertPosition, "."); 
             insertPosition -= 3; 
         }
         return s;
     };
 
-    // Timers Globais da Função
-    auto t_func_start = std::chrono::high_resolution_clock::now();
     uint64_t c_func_start = __rdtsc();
+    auto t_func_start = std::chrono::high_resolution_clock::now();
 
     hit_candidates_.clear(); 
     
-    // =================================================================================
-    // 2. PREPARAÇÃO DO AMBIENTE (KD-TREE)
-    // =================================================================================
+    
+    uint64_t c_kdtree_start = __rdtsc();
     auto t_kdtree_start = std::chrono::high_resolution_clock::now();
     
-    // NOTA: O collision_kdtree_ é membro da classe, mas é seguro para LEITURA em paralelo
-    // desde que não chamemos setInputCloud dentro das threads.
     pcl::KdTreeFLANN<pcl::PointXYZ> env_kdtree;
-    if (target_environment->empty()) {
+    
+    if (target_environment->empty()) 
+    {
         RCLCPP_WARN(this->get_logger(), "Ambiente vazio, ignorando colisão.");
-    } else {
+    } 
+    else 
+    {
         env_kdtree.setInputCloud(target_environment);
     }
     
     auto t_kdtree_end = std::chrono::high_resolution_clock::now();
     double d_kdtree = std::chrono::duration<double, std::milli>(t_kdtree_end - t_kdtree_start).count();
+    uint64_t clk_kdtree = __rdtsc() - c_kdtree_start;
 
-    // =================================================================================
-    // 3. CONSTRUÇÃO DO GRID LINEAR (SERIAL - Rápido o suficiente)
-    // =================================================================================
+    
+    uint64_t c_voxel_start = __rdtsc();
     auto t_voxel_start = std::chrono::high_resolution_clock::now();
 
-    // 3.1. Calcular Bounding Box
+    // [MODIFIED START] --- IMPLEMENTAÇÃO DO GRID LINEAR (SUBSTITUI O UNORDERED_MAP) ---
+    
+    // 1. Calcular Bounding Box do ambiente para dimensionar o vetor
     Eigen::Vector3f min_bound(1e9, 1e9, 1e9);
     Eigen::Vector3f max_bound(-1e9, -1e9, -1e9);
 
@@ -1202,39 +1171,51 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         if (pt.x < min_bound.x()) min_bound.x() = pt.x;
         if (pt.y < min_bound.y()) min_bound.y() = pt.y;
         if (pt.z < min_bound.z()) min_bound.z() = pt.z;
+        
         if (pt.x > max_bound.x()) max_bound.x() = pt.x;
         if (pt.y > max_bound.y()) max_bound.y() = pt.y;
         if (pt.z > max_bound.z()) max_bound.z() = pt.z;
     }
 
-    float voxel_size = 0.01f; 
+    float voxel_size = 0.0075;
     float padding = voxel_size * 2.0f;
     min_bound -= Eigen::Vector3f(padding, padding, padding);
     max_bound += Eigen::Vector3f(padding, padding, padding);
 
-    // 3.2. Dimensões e Strides
+    // 2. Calcular Dimensões e Strides
     float inv_voxel_size = 1.0f / voxel_size;
+    
     int dim_x = std::ceil((max_bound.x() - min_bound.x()) * inv_voxel_size);
     int dim_y = std::ceil((max_bound.y() - min_bound.y()) * inv_voxel_size);
     int dim_z = std::ceil((max_bound.z() - min_bound.z()) * inv_voxel_size);
 
+    // Strides para indexação 1D: idx = x + y*dim_x + z*dim_x*dim_y
     int stride_y = dim_x;
     int stride_z = dim_x * dim_y;
     size_t total_voxels = (size_t)dim_x * dim_y * dim_z;
 
-    // Grid Linear Global (Somente Leitura no loop paralelo)
+
     std::vector<VoxelBucket> linear_grid(total_voxels);
-    
-    // 3.3. Popular o Grid
+        
+    // Vetor de visitas (para o Ray Casting não checar o mesmo voxel 2x)
+    std::vector<uint32_t> visited_timestamps(total_voxels, 0);
+    uint32_t current_query_id = 0;
+
+    // -----------------------------------------------------------------------
+    // 5. Popular o Grid com os Pontos (Igual ao anterior)
+    // -----------------------------------------------------------------------
     for (const auto& pt : stored_cloud_->points) 
     {
+        // Importante: Coordenadas relativas ao min_bound
         int ix = std::floor((pt.x - min_bound.x()) * inv_voxel_size); 
         int iy = std::floor((pt.y - min_bound.y()) * inv_voxel_size); 
         int iz = std::floor((pt.z - min_bound.z()) * inv_voxel_size);
         
+        // Bounds Check rigoroso
         if (ix >= 0 && ix < dim_x && iy >= 0 && iy < dim_y && iz >= 0 && iz < dim_z)
         {
             size_t flat_idx = ix + iy * stride_y + iz * stride_z;
+            
             VoxelBucket& bucket = linear_grid[flat_idx];
             
             if (!bucket.has_points) {
@@ -1245,6 +1226,8 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 );
                 bucket.has_points = true;
                 bucket.points.reserve(16); 
+                
+                // O próprio voxel cheio deve saber que é "perto da superfície" (dele mesmo)
                 bucket.is_near_surface = true;
                 bucket.nearby_filled_indices.push_back(flat_idx); 
             }
@@ -1252,17 +1235,24 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         }
     }
 
-    // 3.4. Inflação do Grid (Pre-cálculo de vizinhos)
+    // -----------------------------------------------------------------------
+    // 6. INFLAÇÃO DO GRID (Popula o vetor nearby_filled_indices)
+    // -----------------------------------------------------------------------
+    
     int expansion_rad = std::ceil(cylinder_radius_ * inv_voxel_size);
     int expansion_rad_sq = expansion_rad * expansion_rad;
 
+    // 6.1. Pré-calcular offsets esféricos
     std::vector<std::tuple<int, int, int>> sphere_offsets;
+    // Reserva espaço aproximado para evitar re-alocações
     sphere_offsets.reserve((2*expansion_rad+1)*(2*expansion_rad+1)*(2*expansion_rad+1));
 
     for(int dx = -expansion_rad; dx <= expansion_rad; ++dx) {
         for(int dy = -expansion_rad; dy <= expansion_rad; ++dy) {
             for(int dz = -expansion_rad; dz <= expansion_rad; ++dz) {
+                // Não adicionamos (0,0,0) aqui pois já tratamos o próprio voxel acima
                 if (dx == 0 && dy == 0 && dz == 0) continue;
+
                 if (dx*dx + dy*dy + dz*dz <= expansion_rad_sq) {
                     sphere_offsets.emplace_back(dx, dy, dz);
                 }
@@ -1270,19 +1260,37 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         }
     }
 
+    // 6.2. Aplicar a inflação e preencher os vetores de vizinhos
+    // Iteramos por coordenadas para facilitar o bounds check
     for (int iz = 0; iz < dim_z; ++iz) {
         for (int iy = 0; iy < dim_y; ++iy) {
             for (int ix = 0; ix < dim_x; ++ix) {
+                
                 size_t current_idx = ix + iy * stride_y + iz * stride_z;
-                if (linear_grid[current_idx].has_points) {
-                    for (const auto& offset : sphere_offsets) {
+                
+                // Se este voxel TEM PONTOS, ele avisa os vizinhos
+                if (linear_grid[current_idx].has_points) 
+                {
+                    // Percorre todos os vizinhos dentro da esfera
+                    for (const auto& offset : sphere_offsets) 
+                    {
                         int nx = ix + std::get<0>(offset);
                         int ny = iy + std::get<1>(offset);
                         int nz = iz + std::get<2>(offset);
 
-                        if (nx >= 0 && nx < dim_x && ny >= 0 && ny < dim_y && nz >= 0 && nz < dim_z) {
+                        // Bounds Check
+                        if (nx >= 0 && nx < dim_x && 
+                            ny >= 0 && ny < dim_y && 
+                            nz >= 0 && nz < dim_z) 
+                        {
                             size_t neighbor_idx = nx + ny * stride_y + nz * stride_z;
+                            
+                            // Marca o vizinho como área de interesse
                             linear_grid[neighbor_idx].is_near_surface = true;
+                            
+                            // [IMPORTANTE] Adiciona o índice do voxel CHEIO (current_idx)
+                            // na lista de vizinhos do voxel (neighbor_idx).
+                            // Assim, quando o raio passar pelo vizinho, ele sabe onde olhar.
                             linear_grid[neighbor_idx].nearby_filled_indices.push_back(current_idx);
                         }
                     }
@@ -1292,732 +1300,1091 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     }
 
     auto t_voxel_end = std::chrono::high_resolution_clock::now();
+    double d_voxel = std::chrono::duration<double, std::milli>(t_voxel_end - t_voxel_start).count();
+    uint64_t clk_voxel = __rdtsc() - c_voxel_start;
+
     
-    // =================================================================================
-    // 4. CONFIGURAÇÃO DO PARALELISMO (TBB)
-    // =================================================================================
-    
-    // Estrutura para dados locais de cada thread (evita alocação dinâmica repetitiva e race conditions)
-    struct ThreadLocalData {
-        // Controle de visitação (exclusivo por thread)
-        std::vector<uint32_t> visited_timestamps;
-        uint32_t current_query_id = 0;
-
-        // Buffers reutilizáveis
-        std::vector<const VoxelBucket*> voxels_no_caminho;
-        pcl::PointCloud<pcl::PointXYZ>::Ptr init_inliers;
-        pcl::PointCloud<pcl::PointXYZ>::Ptr inliers_entry;
-        pcl::PointCloud<pcl::PointXYZ>::Ptr inliers_exit;
-
-        // Resultados parciais
-        std::vector<ScoredGrasp> local_candidates;
-        std::vector<geometry_msgs::msg::Pose> local_hits;
-
-        // Timers Parciais
-        double acc_inliers_ms = 0.0;
-        double acc_analysis_ms = 0.0;
-        double acc_scoring_ms = 0.0;
-
-        ThreadLocalData(size_t grid_size) : visited_timestamps(grid_size, 0) {
-            voxels_no_caminho.reserve(100);
-            init_inliers.reset(new pcl::PointCloud<pcl::PointXYZ>); init_inliers->reserve(100);
-            inliers_entry.reset(new pcl::PointCloud<pcl::PointXYZ>); inliers_entry->reserve(500);
-            inliers_exit.reset(new pcl::PointCloud<pcl::PointXYZ>);  inliers_exit->reserve(500);
-        }
-    };
-
-    // Container TBB para armazenamento local
-    tbb::enumerable_thread_specific<ThreadLocalData> tls([&]() {
-        return ThreadLocalData(total_voxels);
-    });
-
-    // Contador Atômico para Early Exit Global
-    std::atomic<int> atomic_perfect_count{0};
-
-    // Constantes pré-calculadas para o lambda
     float voxel_radius = (voxel_size * 1.73205f) / 2.0f;
     float voxel_check_threshold = cylinder_radius_ + voxel_radius; 
     float voxel_check_threshold_squared = voxel_check_threshold * voxel_check_threshold;
     float cylinder_radius_sq = cylinder_radius_ * cylinder_radius_;
-    float max_scan_dist = max_gripper_width_ * 1.1f;
-    int r_int = std::ceil(cylinder_radius_ * inv_voxel_size);
-    int r_sq = r_int * r_int;
 
-    const float voxel_extent = (voxel_size * 1.73205f) * 0.5f; 
-    const float safe_radius_sq = (cylinder_radius_ - voxel_extent) * (cylinder_radius_ - voxel_extent);
-    const bool use_fast_check = (cylinder_radius_ > voxel_extent); // Só vale se a esfera for maior que o voxel
-
-    RCLCPP_INFO(this->get_logger(), "Iniciando Processamento PARALELO (Candidates: %lu)...", all_candidates_.size());
-    auto t_loop_start = std::chrono::high_resolution_clock::now();
-
-    // =================================================================================
-    // 5. LOOP PARALELO PRINCIPAL
-    // =================================================================================
     
-    tbb::parallel_for(tbb::blocked_range<size_t>(0, all_candidates_.size()), 
-        [&](const tbb::blocked_range<size_t>& range) 
-    {
-        // Obter referência aos dados exclusivos da thread atual
-        ThreadLocalData& local = tls.local();
+    double acc_inliers_ms2 = 0.0;
+    double acc_inliers_ms = 0.0;   uint64_t acc_inliers_clk = 0;
+    double acc_analysis_ms = 0.0;  uint64_t acc_analysis_clk = 0;
+    double acc_scoring_ms = 0.0;   uint64_t acc_scoring_clk = 0;
 
-        for (size_t i = range.begin(); i != range.end(); ++i) 
+    std::vector<ScoredGrasp> initial_candidates;
+    initial_candidates.reserve(all_candidates_.size());
+    int perfect_grasps_count = 0;
+
+    RCLCPP_INFO(this->get_logger(), "Iniciando Processamento SERIAL c/ Animação (Candidates: %lu)...", all_candidates_.size());
+    
+    uint64_t c_loop_start = __rdtsc();
+    auto t_loop_start = std::chrono::high_resolution_clock::now();
+  
+    // [MODIFIED START] Printar tamanho do vetor linear
+    std::cout << "Linear Grid Size: " << linear_grid.size() << " voxels" << std::endl;
+    // [MODIFIED END]
+
+
+    float max_scan_dist = max_gripper_width_ * 1.1f;
+
+    // Setup da Expansão (Raio em voxels)
+    int r_int = std::ceil(cylinder_radius_ * inv_voxel_size);
+    
+    // Setup Geometria para filtro fino
+    float voxel_radius_approx = voxel_size * 0.87f; 
+    float check_dist = cylinder_radius_ + voxel_radius_approx; 
+    float check_dist_sq = check_dist * check_dist;
+
+    for (size_t i = 0; i < all_candidates_.size(); ++i) 
+    {
+        
+        if (perfect_grasps_count >= num_best_grasps_) 
         {
-            // CHECK DE SAÍDA GLOBAL
-            if (atomic_perfect_count.load() >= num_best_grasps_) {
-                continue; // Skip restante
+            break;
+        }
+
+        const auto& raw_pose = all_candidates_[i]; 
+        
+        Eigen::Quaternionf q_start(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
+        Eigen::Vector3f ray_origin_start(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
+        Eigen::Vector3f ray_dir_start = q_start * Eigen::Vector3f::UnitX(); 
+
+        
+        uint64_t c0 = __rdtsc(); 
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto t00 = std::chrono::high_resolution_clock::now();
+
+        // -----------------------------------------------------------------------
+        // 1. SETUP GERAL E VARIÁVEIS DE SAÍDA
+        // -----------------------------------------------------------------------
+        float t_min_init = 1e6f;
+        float t_max_init = -1e6f;
+        Eigen::Vector3f PIVOT_POINT = {0.0f, 0.0f, 0.0f}; 
+        bool hit_init = false;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr init_inliers(new pcl::PointCloud<pcl::PointXYZ>);
+        init_inliers->reserve(40);
+        bool continuar = false;
+
+        std::vector<const VoxelBucket*> voxels_no_caminho;
+        voxels_no_caminho.reserve(20); 
+
+        // [MODIFIED] Removido visited_keys (set), agora usamos o vetor 'visited_timestamps'
+
+        // --- Configuração Matemática ---
+        Eigen::Vector3f dir = ray_dir_start;
+        if (std::abs(dir.x()) < 1e-9f) dir.x() = 1e-9f;
+        if (std::abs(dir.y()) < 1e-9f) dir.y() = 1e-9f;
+        if (std::abs(dir.z()) < 1e-9f) dir.z() = 1e-9f;
+
+        // [MODIFIED START] Posição inteira inicial AGORA RELATIVA AO MIN_BOUND
+        // Isso é fundamental para alinhar com o índice 0 do vetor
+        Eigen::Vector3f relative_origin = ray_origin_start - min_bound;
+        
+        int cur_x = std::floor(relative_origin.x() * inv_voxel_size);
+        int cur_y = std::floor(relative_origin.y() * inv_voxel_size);
+        int cur_z = std::floor(relative_origin.z() * inv_voxel_size);
+        // [MODIFIED END]
+
+        // Direção do passo
+        int step_x = (dir.x() > 0) ? 1 : -1;
+        int step_y = (dir.y() > 0) ? 1 : -1;
+        int step_z = (dir.z() > 0) ? 1 : -1;
+
+        // [MODIFIED START] tMax calculado usando a origem relativa
+        float tMaxX = ((cur_x + (step_x > 0 ? 1 : 0)) * voxel_size - relative_origin.x()) / dir.x();
+        float tMaxY = ((cur_y + (step_y > 0 ? 1 : 0)) * voxel_size - relative_origin.y()) / dir.y();
+        float tMaxZ = ((cur_z + (step_z > 0 ? 1 : 0)) * voxel_size - relative_origin.z()) / dir.z();
+        // [MODIFIED END]
+
+        float tDeltaX = std::abs(voxel_size / dir.x());
+        float tDeltaY = std::abs(voxel_size / dir.y());
+        float tDeltaZ = std::abs(voxel_size / dir.z());
+
+        float max_dist = max_gripper_width_ * 1.2f;
+
+        // -----------------------------------------------------------------------
+        // SETUP DA EXPANSÃO (Calculado aqui dentro)
+        // -----------------------------------------------------------------------
+        int r_int = std::ceil(cylinder_radius_ * inv_voxel_size);
+        int r_sq = r_int * r_int; 
+
+        // [MODIFIED START] Incrementa ID da Query para limpar "visitados" em O(1)
+        current_query_id++;
+        if (current_query_id == 0) {
+            // Em caso raríssimo de overflow do uint32, resetamos o vetor
+            std::fill(visited_timestamps.begin(), visited_timestamps.end(), 0);
+            current_query_id = 1;
+        }
+        // [MODIFIED END]
+
+        // -----------------------------------------------------------------------
+        // 2. LOOP DE TRAVESSIA (THICK RAY ON-THE-FLY)
+        // -----------------------------------------------------------------------
+        while (true)
+        {
+            if (std::min({tMaxX, tMaxY, tMaxZ}) - std::min({tDeltaX, tDeltaY, tDeltaZ}) > max_dist) break;
+
+            // --- EXPANSÃO VOLUMÉTRICA ---
+            for (int dx = -r_int; dx <= r_int; ++dx)
+            {
+                for (int dy = -r_int; dy <= r_int; ++dy)
+                {
+                    for (int dz = -r_int; dz <= r_int; ++dz)
+                    {
+                        if (dx*dx + dy*dy + dz*dz > r_sq) continue;
+
+                        int nx = cur_x + dx;
+                        int ny = cur_y + dy;
+                        int nz = cur_z + dz;
+
+                        // [MODIFIED START] ACESSO AO VETOR LINEAR
+                        // 1. Bounds Check (Obrigatório)
+                        if (nx >= 0 && nx < dim_x && ny >= 0 && ny < dim_y && nz >= 0 && nz < dim_z)
+                        {
+                            // 2. Cálculo do Índice Linear
+                            size_t flat_idx = nx + ny * stride_y + nz * stride_z;
+
+                            // 3. Check de Visitado O(1) com Timestamp
+                            if (visited_timestamps[flat_idx] != current_query_id)
+                            {
+                                visited_timestamps[flat_idx] = current_query_id; // Marca como visitado
+
+                                // 4. Acesso Direto (Sem Hash)
+                                const auto& bucket = linear_grid[flat_idx];
+                                if (bucket.has_points) 
+                                {
+                                    voxels_no_caminho.push_back(&bucket);
+                                }
+                            }
+                        }
+                        // [MODIFIED END]
+                    }
+                }
             }
 
-            const auto& raw_pose = all_candidates_[i]; 
+            // --- AVANÇO DO AMANATIDES & WOO ---
+            if (tMaxX < tMaxY) {
+                if (tMaxX < tMaxZ) {
+                    cur_x += step_x; tMaxX += tDeltaX;
+                } else {
+                    cur_z += step_z; tMaxZ += tDeltaZ;
+                }
+            } else {
+                if (tMaxY < tMaxZ) {
+                    cur_y += step_y; tMaxY += tDeltaY;
+                } else {
+                    cur_z += step_z; tMaxZ += tDeltaZ;
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // 4. LOOP DE PROCESSAMENTO DE PONTOS
+        // -----------------------------------------------------------------------
+        for (const auto* bucket_ptr : voxels_no_caminho) 
+        {
+            const auto& bucket = *bucket_ptr;
+
+            // Check rápido: Centro do bucket longe do raio?
+            Eigen::Vector3f diff = bucket.center - ray_origin_start;
+            if ((diff.cross(ray_dir_start)).squaredNorm() > voxel_check_threshold_squared) 
+            {
+                continue;
+            }
+
+            // Check fino: Ponto a Ponto
+            for (const auto& pt : bucket.points) 
+            {
+                Eigen::Vector3f p(pt.x, pt.y, pt.z);
+                float t = (p - ray_origin_start).dot(ray_dir_start);
+                Eigen::Vector3f dist_vec = p - (ray_origin_start + t * ray_dir_start);
+                
+                if (dist_vec.squaredNorm() < cylinder_radius_sq) 
+                {
+                    if (t < t_min_init) 
+                    {
+                        t_min_init = t;
+                        PIVOT_POINT = p;
+                    }
+                    if (t > t_max_init) 
+                    {
+                        t_max_init = t;
+                    }
+                    
+                    hit_init = true;
+                    init_inliers->points.push_back(pt);
+                }
+            }
+
+            // Early exit se a garra não encaixar
+            if(t_max_init - t_min_init >= max_gripper_width_)
+            {
+                continuar = true;
+                break;
+            }
+        }
+        
+    
+
+        if(continuar == true)
+        {
+            continue;
+        }
+
+        auto t1 = std::chrono::high_resolution_clock::now(); 
+        auto t11 = std::chrono::high_resolution_clock::now(); 
+        uint64_t c1 = __rdtsc();
+        acc_inliers_ms += std::chrono::duration<double, std::milli>(t1 - t0).count(); 
+        acc_inliers_clk += (c1 - c0);
+
+        
+        float init_thickness = t_max_init - t_min_init;
+        if (!hit_init || init_inliers->size() < 3 || 
+            init_thickness < 0.0005 || init_thickness > max_gripper_width_) 
+        {
+            acc_inliers_ms2 += std::chrono::duration<double, std::milli>(t11 - t00).count(); 
+            continue;
+        }
+
+        
+        uint64_t c2_pre = __rdtsc(); 
+        auto t2_pre = std::chrono::high_resolution_clock::now();
+        
+        Eigen::Vector4f centroid; 
+        Eigen::Matrix3f covariance_matrix;
+        
+        pcl::compute3DCentroid(*init_inliers, centroid);
+        pcl::computeCovarianceMatrixNormalized(*init_inliers, centroid, covariance_matrix);
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
+        
+        Eigen::Vector3f pca_normal = eigen_solver.eigenvectors().col(0);
+        
+     
+        if (!pca_normal.allFinite()) 
+        {
+            pca_normal = -ray_dir_start; 
+        }
+        else if (pca_normal.dot(ray_dir_start) > 0) 
+        {
+            pca_normal = -pca_normal;
+        }
+
+        const float DISTANCE_TO_PIVOT = t_min_init;                                        
+        const Eigen::Vector3f DIR_START = ray_dir_start;                                   
+        const Eigen::Vector3f DIR_TARGET = -pca_normal;                                
+
+        auto t2_post = std::chrono::high_resolution_clock::now(); 
+        uint64_t c2_post = __rdtsc();
+        acc_analysis_ms += std::chrono::duration<double, std::milli>(t2_post - t2_pre).count();
+        acc_analysis_clk += (c2_post - c2_pre);
+
+        ScoredGrasp best_iter_grasp;
+        best_iter_grasp.total_score = -1.0; 
+        bool found_valid_in_optimization = false;
+        bool perfect_candidate_found = false;                          
+
+        
+        int max_optimization_steps = 10; 
+        
+
+        for (int step = 0; step < max_optimization_steps; ++step)
+        {
+             
+            float t_lerp = (float)step / (float)max_optimization_steps; 
+            Eigen::Vector3f current_ray_dir = ((1.0f - t_lerp) * DIR_START + t_lerp * DIR_TARGET).normalized();
+            Eigen::Vector3f current_ray_origin = PIVOT_POINT - (current_ray_dir * DISTANCE_TO_PIVOT);
+
+            uint64_t c3 = __rdtsc(); 
             
-            // Setup Geometria do Raio
-            Eigen::Quaternionf q_start(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
-            Eigen::Vector3f ray_origin_start(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
-            Eigen::Vector3f ray_dir_start = q_start * Eigen::Vector3f::UnitX(); 
-
-            auto t0 = std::chrono::high_resolution_clock::now();
-
-            // --- Reset Local ---
-            float t_min_init = 1e6f;
-            float t_max_init = -1e6f;
-            Eigen::Vector3f PIVOT_POINT = {0.0f, 0.0f, 0.0f}; 
-            bool hit_init = false;
-            local.init_inliers->clear();
-            local.voxels_no_caminho.clear();
-            bool continuar = false;
-
-            // --- Configuração Ray Casting ---
-            Eigen::Vector3f dir = ray_dir_start;
+           // [TIMER START] Início da medição do processo de Inliers
+            
+            
+            // Limpa os vetores auxiliares para este passo
+            voxels_no_caminho.clear();
+            // Não limpamos visited_timestamps, apenas incrementamos o ID
+            
+            // -----------------------------------------------------------------------
+            // 1. SETUP DO ALGORITMO (USANDO VARIÁVEIS 'CURRENT' + Vector)
+            // -----------------------------------------------------------------------
+            Eigen::Vector3f dir = current_ray_dir;
+            
             if (std::abs(dir.x()) < 1e-9f) dir.x() = 1e-9f;
             if (std::abs(dir.y()) < 1e-9f) dir.y() = 1e-9f;
             if (std::abs(dir.z()) < 1e-9f) dir.z() = 1e-9f;
 
-            Eigen::Vector3f relative_origin = ray_origin_start - min_bound;
-            int cur_x = std::floor(relative_origin.x() * inv_voxel_size);
-            int cur_y = std::floor(relative_origin.y() * inv_voxel_size);
-            int cur_z = std::floor(relative_origin.z() * inv_voxel_size);
+            // Posição inteira inicial relativa ao MinBound
+            Eigen::Vector3f rel_orig = current_ray_origin - min_bound;
+            int cur_x = std::floor(rel_orig.x() * inv_voxel_size);
+            int cur_y = std::floor(rel_orig.y() * inv_voxel_size);
+            int cur_z = std::floor(rel_orig.z() * inv_voxel_size);
 
+            // Direção do passo
             int step_x = (dir.x() > 0) ? 1 : -1;
             int step_y = (dir.y() > 0) ? 1 : -1;
             int step_z = (dir.z() > 0) ? 1 : -1;
 
-            float tMaxX = ((cur_x + (step_x > 0 ? 1 : 0)) * voxel_size - relative_origin.x()) / dir.x();
-            float tMaxY = ((cur_y + (step_y > 0 ? 1 : 0)) * voxel_size - relative_origin.y()) / dir.y();
-            float tMaxZ = ((cur_z + (step_z > 0 ? 1 : 0)) * voxel_size - relative_origin.z()) / dir.z();
+            // tMax com origem relativa
+            float tMaxX = ((cur_x + (step_x > 0 ? 1 : 0)) * voxel_size - rel_orig.x()) / dir.x();
+            float tMaxY = ((cur_y + (step_y > 0 ? 1 : 0)) * voxel_size - rel_orig.y()) / dir.y();
+            float tMaxZ = ((cur_z + (step_z > 0 ? 1 : 0)) * voxel_size - rel_orig.z()) / dir.z();
 
             float tDeltaX = std::abs(voxel_size / dir.x());
             float tDeltaY = std::abs(voxel_size / dir.y());
             float tDeltaZ = std::abs(voxel_size / dir.z());
 
-            // --- Controle de Visita O(1) Local ---
-            local.current_query_id++;
-            if (local.current_query_id == 0) {
-                std::fill(local.visited_timestamps.begin(), local.visited_timestamps.end(), 0);
-                local.current_query_id = 1;
-            }
+            
+            
+            float ray_ox = current_ray_origin.x();
+            float ray_oy = current_ray_origin.y();
+            float ray_oz = current_ray_origin.z();
+            float ray_dx = current_ray_dir.x();
+            float ray_dy = current_ray_dir.y();
+            float ray_dz = current_ray_dir.z();
 
-            // --- Thick Ray Traversal ---
+
+            float found_t_min = 1e9f;
+            float found_t_max = -1e9f;
+            bool voxel_hit_any = false;
+            bool abort_too_thick = false; 
+
+
+            current_query_id++;
+            if (current_query_id == 0) 
+            {
+                std::fill(visited_timestamps.begin(), visited_timestamps.end(), 0);
+                current_query_id = 1;
+            }
+            
+            
+
+            int r_search = std::ceil(cylinder_radius_ * inv_voxel_size);
+
             while (true)
             {
-                if (std::min({tMaxX, tMaxY, tMaxZ}) - std::min({tDeltaX, tDeltaY, tDeltaZ}) > max_scan_dist) break;
-
-                for (int dx = -r_int; dx <= r_int; ++dx) {
-                    for (int dy = -r_int; dy <= r_int; ++dy) {
-                        for (int dz = -r_int; dz <= r_int; ++dz) {
-                            if (dx*dx + dy*dy + dz*dz > r_sq) continue;
-
-                            int nx = cur_x + dx;
-                            int ny = cur_y + dy;
-                            int nz = cur_z + dz;
-
-                            if (nx >= 0 && nx < dim_x && ny >= 0 && ny < dim_y && nz >= 0 && nz < dim_z) {
-                                size_t flat_idx = nx + ny * stride_y + nz * stride_z;
-                                if (local.visited_timestamps[flat_idx] != local.current_query_id) {
-                                    local.visited_timestamps[flat_idx] = local.current_query_id;
-                                    const auto& bucket = linear_grid[flat_idx];
-                                    if (bucket.has_points) {
-                                        local.voxels_no_caminho.push_back(&bucket);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (tMaxX < tMaxY) {
-                    if (tMaxX < tMaxZ) { cur_x += step_x; tMaxX += tDeltaX; } else { cur_z += step_z; tMaxZ += tDeltaZ; }
-                } else {
-                    if (tMaxY < tMaxZ) { cur_y += step_y; tMaxY += tDeltaY; } else { cur_z += step_z; tMaxZ += tDeltaZ; }
-                }
-            }
-
-            // --- Processamento de Pontos Inicial ---
-            for (const auto* bucket_ptr : local.voxels_no_caminho) 
-            {
-                const auto& bucket = *bucket_ptr;
-                Eigen::Vector3f diff = bucket.center - ray_origin_start;
-                if ((diff.cross(ray_dir_start)).squaredNorm() > voxel_check_threshold_squared) continue;
-
-                for (const auto& pt : bucket.points) {
-                    Eigen::Vector3f p(pt.x, pt.y, pt.z);
-                    float t = (p - ray_origin_start).dot(ray_dir_start);
-                    Eigen::Vector3f dist_vec = p - (ray_origin_start + t * ray_dir_start);
-                    
-                    if (dist_vec.squaredNorm() < cylinder_radius_sq) {
-                        if (t < t_min_init) { t_min_init = t; PIVOT_POINT = p; }
-                        if (t > t_max_init) { t_max_init = t; }
-                        hit_init = true;
-                        local.init_inliers->points.push_back(pt);
-                    }
-                }
-                if(t_max_init - t_min_init >= max_gripper_width_) { continuar = true; break; }
-            }
-            if(continuar) continue;
-
-            auto t1 = std::chrono::high_resolution_clock::now(); 
-            local.acc_inliers_ms += std::chrono::duration<double, std::milli>(t1 - t0).count(); 
-
-            float init_thickness = t_max_init - t_min_init;
-            if (!hit_init || local.init_inliers->size() < 3 || 
-                init_thickness < 0.0005 || init_thickness > max_gripper_width_) continue;
-
-            // --- PCA ---
-            auto t2_pre = std::chrono::high_resolution_clock::now();
-            Eigen::Vector4f centroid; 
-            Eigen::Matrix3f covariance_matrix;
-            pcl::compute3DCentroid(*local.init_inliers, centroid);
-            pcl::computeCovarianceMatrixNormalized(*local.init_inliers, centroid, covariance_matrix);
-            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
-            Eigen::Vector3f pca_normal = eigen_solver.eigenvectors().col(0);
-            
-            if (!pca_normal.allFinite()) pca_normal = -ray_dir_start; 
-            else if (pca_normal.dot(ray_dir_start) > 0) pca_normal = -pca_normal;
-
-            const float DISTANCE_TO_PIVOT = t_min_init;                                        
-            const Eigen::Vector3f DIR_START = ray_dir_start;                                   
-            const Eigen::Vector3f DIR_TARGET = -pca_normal;     
-            
-            float dot_prod = DIR_START.dot(DIR_TARGET);
-            
-            // Clamp para evitar erros numéricos (NaN) no acos se o dot for levemente > 1.0
-            if (dot_prod > 1.0f) dot_prod = 1.0f;
-            if (dot_prod < -1.0f) dot_prod = -1.0f;
-
-            float angle_diff_rad = std::acos(dot_prod);
-            float angle_diff_deg = angle_diff_rad * (180.0f / M_PI);
-
-          
-            // RCLCPP_INFO(this->get_logger(), "[Cand %lu] Angle Diff: %.2f deg", i, angle_diff_deg);
-
-            
-
-            auto t2_post = std::chrono::high_resolution_clock::now(); 
-            local.acc_analysis_ms += std::chrono::duration<double, std::milli>(t2_post - t2_pre).count();
-
-            // --- Otimização ---
-            ScoredGrasp best_iter_grasp;
-            best_iter_grasp.total_score = -1.0; 
-            bool found_valid_in_optimization = false;
-            bool perfect_candidate_found = false;                          
-            int max_optimization_steps = 10; 
-
-            for (int step = 0; step < max_optimization_steps; ++step)
-            {
-                auto t3 = std::chrono::high_resolution_clock::now();
-                float t_lerp = (float)step / (float)max_optimization_steps; 
-                Eigen::Vector3f current_ray_dir = ((1.0f - t_lerp) * DIR_START + t_lerp * DIR_TARGET).normalized();
-                Eigen::Vector3f current_ray_origin = PIVOT_POINT - (current_ray_dir * DISTANCE_TO_PIVOT);
-
-                local.voxels_no_caminho.clear();
+                // 1. Controle de Segurança
+                float t_curr = std::min({tMaxX, tMaxY, tMaxZ}) - std::min({tDeltaX, tDeltaY, tDeltaZ});
+                if (t_curr > max_scan_dist) break; 
                 
-                // Add Pivot Voxel (Manual)
+                // 2. Check se está dentro do Grid
+                if (cur_x >= 0 && cur_x < dim_x && 
+                    cur_y >= 0 && cur_y < dim_y && 
+                    cur_z >= 0 && cur_z < dim_z)
                 {
-                    Eigen::Vector3f rel_pivot = PIVOT_POINT - min_bound;
-                    int pv_x = std::floor(rel_pivot.x() * inv_voxel_size);
-                    int pv_y = std::floor(rel_pivot.y() * inv_voxel_size);
-                    int pv_z = std::floor(rel_pivot.z() * inv_voxel_size);
-                    if (pv_x >= 0 && pv_x < dim_x && pv_y >= 0 && pv_y < dim_y && pv_z >= 0 && pv_z < dim_z) {
-                        size_t pivot_idx = pv_x + pv_y * stride_y + pv_z * stride_z;
-                        local.voxels_no_caminho.push_back(&linear_grid[pivot_idx]);
-                    }
-                }
+                    size_t current_flat_idx = cur_x + cur_y * stride_y + cur_z * stride_z;
+                    const auto& bucket_curr = linear_grid[current_flat_idx];
 
-                // --- Raio Invertido (Stop on First Hit) ---
-                Eigen::Vector3f ray_end_pos = current_ray_origin + (current_ray_dir * max_scan_dist);
-                Eigen::Vector3f traverse_dir = -current_ray_dir; 
-                if (std::abs(traverse_dir.x()) < 1e-9f) traverse_dir.x() = 1e-9f;
-                if (std::abs(traverse_dir.y()) < 1e-9f) traverse_dir.y() = 1e-9f;
-                if (std::abs(traverse_dir.z()) < 1e-9f) traverse_dir.z() = 1e-9f;
-
-                Eigen::Vector3f rel_start = ray_end_pos - min_bound;
-                int cur_x = std::floor(rel_start.x() * inv_voxel_size);
-                int cur_y = std::floor(rel_start.y() * inv_voxel_size);
-                int cur_z = std::floor(rel_start.z() * inv_voxel_size);
-
-                int step_x = (traverse_dir.x() > 0) ? 1 : -1;
-                int step_y = (traverse_dir.y() > 0) ? 1 : -1;
-                int step_z = (traverse_dir.z() > 0) ? 1 : -1;
-
-                float tMaxX = ((cur_x + (step_x > 0 ? 1 : 0)) * voxel_size - rel_start.x()) / traverse_dir.x();
-                float tMaxY = ((cur_y + (step_y > 0 ? 1 : 0)) * voxel_size - rel_start.y()) / traverse_dir.y();
-                float tMaxZ = ((cur_z + (step_z > 0 ? 1 : 0)) * voxel_size - rel_start.z()) / traverse_dir.z();
-
-                float tDeltaX = std::abs(voxel_size / traverse_dir.x());
-                float tDeltaY = std::abs(voxel_size / traverse_dir.y());
-                float tDeltaZ = std::abs(voxel_size / traverse_dir.z());
-
-                bool voxel_hit_any = false;
-                
-                while (true)
-                {
-                    float t_curr = std::min({tMaxX, tMaxY, tMaxZ}) - std::min({tDeltaX, tDeltaY, tDeltaZ});
-                    if (t_curr > max_scan_dist) break; 
-                    
-                    if (cur_x >= 0 && cur_x < dim_x && cur_y >= 0 && cur_y < dim_y && cur_z >= 0 && cur_z < dim_z)
+                    // --- OTIMIZAÇÃO MÁXIMA (Vector Lookup) ---
+                    // Se o voxel atual tem vizinhos perigosos, o vetor não estará vazio.
+                    // Iteramos DIRETO nos índices dos voxels cheios. Sem busca cega.
+                    if (!bucket_curr.nearby_filled_indices.empty())
                     {
-                        size_t current_flat_idx = cur_x + cur_y * stride_y + cur_z * stride_z;
-                        const auto& bucket_curr = linear_grid[current_flat_idx];
-
-                        if (bucket_curr.is_near_surface && bucket_curr.has_points) {
-                            local.voxels_no_caminho.push_back(&bucket_curr);
-                            voxel_hit_any = true;
-                            break; // Stop on first hit
-                        }
-                    } 
-
-                    if (tMaxX < tMaxY) {
-                        if (tMaxX < tMaxZ) { cur_x += step_x; tMaxX += tDeltaX; } else { cur_z += step_z; tMaxZ += tDeltaZ; }
-                    } else {
-                        if (tMaxY < tMaxZ) { cur_y += step_y; tMaxY += tDeltaY; } else { cur_z += step_z; tMaxZ += tDeltaZ; }
-                    }
-                }
-
-                if (!voxel_hit_any && local.voxels_no_caminho.size() <= 1) continue; 
-
-                // --- Coleta de Inliers ---
-                local.inliers_entry->clear();
-                local.inliers_exit->clear();
-
-                const auto* bucket_min = local.voxels_no_caminho.front();
-                float exact_t_min = 1e9f;
-                bool points_found = false;
-                float c_ox = current_ray_origin.x(), c_oy = current_ray_origin.y(), c_oz = current_ray_origin.z();
-                float c_dx = current_ray_dir.x(), c_dy = current_ray_dir.y(), c_dz = current_ray_dir.z();
-
-                for(const auto& pt : bucket_min->points) {
-                    float vx = pt.x - c_ox, vy = pt.y - c_oy, vz = pt.z - c_oz;
-                    float t = vx * c_dx + vy * c_dy + vz * c_dz;
-                    if (t < exact_t_min) { exact_t_min = t; points_found = true; }
-                }
-                if (!points_found) continue; 
-
-                const auto* bucket_max = local.voxels_no_caminho.back();
-                float exact_t_max = -1e9f;
-                bool exit_found = false; 
-                for(const auto& pt : bucket_max->points) {
-                    float vx = pt.x - c_ox, vy = pt.y - c_oy, vz = pt.z - c_oz;
-                    float t = vx * c_dx + vy * c_dy + vz * c_dz;
-                    if (t > exact_t_max) { exact_t_max = t; exit_found = true; }
-                }
-                if (!exit_found && exact_t_max < -1e8f) exact_t_max = exact_t_min; 
-
-                // Coleta Esférica
-                Eigen::Vector3f center_entry = current_ray_origin + current_ray_dir * exact_t_min;
-                Eigen::Vector3f center_exit  = current_ray_origin + current_ray_dir * exact_t_max;
-
-                auto collect_spherical = [&](const Eigen::Vector3f& center, pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_out) 
-                {
-                    // 1. Calcula índices do voxel central
-                    int ix = std::floor((center.x() - min_bound.x()) * inv_voxel_size);
-                    int iy = std::floor((center.y() - min_bound.y()) * inv_voxel_size);
-                    int iz = std::floor((center.z() - min_bound.z()) * inv_voxel_size);
-
-                    if (ix >= 0 && ix < dim_x && iy >= 0 && iy < dim_y && iz >= 0 && iz < dim_z) {
-                        size_t idx = ix + iy * stride_y + iz * stride_z;
-                        const auto& center_bucket = linear_grid[idx];
-
-                        if (!center_bucket.nearby_filled_indices.empty()) {
+                                   
+                        auto t3 = std::chrono::high_resolution_clock::now();
+                        for (const auto& neighbor_idx : bucket_curr.nearby_filled_indices)
+                        {
                             
-                            // --- OTIMIZAÇÃO DE RESERVE ---
-                            // Passo A: Calcular o total de candidatos (limite superior)
-                            size_t total_candidates = 0;
-                            for (const auto& neighbor_idx : center_bucket.nearby_filled_indices) {
-                                total_candidates += linear_grid[neighbor_idx].points.size();
-                            }
-
-                            // Passo B: Reservar tamanho atual + candidatos
-                            // Isso garante zero realocações durante os push_back abaixo
-                            cloud_out->points.reserve(cloud_out->points.size() + total_candidates);
-                            // -----------------------------
-
-                            // Cache das coordenadas do centro (fora dos loops para performance)
-                            const float cx = center.x();
-                            const float cy = center.y();
-                            const float cz = center.z();
-
-                            for (const auto& neighbor_idx : center_bucket.nearby_filled_indices) 
+                            // 1. Check de Timestamp (Evita processar o mesmo obstáculo 2x no mesmo raio)
+                            if (visited_timestamps[neighbor_idx] != current_query_id)
                             {
-                                const auto& neighbor_bucket = linear_grid[neighbor_idx];
+                                visited_timestamps[neighbor_idx] = current_query_id;
+                                
+                                // Acesso direto à memória (sem cálculos de índice)
+                                const auto& bucket_neighbor = linear_grid[neighbor_idx];
+                                
+                                // Nota: Não precisamos checar bucket.has_points, 
+                                // pois a lista nearby_filled_indices SÓ contém voxels cheios.
 
-                                for (const auto& pt : neighbor_bucket.points) 
+                                // --- MATEMÁTICA GEOMÉTRICA ---
+                                // Usamos o centro pré-calculado do bucket (bucket.center)
+                                // Isso evita converter (nx, ny, nz) para float novamente.
+                                float w_x = bucket_neighbor.center.x() - ray_ox;
+                                float w_y = bucket_neighbor.center.y() - ray_oy;
+                                float w_z = bucket_neighbor.center.z() - ray_oz;
+
+                                // Cross Product (Distância Ponto-Linha)
+                                float cross_x = w_y * ray_dz - w_z * ray_dy;
+                                float cross_y = w_z * ray_dx - w_x * ray_dz;
+                                float cross_z = w_x * ray_dy - w_y * ray_dx;
+                                
+                                float dist_sq_to_line = cross_x*cross_x + cross_y*cross_y + cross_z*cross_z;
+
+                                if (dist_sq_to_line <= check_dist_sq) 
                                 {
-                                    float dx = pt.x - cx;
-                                    float dy = pt.y - cy;
-                                    float dz = pt.z - cz;
+                                    voxels_no_caminho.push_back(&bucket_neighbor);
 
-                                    float dist_sq = (dx * dx) + (dy * dy) + (dz * dz);
+                                    // Projeção t (Distância ao longo da linha)
+                                    float t_vox = w_x * ray_dx + w_y * ray_dy + w_z * ray_dz;
 
-                                    if (dist_sq <= cylinder_radius_sq) 
-                                    {
-                                        cloud_out->points.push_back(pt);
-                                    }
+                                    if (t_vox < found_t_min) found_t_min = t_vox;
+                                    if (t_vox > found_t_max) found_t_max = t_vox;
+                                    
+                                    voxel_hit_any = true;
                                 }
                             }
+
+                           
                         }
-                    }
-                };
 
-                collect_spherical(center_entry, local.inliers_entry);
-                if ((exact_t_max - exact_t_min) > 0.005f) collect_spherical(center_exit, local.inliers_exit);
+                         auto t4 = std::chrono::high_resolution_clock::now();
 
-                auto t4 = std::chrono::high_resolution_clock::now();
-                local.acc_inliers_ms += std::chrono::duration<double, std::milli>(t4 - t3).count();
-
-                float real_thickness = exact_t_max - exact_t_min;
-                if (!points_found || local.inliers_entry->size() < 5 || local.inliers_exit->size() < 5 || real_thickness >= max_gripper_width_) continue; 
-
-
-                if (enable_ray_animation_ && debug_marker_pub_)
-                {
-                    std::lock_guard<std::mutex> lock(toma);
-                    auto t_now = this->now();
-                    visualization_msgs::msg::MarkerArray markers;
-
-                    // Publica a nuvem original para referência
-                    sensor_msgs::msg::PointCloud2 m; 
-                    pcl::toROSMsg(*stored_cloud_, m); 
-                    m.header.stamp = t_now; 
-                    m.header.frame_id = "world"; 
-                    pub_cloud_->publish(m);
-
-                    // Configuração base para NÃO PISCAR (Lifetime = 0)
-                    visualization_msgs::msg::Marker base_marker;
-                    base_marker.header.frame_id = "world";
-                    base_marker.header.stamp = t_now;
-                    base_marker.action = visualization_msgs::msg::Marker::ADD;
-                    base_marker.lifetime = rclcpp::Duration::from_seconds(0); 
-
-                    // -----------------------------------------------------------------
-                    // 0. PRÉ-CÁLCULO DAS NORMAIS PARA VISUALIZAÇÃO
-                    // -----------------------------------------------------------------
-                    // Precisamos calcular as normais AGORA para poder desenhá-las
-                    StepAnalysis debug_entry = analyzeLocalCylinder(local.inliers_entry, center_entry, current_ray_dir);
-                    StepAnalysis debug_exit;
-                    if (real_thickness > 0.001f) {
-                        debug_exit = analyzeLocalCylinder(local.inliers_exit, center_exit, current_ray_dir);
-                    }
-
-                    // -----------------------------------------------------------------
-                    // 1. PIVÔ E ORIGEM (Esferas)
-                    // -----------------------------------------------------------------
-                    visualization_msgs::msg::Marker pivot_mk = base_marker;
-                    pivot_mk.ns = "debug_anim_pivot"; 
-                    pivot_mk.id = 1;
-                    pivot_mk.type = visualization_msgs::msg::Marker::SPHERE;
-                    pivot_mk.pose.position.x = PIVOT_POINT.x(); 
-                    pivot_mk.pose.position.y = PIVOT_POINT.y(); 
-                    pivot_mk.pose.position.z = PIVOT_POINT.z();
-                    pivot_mk.pose.orientation.w = 1.0;
-                    pivot_mk.scale.x = 0.005; pivot_mk.scale.y = 0.005; pivot_mk.scale.z = 0.005;
-                    pivot_mk.color.a = 1.0; pivot_mk.color.r = 0.0; pivot_mk.color.g = 1.0; pivot_mk.color.b = 1.0; 
-                    markers.markers.push_back(pivot_mk);
-
-                    visualization_msgs::msg::Marker origin_mk = base_marker;
-                    origin_mk.ns = "current_ray_origin"; 
-                    origin_mk.id = 1;
-                    origin_mk.type = visualization_msgs::msg::Marker::SPHERE;
-                    origin_mk.pose.position.x = current_ray_origin.x(); 
-                    origin_mk.pose.position.y = current_ray_origin.y(); 
-                    origin_mk.pose.position.z = current_ray_origin.z();
-                    origin_mk.pose.orientation.w = 1.0;
-                    origin_mk.scale.x = 0.005; origin_mk.scale.y = 0.005; origin_mk.scale.z = 0.005;
-                    origin_mk.color.a = 1.0; origin_mk.color.r = 1.0; origin_mk.color.g = 0.0; origin_mk.color.b = 1.0; 
-                    markers.markers.push_back(origin_mk);
-
-                    // -----------------------------------------------------------------
-                    // 2. ESFERAS DE BUSCA (Entry & Exit)
-                    // -----------------------------------------------------------------
-                    Eigen::Vector3f pos_entry = current_ray_origin + current_ray_dir * exact_t_min;
-                    Eigen::Vector3f pos_exit  = current_ray_origin + current_ray_dir * exact_t_max;
-
-                    visualization_msgs::msg::Marker sphere_entry = base_marker;
-                    sphere_entry.ns = "debug_anim_sphere_entry";
-                    sphere_entry.id = 6;
-                    sphere_entry.type = visualization_msgs::msg::Marker::SPHERE;
-                    sphere_entry.pose.position.x = pos_entry.x();
-                    sphere_entry.pose.position.y = pos_entry.y();
-                    sphere_entry.pose.position.z = pos_entry.z();
-                    sphere_entry.pose.orientation.w = 1.0;
-                    sphere_entry.scale.x = cylinder_radius_ * 2.0; 
-                    sphere_entry.scale.y = cylinder_radius_ * 2.0; 
-                    sphere_entry.scale.z = cylinder_radius_ * 2.0;
-                    sphere_entry.color.a = 0.3; sphere_entry.color.r = 0.0; sphere_entry.color.g = 0.5; sphere_entry.color.b = 1.0;
-                    markers.markers.push_back(sphere_entry);
-
-                    if ((exact_t_max - exact_t_min) > 0.005) 
-                    {
-                        visualization_msgs::msg::Marker sphere_exit = sphere_entry; 
-                        sphere_exit.ns = "debug_anim_sphere_exit";
-                        sphere_exit.id = 7;
-                        sphere_exit.pose.position.x = pos_exit.x();
-                        sphere_exit.pose.position.y = pos_exit.y();
-                        sphere_exit.pose.position.z = pos_exit.z();
-                        sphere_exit.color.r = 1.0; sphere_exit.color.g = 0.5; sphere_exit.color.b = 0.0;
-                        markers.markers.push_back(sphere_exit);
-                    }
-
-                    // -----------------------------------------------------------------
-                    // 3. RAIO ATUAL (Seta Amarela)
-                    // -----------------------------------------------------------------
-                    visualization_msgs::msg::Marker ray_mk = base_marker;
-                    ray_mk.ns = "debug_anim_ray"; 
-                    ray_mk.id = 2;
-                    ray_mk.type = visualization_msgs::msg::Marker::ARROW;
-                    
-                    geometry_msgs::msg::Point p_start, p_end;
-                    p_start.x = current_ray_origin.x(); p_start.y = current_ray_origin.y(); p_start.z = current_ray_origin.z();
-                    Eigen::Vector3f visual_end = current_ray_origin + (current_ray_dir * (DISTANCE_TO_PIVOT + 0.05f));
-                    p_end.x = visual_end.x(); p_end.y = visual_end.y(); p_end.z = visual_end.z();
-
-                    ray_mk.points.push_back(p_start); 
-                    ray_mk.points.push_back(p_end);
-                    ray_mk.scale.x = 0.003; ray_mk.scale.y = 0.006; ray_mk.scale.z = 0.01;  
-                    ray_mk.color.a = 0.8; ray_mk.color.r = 1.0; ray_mk.color.g = 1.0; ray_mk.color.b = 0.0;
-                    markers.markers.push_back(ray_mk);
-
-                    // -----------------------------------------------------------------
-                    // 4. NORMAIS DA SUPERFÍCIE (Entry = Vermelha, Exit = Laranja)
-                    // -----------------------------------------------------------------
-                    
-                    // Normal de Entrada
-                    if (debug_entry.valid) {
-                        visualization_msgs::msg::Marker norm_entry = base_marker;
-                        norm_entry.ns = "debug_anim_normal_entry";
-                        norm_entry.id = 3;
-                        norm_entry.type = visualization_msgs::msg::Marker::ARROW;
-
-                        geometry_msgs::msg::Point p_center, p_norm;
-                        p_center.x = debug_entry.center.x(); 
-                        p_center.y = debug_entry.center.y(); 
-                        p_center.z = debug_entry.center.z();
-
-                        Eigen::Vector3f n_end = debug_entry.center + (debug_entry.normal_vector * 0.04f);
-                        p_norm.x = n_end.x(); p_norm.y = n_end.y(); p_norm.z = n_end.z();
-
-                        norm_entry.points.push_back(p_center);
-                        norm_entry.points.push_back(p_norm);
-                        norm_entry.scale.x = 0.002; norm_entry.scale.y = 0.004; norm_entry.scale.z = 0.0;
-                        norm_entry.color.a = 1.0; norm_entry.color.r = 1.0; norm_entry.color.g = 0.0; norm_entry.color.b = 0.0; // Vermelho
-                        markers.markers.push_back(norm_entry);
-                    }
-
-                    // Normal de Saída
-                    if (debug_exit.valid) {
-                        visualization_msgs::msg::Marker norm_exit = base_marker;
-                        norm_exit.ns = "debug_anim_normal_exit";
-                        norm_exit.id = 4;
-                        norm_exit.type = visualization_msgs::msg::Marker::ARROW;
-
-                        geometry_msgs::msg::Point p_center, p_norm;
-                        p_center.x = debug_exit.center.x(); 
-                        p_center.y = debug_exit.center.y(); 
-                        p_center.z = debug_exit.center.z();
-
-                        Eigen::Vector3f n_end = debug_exit.center + (debug_exit.normal_vector * 0.04f);
-                        p_norm.x = n_end.x(); p_norm.y = n_end.y(); p_norm.z = n_end.z();
-
-                        norm_exit.points.push_back(p_center);
-                        norm_exit.points.push_back(p_norm);
-                        norm_exit.scale.x = 0.002; norm_exit.scale.y = 0.004; norm_exit.scale.z = 0.0;
-                        norm_exit.color.a = 1.0; norm_exit.color.r = 1.0; norm_exit.color.g = 0.5; norm_exit.color.b = 0.0; // Laranja
-                        markers.markers.push_back(norm_exit);
-                    }
-
-                    // -----------------------------------------------------------------
-                    // 5. INLIERS POINTS (Entry = Verde, Exit = Roxo)
-                    // -----------------------------------------------------------------
-                    
-                    if (local.inliers_entry && !local.inliers_entry->empty()) 
-                    {
-                        visualization_msgs::msg::Marker entry_mk = base_marker;
-                        entry_mk.ns = "debug_anim_inliers_entry"; 
-                        entry_mk.id = 4;
-                        entry_mk.type = visualization_msgs::msg::Marker::POINTS;
-                        entry_mk.scale.x = 0.003; entry_mk.scale.y = 0.003;
-                        entry_mk.color.a = 1.0; entry_mk.color.r = 0.0; entry_mk.color.g = 1.0; entry_mk.color.b = 0.0; // Verde
-
-                        entry_mk.points.reserve(local.inliers_entry->size());
-                        for (const auto& p : local.inliers_entry->points) {
-                            geometry_msgs::msg::Point gp;
-                            gp.x = p.x; gp.y = p.y; gp.z = p.z;
-                            entry_mk.points.push_back(gp);
-                        }
-                        markers.markers.push_back(entry_mk);
-                    }
-
-                    if (local.inliers_exit && !local.inliers_exit->empty()) 
-                    {
-                        visualization_msgs::msg::Marker exit_mk = base_marker;
-                        exit_mk.ns = "debug_anim_inliers_exit"; 
-                        exit_mk.id = 5;
-                        exit_mk.type = visualization_msgs::msg::Marker::POINTS;
-                        exit_mk.scale.x = 0.003; exit_mk.scale.y = 0.003;
-                        exit_mk.color.a = 1.0; exit_mk.color.r = 1.0; exit_mk.color.g = 0.0; exit_mk.color.b = 1.0; // Roxo
-
-                        exit_mk.points.reserve(local.inliers_exit->size());
-                        for (const auto& p : local.inliers_exit->points) {
-                            geometry_msgs::msg::Point gp;
-                            gp.x = p.x; gp.y = p.y; gp.z = p.z;
-                            exit_mk.points.push_back(gp);
-                        }
-                        markers.markers.push_back(exit_mk);
-                    }
-
-                    // -----------------------------------------------------------------
-                    // 6. VOXELS VISITADOS
-                    // -----------------------------------------------------------------
-                    if (!local.voxels_no_caminho.empty())
-                    {
-                        visualization_msgs::msg::Marker vox_mk = base_marker;
-                        vox_mk.ns = "debug_anim_voxels_path";
-                        vox_mk.id = 9;
-                        vox_mk.type = visualization_msgs::msg::Marker::CUBE_LIST; 
-                        vox_mk.scale.x = 0.0075; vox_mk.scale.y = 0.0075; vox_mk.scale.z = 0.0075;
-                        vox_mk.color.r = 0.0; vox_mk.color.g = 1.0; vox_mk.color.b = 1.0; vox_mk.color.a = 0.15;
-
-                        vox_mk.points.reserve(local.voxels_no_caminho.size());
-                        for (const auto* bucket_ptr : local.voxels_no_caminho) {
-                            if (bucket_ptr) {
-                                geometry_msgs::msg::Point p;
-                                p.x = bucket_ptr->center.x(); p.y = bucket_ptr->center.y(); p.z = bucket_ptr->center.z();
-                                vox_mk.points.push_back(p);
-                            }
-                        }
-                        markers.markers.push_back(vox_mk);
-                    }
-
-                    debug_marker_pub_->publish(markers);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(animation_delay_ms_));
-                }
-
-
-                // --- Scoring ---
-                auto t5 = std::chrono::high_resolution_clock::now();
-                std::vector<StepAnalysis> steps; steps.reserve(2); 
-                
-                StepAnalysis res_entry = analyzeLocalCylinder(local.inliers_entry, center_entry, current_ray_dir);
-                if (res_entry.valid) steps.push_back(res_entry);
-
-                if (real_thickness > 0.001f) { 
-                    StepAnalysis res_exit = analyzeLocalCylinder(local.inliers_exit, center_exit, current_ray_dir);
-                    if (res_exit.valid) steps.push_back(res_exit);
-                }
-                
-                auto t6 = std::chrono::high_resolution_clock::now(); 
-                local.acc_analysis_ms += std::chrono::duration<double, std::milli>(t6 - t5).count();
-
-                if (steps.empty()) continue; 
-
-                auto t7 = std::chrono::high_resolution_clock::now();
-                StepAnalysis& entry = steps.front();
-                StepAnalysis& exit = steps.back();
-                
-                float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
-                float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
-                float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
-                float score_plan_exit  = std::max(0.0f, 1.0f - (exit.curvature * 20.0f));
-
-                float score_sym_entry = entry.symmetry_score;
-                float score_sym_exit  = exit.symmetry_score;
-
-                double total = (score_ang_entry * weight_orientation_ + score_sym_entry * weight_symmetry_ ) * 0.5 
-                            + (score_ang_exit * weight_orientation_  + score_sym_exit * weight_symmetry_ ) * 0.5;
-
-                auto t8 = std::chrono::high_resolution_clock::now(); 
-                local.acc_scoring_ms += std::chrono::duration<double, std::milli>(t8 - t7).count();
-
-                if (total > best_iter_grasp.total_score) 
-                {
-                    found_valid_in_optimization = true;
-                    float current_offset = finger_offset_; 
-                    Eigen::Vector3f p_f1 = current_ray_origin + current_ray_dir * (exact_t_min - current_offset);
-                    Eigen::Vector3f p_f2 = current_ray_origin + current_ray_dir * (exact_t_max + current_offset);
-                    Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
-                    Eigen::Quaternionf best_q = findBestOrientation(p_f1, p_f2);
-
-                    best_iter_grasp.pose_center.position.x = center_grasp.x(); 
-                    best_iter_grasp.pose_center.position.y = center_grasp.y(); 
-                    best_iter_grasp.pose_center.position.z = center_grasp.z();
-                    best_iter_grasp.pose_center.orientation.x = best_q.x(); 
-                    best_iter_grasp.pose_center.orientation.y = best_q.y(); 
-                    best_iter_grasp.pose_center.orientation.z = best_q.z(); 
-                    best_iter_grasp.pose_center.orientation.w = best_q.w();
-                    
-                    best_iter_grasp.total_score = total;
-                    best_iter_grasp.score_orientation_entry = score_ang_entry;
-                    best_iter_grasp.score_orientation_exit = score_ang_exit;
-                    best_iter_grasp.score_symmetry_entry = score_sym_entry;
-                    best_iter_grasp.score_symmetry_exit = score_sym_exit;
-                    best_iter_grasp.score_symmetry = (score_sym_entry + score_sym_exit) * 0.5f;
-                    best_iter_grasp.score_orientation = (score_ang_entry + score_ang_exit) * 0.5f;
-                    best_iter_grasp.raw_ray_dir = current_ray_dir;
-                }
-
-                if (total >= target_score_) 
-                { 
-                    // [ATENÇÃO] collision_kdtree_ (pcl::KdTreeFLANN) é Thread-Safe para BUSCA (radiusSearch/nearestKSearch)
-                    // desde que não seja modificado (setInputCloud) concorrentemente.
-                    if (check_collision(best_iter_grasp, collision_kdtree_, true, false)) 
-                    { 
-                        local.local_candidates.push_back(best_iter_grasp);
-                        local.local_hits.push_back(raw_pose);
+            acc_inliers_ms += std::chrono::duration<double, std::milli>(t4 - t3).count();
+             
                         
-                        atomic_perfect_count++;
-                        perfect_candidate_found = true;
+                    }
+                } 
+
+                // 3. Verificação de Saída Antecipada (Espessura)
+                if (voxel_hit_any)
+                {
+                    if ((found_t_max - found_t_min) >= max_gripper_width_)
+                    {
+                        abort_too_thick = true;
                         break; 
                     }
                 }
-            } // end optimization
 
-            if (!perfect_candidate_found && found_valid_in_optimization) {
-                local.local_candidates.push_back(best_iter_grasp);
-                local.local_hits.push_back(raw_pose);
+                // 4. Avanço Amanatides & Woo (Padrão)
+                if (tMaxX < tMaxY) {
+                    if (tMaxX < tMaxZ) { cur_x += step_x; tMaxX += tDeltaX; } 
+                    else { cur_z += step_z; tMaxZ += tDeltaZ; }
+                } else {
+                    if (tMaxY < tMaxZ) { cur_y += step_y; tMaxY += tDeltaY; } 
+                    else { cur_z += step_z; tMaxZ += tDeltaZ; }
+                }
             }
+                       
+            if (abort_too_thick || !voxel_hit_any) 
+            {
+                continue; 
+            }
+
+
+           
+            pcl::PointCloud<pcl::PointXYZ>::Ptr inliers_entry(new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr inliers_exit(new pcl::PointCloud<pcl::PointXYZ>);
+            
+            
+            inliers_entry->reserve(400);
+            inliers_exit->reserve(400);
+
+
+            if (voxels_no_caminho.empty()) continue;
+
+            float exact_t_min = 1e9f;
+            float exact_t_max = -1e9f;
+            bool points_found = false;
+
+            float c_ox = current_ray_origin.x();
+            float c_oy = current_ray_origin.y();
+            float c_oz = current_ray_origin.z();
+            
+            float c_dx = current_ray_dir.x();
+            float c_dy = current_ray_dir.y();
+            float c_dz = current_ray_dir.z();
+
+            // -------------------------------------------------------------------
+            // 1. ENCONTRAR O INÍCIO (entry point) NO PRIMEIRO VOXEL
+            // -------------------------------------------------------------------
+            // Acessa direto o primeiro balde (min_id = 0)
+            const auto* bucket_min = voxels_no_caminho.front();
+
+            for(const auto& pt : bucket_min->points)
+            {
+                // Vetor do ponto até a origem do raio
+                float vx = pt.x - c_ox;
+                float vy = pt.y - c_oy;
+                float vz = pt.z - c_oz;
+
+                // Projeção escalar (t) na direção do raio
+                float t = vx * c_dx + vy * c_dy + vz * c_dz;
+
+                // Distância ao quadrado do ponto até a LINHA do raio (Pitágoras)
+                // v_sq = hipotenusa^2
+                float v_sq = vx*vx + vy*vy + vz*vz;
+                // dist_sq = hipotenusa^2 - cateto_adj^2
+                float dist_sq = v_sq - (t * t);
+
+                
+                if (t < exact_t_min) 
+                {
+                    exact_t_min = t;
+                    points_found = true;
+                }
+                
+                    
+                
+            }
+
+            // Se não achou nada no primeiro voxel (raio passou raspando), 
+            // aborta ou tenta o próximo (dependendo da sua tolerância)
+            if (!points_found) continue; 
+
+            // -------------------------------------------------------------------
+            // 2. ENCONTRAR O FIM (exit point) NO ÚLTIMO VOXEL
+            // -------------------------------------------------------------------
+            // Acessa direto o último balde (max_id = size - 1)
+            const auto* bucket_max = voxels_no_caminho.back();
+
+            // Flag local para saber se achamos saída válida
+            bool exit_found = false; 
+
+            for(const auto& pt : bucket_max->points)
+            {
+                float vx = pt.x - c_ox;
+                float vy = pt.y - c_oy;
+                float vz = pt.z - c_oz;
+
+                float t = vx * c_dx + vy * c_dy + vz * c_dz;
+                
+                float v_sq = vx*vx + vy*vy + vz*vz;
+                float dist_sq = v_sq - (t * t);
+
+               
+                if (t > exact_t_max) 
+                {
+                    exact_t_max = t;   
+                    exit_found = true;
+                }
+            }
+
+            // Caso especial: Se o array tem tamanho 1, o min e max são calculados no mesmo voxel.
+            // Se tem >1 e não achou saida no último (raro), assume o t_min como t_max provisório.
+            if (!exit_found && exact_t_max < -1e8f) 
+            {
+                // Tenta o penúltimo voxel se for crítico, ou apenas ignora
+                exact_t_max = exact_t_min; 
+            }
+
+
+
+
+            // -------------------------------------------------------------------
+            // 3. COLETA DE PONTOS GEOMÉTRICA (ESFERAS DE ENTRADA/SAÍDA)
+            // -------------------------------------------------------------------
+            
+         
+            // 3.1. Calcular os Centros Exatos no Espaço 3D
+            // (Assumindo que exact_t_min e exact_t_max foram calculados no passo anterior ou são found_t_min/max)
+            Eigen::Vector3f center_entry = current_ray_origin + current_ray_dir * exact_t_min;
+            Eigen::Vector3f center_exit  = current_ray_origin + current_ray_dir * exact_t_max;
+
+            // Lambda de Coleta Esférica
+            // Recebe: Centro 3D da esfera e o PointCloud de destino
+            auto collect_spherical = [&](const Eigen::Vector3f& center, pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_out)
+            {
+                // 1. Achar o Voxel correspondente ao centro
+                int ix = std::floor((center.x() - min_bound.x()) * inv_voxel_size);
+                int iy = std::floor((center.y() - min_bound.y()) * inv_voxel_size);
+                int iz = std::floor((center.z() - min_bound.z()) * inv_voxel_size);
+
+                // Check se o centro caiu dentro do grid
+                if (ix >= 0 && ix < dim_x && iy >= 0 && iy < dim_y && iz >= 0 && iz < dim_z)
+                {
+                    size_t idx = ix + iy * stride_y + iz * stride_z;
+                    const auto& center_bucket = linear_grid[idx];
+
+                    // 2. Pegar os vizinhos usando a lista pré-calculada (nearby_filled_indices)
+                    // Essa lista contém o próprio índice 'idx' e todos os vizinhos cheios num raio de colisão.
+                    if (!center_bucket.nearby_filled_indices.empty())
+                    {
+                        for (const auto& neighbor_idx : center_bucket.nearby_filled_indices)
+                        {
+                            const auto& neighbor_bucket = linear_grid[neighbor_idx];
+                            
+                            for (const auto& pt : neighbor_bucket.points)
+                            {
+                                Eigen::Vector3f p(pt.x, pt.y, pt.z);
+                                Eigen::Vector3f diff = p - center;
+                                if (std::abs(diff.dot(current_ray_dir)) > cylinder_height_/2.0f) 
+                                {
+                                    continue;
+                                }
+                                if (diff.cross(current_ray_dir).norm() > cylinder_radius_) 
+                                {
+                                    continue;
+                                }
+                                
+                                cloud_out->points.push_back(pt);
+                            
+
+                            }
+                        }
+                    }
+                }
+            };
+
+            // --- EXECUÇÃO ---
+
+            // 1. Coleta Entrada
+            collect_spherical(center_entry, inliers_entry);
+
+            // 2. Coleta Saída (apenas se houver espessura suficiente para serem distintos)
+            if ((exact_t_max - exact_t_min) > 0.005f) 
+            {
+                collect_spherical(center_exit, inliers_exit);
+            }
+            
+
+            
+            // acc_inliers_ms += std::chrono::duration<double, std::milli>(t4 - t3).count();
+
+            // [TIMER END] Fim da medição do processo de Inliers
+            uint64_t c4 = __rdtsc();
+            
+            acc_inliers_clk += (c4 - c3);
+
+           
+            float real_thickness = exact_t_max - exact_t_min;
+            if (!points_found || inliers_entry->size() < 5 || inliers_exit->size() < 5 || real_thickness >= max_gripper_width_) 
+            {
+                continue; 
+            }
+
+             
+            if (enable_ray_animation_ && debug_marker_pub_)
+            {
+                
+                auto t_now = this->now();
+                visualization_msgs::msg::MarkerArray markers;
+
+                sensor_msgs::msg::PointCloud2 m; 
+                pcl::toROSMsg(*stored_cloud_, m); 
+                m.header.stamp = t_now; 
+                m.header.frame_id = "world"; 
+                pub_cloud_->publish(m);
+
+                // Configuração base para NÃO PISCAR (Lifetime = 0)
+                visualization_msgs::msg::Marker base_marker;
+                base_marker.header.frame_id = "world";
+                base_marker.header.stamp = t_now;
+                base_marker.action = visualization_msgs::msg::Marker::ADD;
+                base_marker.lifetime = rclcpp::Duration::from_seconds(0); 
+
+                // -----------------------------------------------------------------
+                // 1. PIVÔ ESTÁTICO (Esfera Ciano no Ponto de Contato)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker pivot_mk = base_marker;
+                pivot_mk.ns = "debug_anim_pivot"; 
+                pivot_mk.id = 1;
+                pivot_mk.type = visualization_msgs::msg::Marker::SPHERE;
+                
+                pivot_mk.pose.position.x = PIVOT_POINT.x(); 
+                pivot_mk.pose.position.y = PIVOT_POINT.y(); 
+                pivot_mk.pose.position.z = PIVOT_POINT.z();
+                
+                pivot_mk.pose.orientation.w = 1.0;
+
+                pivot_mk.scale.x = 0.005; 
+                pivot_mk.scale.y = 0.005; 
+                pivot_mk.scale.z = 0.005;
+                
+                pivot_mk.color.a = 1.0; pivot_mk.color.r = 0.0; pivot_mk.color.g = 1.0; pivot_mk.color.b = 1.0; 
+                markers.markers.push_back(pivot_mk);
+
+                visualization_msgs::msg::Marker pivot_mk22 = base_marker;
+                pivot_mk22.ns = "current_ray_origin"; 
+                pivot_mk22.id = 1;
+                pivot_mk22.type = visualization_msgs::msg::Marker::SPHERE;
+                
+                pivot_mk22.pose.position.x = current_ray_origin.x(); 
+                pivot_mk22.pose.position.y = current_ray_origin.y(); 
+                pivot_mk22.pose.position.z = current_ray_origin.z();
+                
+                pivot_mk22.pose.orientation.w = 1.0;
+
+                pivot_mk22.scale.x = 0.005; 
+                pivot_mk22.scale.y = 0.005; 
+                pivot_mk22.scale.z = 0.005;
+                
+                pivot_mk22.color.a = 1.0; pivot_mk22.color.r = 1.0; pivot_mk22.color.g = 0.0; pivot_mk22.color.b = 1.0; 
+                markers.markers.push_back(pivot_mk22);
+
+                // -----------------------------------------------------------------
+                // 2. ESFERAS DE ANÁLISE (Entry & Exit) - SUBSTITUI CILINDROS
+                // -----------------------------------------------------------------
+                Eigen::Vector3f pos_entry = current_ray_origin + current_ray_dir * exact_t_min;
+                Eigen::Vector3f pos_exit  = current_ray_origin + current_ray_dir * exact_t_max;
+
+                // --- Esfera de Entrada (ENTRY) ---
+                visualization_msgs::msg::Marker sphere_entry = base_marker;
+                sphere_entry.ns = "debug_anim_sphere_entry";
+                sphere_entry.id = 6;
+                sphere_entry.type = visualization_msgs::msg::Marker::SPHERE; // Tipo alterado
+
+                sphere_entry.pose.position.x = pos_entry.x();
+                sphere_entry.pose.position.y = pos_entry.y();
+                sphere_entry.pose.position.z = pos_entry.z();
+                
+                // Orientação Identity (Esfera não precisa de rotação)
+                sphere_entry.pose.orientation.w = 1.0;
+                sphere_entry.pose.orientation.x = 0.0; 
+                sphere_entry.pose.orientation.y = 0.0; 
+                sphere_entry.pose.orientation.z = 0.0;
+
+                // Escala: Diâmetro em todos os eixos (2 * raio)
+                sphere_entry.scale.x = cylinder_radius_ * 2.0; 
+                sphere_entry.scale.y = cylinder_radius_ * 2.0; 
+                sphere_entry.scale.z = cylinder_radius_ * 2.0;
+
+                sphere_entry.color.a = 0.5; // Um pouco mais visível
+                sphere_entry.color.r = 0.0; 
+                sphere_entry.color.g = 0.5; 
+                sphere_entry.color.b = 1.0;
+                markers.markers.push_back(sphere_entry);
+
+                // --- Esfera de Saída (EXIT) ---
+                if ((exact_t_max - exact_t_min) > 0.005) 
+                {
+                    visualization_msgs::msg::Marker sphere_exit = sphere_entry; 
+                    sphere_exit.ns = "debug_anim_sphere_exit";
+                    sphere_exit.id = 7;
+                    
+                    sphere_exit.pose.position.x = pos_exit.x();
+                    sphere_exit.pose.position.y = pos_exit.y();
+                    sphere_exit.pose.position.z = pos_exit.z();
+
+                    sphere_exit.color.r = 1.0; 
+                    sphere_exit.color.g = 0.5; 
+                    sphere_exit.color.b = 0.0;
+                    markers.markers.push_back(sphere_exit);
+                }
+
+                // -----------------------------------------------------------------
+                // [PREPARAÇÃO] CÁLCULO DOS VETORES ORIGINAIS (Necessário para os Markers abaixo)
+                // -----------------------------------------------------------------
+                // Correção: Calculamos aqui para usar tanto no Cilindro quanto na Seta
+                Eigen::Quaternionf q_orig(
+                    all_candidates_[i].orientation.w,
+                    all_candidates_[i].orientation.x,
+                    all_candidates_[i].orientation.y,
+                    all_candidates_[i].orientation.z
+                );
+                Eigen::Vector3f dir_orig = q_orig * Eigen::Vector3f::UnitX();
+                Eigen::Vector3f v_start(
+                    all_candidates_[i].position.x, 
+                    all_candidates_[i].position.y, 
+                    all_candidates_[i].position.z
+                );
+
+                // -----------------------------------------------------------------
+                // 3. CILINDRO DO RAIO ORIGINAL (Envolvendo a seta roxa)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker orig_cyl_mk = base_marker;
+                orig_cyl_mk.ns = "debug_anim_cyl_original";
+                orig_cyl_mk.id = 8; // ID Único
+                orig_cyl_mk.type = visualization_msgs::msg::Marker::CYLINDER;
+
+                // Centro = Inicio + (Direção * Metade do Comprimento)
+                Eigen::Vector3f center_cyl_orig = v_start + (dir_orig * (ray_lengths[i] / 2.0f));
+
+                orig_cyl_mk.pose.position.x = center_cyl_orig.x();
+                orig_cyl_mk.pose.position.y = center_cyl_orig.y();
+                orig_cyl_mk.pose.position.z = center_cyl_orig.z();
+
+                // Rotacionar eixo Z (cilindro) para dir_orig
+                Eigen::Quaternionf q_cyl_orig = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitZ(), dir_orig);
+
+                orig_cyl_mk.pose.orientation.w = q_cyl_orig.w();
+                orig_cyl_mk.pose.orientation.x = q_cyl_orig.x();
+                orig_cyl_mk.pose.orientation.y = q_cyl_orig.y();
+                orig_cyl_mk.pose.orientation.z = q_cyl_orig.z();
+
+                orig_cyl_mk.scale.x = cylinder_radius_ * 2.0f; 
+                orig_cyl_mk.scale.y = cylinder_radius_ * 2.0f; 
+                orig_cyl_mk.scale.z = ray_lengths[i];
+
+                orig_cyl_mk.color.a = 0.2; orig_cyl_mk.color.r = 1.0; orig_cyl_mk.color.g = 0.0; orig_cyl_mk.color.b = 1.0;
+                markers.markers.push_back(orig_cyl_mk);
+
+                // -----------------------------------------------------------------
+                // 4. RAIO ORIGINAL (Seta Magenta)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker orig_ray_mk = base_marker;
+                orig_ray_mk.ns = "debug_anim_ray_original"; 
+                orig_ray_mk.id = 5;
+                orig_ray_mk.type = visualization_msgs::msg::Marker::ARROW;
+
+                geometry_msgs::msg::Point p_orig_start, p_orig_end;
+                p_orig_start.x = v_start.x(); 
+                p_orig_start.y = v_start.y(); 
+                p_orig_start.z = v_start.z();
+
+                Eigen::Vector3f v_end = v_start + (dir_orig * ray_lengths[i]);
+
+                p_orig_end.x = v_end.x(); 
+                p_orig_end.y = v_end.y(); 
+                p_orig_end.z = v_end.z();
+
+                orig_ray_mk.points.push_back(p_orig_start); 
+                orig_ray_mk.points.push_back(p_orig_end);
+                
+                orig_ray_mk.scale.x = 0.002; orig_ray_mk.scale.y = 0.004; orig_ray_mk.scale.z = 0.0;  
+                orig_ray_mk.color.a = 0.6; orig_ray_mk.color.r = 1.0; orig_ray_mk.color.g = 0.0; orig_ray_mk.color.b = 1.0;
+                markers.markers.push_back(orig_ray_mk);
+
+                // -----------------------------------------------------------------
+                // 5. RAIO DA GARRA ATUAL (Seta Amarela)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker ray_mk = base_marker;
+                ray_mk.ns = "debug_anim_ray"; 
+                ray_mk.id = 2;
+                ray_mk.type = visualization_msgs::msg::Marker::ARROW;
+
+                geometry_msgs::msg::Point p_start, p_end;
+                p_start.x = current_ray_origin.x(); 
+                p_start.y = current_ray_origin.y(); 
+                p_start.z = current_ray_origin.z();
+
+                Eigen::Vector3f visual_end = current_ray_origin + (current_ray_dir * (DISTANCE_TO_PIVOT + 0.05f));
+                p_end.x = visual_end.x(); 
+                p_end.y = visual_end.y(); 
+                p_end.z = visual_end.z();
+
+                ray_mk.points.push_back(p_start); 
+                ray_mk.points.push_back(p_end);
+                
+                ray_mk.scale.x = 0.003; ray_mk.scale.y = 0.006; ray_mk.scale.z = 0.01;  
+                ray_mk.color.a = 0.8; ray_mk.color.r = 1.0; ray_mk.color.g = 1.0; ray_mk.color.b = 0.0;
+                markers.markers.push_back(ray_mk);
+
+                // -----------------------------------------------------------------
+                // 6. NORMAL DA SUPERFÍCIE (Seta Vermelha)
+                // -----------------------------------------------------------------
+                visualization_msgs::msg::Marker norm_mk = base_marker;
+                norm_mk.ns = "debug_anim_normal";
+                norm_mk.id = 3;
+                norm_mk.type = visualization_msgs::msg::Marker::ARROW;
+
+                geometry_msgs::msg::Point p_piv_geom;
+                p_piv_geom.x = PIVOT_POINT.x(); p_piv_geom.y = PIVOT_POINT.y(); p_piv_geom.z = PIVOT_POINT.z();
+
+                Eigen::Vector3f norm_end = PIVOT_POINT + (pca_normal * 0.04f);
+                geometry_msgs::msg::Point p_norm_end;
+                p_norm_end.x = norm_end.x(); p_norm_end.y = norm_end.y(); p_norm_end.z = norm_end.z();
+
+                norm_mk.points.push_back(p_piv_geom);
+                norm_mk.points.push_back(p_norm_end);
+
+                norm_mk.scale.x = 0.002; norm_mk.scale.y = 0.004; norm_mk.scale.z = 0.0;
+                norm_mk.color.a = 1.0; norm_mk.color.r = 1.0; norm_mk.color.g = 0.0; norm_mk.color.b = 0.0;
+                markers.markers.push_back(norm_mk);
+
+                if (inliers_entry && !inliers_entry->empty()) 
+                {
+                    visualization_msgs::msg::Marker entry_mk = base_marker;
+                    entry_mk.ns = "debug_anim_inliers_entry"; 
+                    entry_mk.id = 4;
+                    entry_mk.type = visualization_msgs::msg::Marker::POINTS;
+                    
+                    // Tamanho do ponto
+                    entry_mk.scale.x = 0.003; 
+                    entry_mk.scale.y = 0.003;
+                    
+                    // Cor: Verde Puro
+                    entry_mk.color.a = 1.0; 
+                    entry_mk.color.r = 0.0; 
+                    entry_mk.color.g = 1.0; 
+                    entry_mk.color.b = 0.0;
+
+                    entry_mk.points.reserve(inliers_entry->size());
+                    for (const auto& p : inliers_entry->points) 
+                    {
+                        geometry_msgs::msg::Point gp;
+                        gp.x = p.x; gp.y = p.y; gp.z = p.z;
+                        entry_mk.points.push_back(gp);
+                    }
+                    markers.markers.push_back(entry_mk);
+                }
+
+                // --- INLIERS EXIT (VERMELHO) ---
+                if (inliers_exit && !inliers_exit->empty()) 
+                {
+                    visualization_msgs::msg::Marker exit_mk = base_marker;
+                    exit_mk.ns = "debug_anim_inliers_exit"; 
+                    exit_mk.id = 5;
+                    exit_mk.type = visualization_msgs::msg::Marker::POINTS;
+                    
+                    // Tamanho do ponto
+                    exit_mk.scale.x = 0.003; 
+                    exit_mk.scale.y = 0.003;
+                    
+                    // Cor: Vermelho Puro
+                    exit_mk.color.a = 1.0; 
+                    exit_mk.color.r = 1.0; 
+                    exit_mk.color.g = 0.0; 
+                    exit_mk.color.b = 0.0;
+
+                    exit_mk.points.reserve(inliers_exit->size());
+                    for (const auto& p : inliers_exit->points) 
+                    {
+                        geometry_msgs::msg::Point gp;
+                        gp.x = p.x; gp.y = p.y; gp.z = p.z;
+                        exit_mk.points.push_back(gp);
+                    }
+                    markers.markers.push_back(exit_mk);
+                }
+                if (!voxels_no_caminho.empty())
+                {
+                    visualization_msgs::msg::Marker vox_mk = base_marker;
+                    vox_mk.ns = "debug_anim_voxels_path";
+                    vox_mk.id = 9; // ID novo para não conflitar
+                    vox_mk.type = visualization_msgs::msg::Marker::CUBE_LIST; 
+
+                    // Tamanho exato do Voxel
+                    vox_mk.scale.x = 0.0075; 
+                    vox_mk.scale.y = 0.0075; 
+                    vox_mk.scale.z = 0.0075;
+
+                    // Cor: Ciano/Azul claro bem transparente para não esconder o raio
+                    vox_mk.color.r = 0.0; 
+                    vox_mk.color.g = 1.0; 
+                    vox_mk.color.b = 1.0;
+                    vox_mk.color.a = 0.15; // 15% de opacidade (bem sutil)
+
+                    vox_mk.points.reserve(voxels_no_caminho.size());
+                    
+                    for (const auto* bucket_ptr : voxels_no_caminho)
+                    {
+                        if (bucket_ptr) 
+                        {
+                            geometry_msgs::msg::Point p;
+                            p.x = bucket_ptr->center.x();
+                            p.y = bucket_ptr->center.y();
+                            p.z = bucket_ptr->center.z();
+                            vox_mk.points.push_back(p);
+                        }
+                    }
+                    markers.markers.push_back(vox_mk);
+                }
+
+                debug_marker_pub_->publish(markers);
+                
+                std::this_thread::sleep_for(std::chrono::milliseconds(animation_delay_ms_));
+            }
+            
+            
+            uint64_t c5 = __rdtsc(); 
+            auto t5 = std::chrono::high_resolution_clock::now();
+
+            std::vector<StepAnalysis> steps; 
+            steps.reserve(2); 
+            
+            // std::cout << "inliers_entry: " << inliers_entry->size() << std::endl;
+            StepAnalysis res_entry = analyzeLocalCylinder(inliers_entry, center_entry, current_ray_dir);
+            
+            if (res_entry.valid) 
+            {
+                steps.push_back(res_entry);
+            }
+
+            if (real_thickness > 0.001f) 
+            { 
+                // std::cout << "inliers_exit: " << inliers_exit->size() << std::endl;
+                StepAnalysis res_exit = analyzeLocalCylinder(inliers_exit, center_exit, current_ray_dir);
+                
+                if (res_exit.valid) 
+                {
+                    steps.push_back(res_exit);
+                }
+            }
+            
+            auto t6 = std::chrono::high_resolution_clock::now(); 
+            uint64_t c6 = __rdtsc();
+            acc_analysis_ms += std::chrono::duration<double, std::milli>(t6 - t5).count();
+            acc_analysis_clk += (c6 - c5);
+
+            if (steps.empty()) 
+            {
+                continue; 
+            }
+
+           
+            uint64_t c7 = __rdtsc(); 
+            auto t7 = std::chrono::high_resolution_clock::now();
+
+            StepAnalysis& entry = steps.front();
+            StepAnalysis& exit = steps.back();
+            
+            float score_ang_entry = 1.0f - (std::min(entry.angle_to_normal_deg, 90.0f) / 90.0f);
+            float score_ang_exit  = 1.0f - (std::min(exit.angle_to_normal_deg, 90.0f) / 90.0f);
+            
+            float score_plan_entry = std::max(0.0f, 1.0f - (entry.curvature * 20.0f)); 
+            float score_plan_exit  = std::max(0.0f, 1.0f - (exit.curvature * 20.0f));
+            
+            float orient_factor_entry = (score_plan_entry > 0.3) ? 1.0f : 0.5f;
+            float orient_factor_exit  = (score_plan_exit > 0.3) ? 1.0f : 0.5f;
+            
+            float score_sym_entry = entry.symmetry_score;
+            float score_sym_exit  = exit.symmetry_score;
+
+            double total = (score_ang_entry * weight_orientation_ * orient_factor_entry + score_sym_entry * weight_symmetry_ ) * 0.5 
+                         + (score_ang_exit * weight_orientation_ * orient_factor_exit + score_sym_exit * weight_symmetry_ ) * 0.5;
+
+            auto t8 = std::chrono::high_resolution_clock::now(); 
+            uint64_t c8 = __rdtsc();
+            acc_scoring_ms += std::chrono::duration<double, std::milli>(t8 - t7).count();
+            acc_scoring_clk += (c8 - c7);
+
+            
+            if (total > best_iter_grasp.total_score) 
+            {
+                found_valid_in_optimization = true;
+                
+                float current_offset = finger_offset_; 
+                Eigen::Vector3f p_f1 = current_ray_origin + current_ray_dir * (exact_t_min - current_offset);
+                Eigen::Vector3f p_f2 = current_ray_origin + current_ray_dir * (exact_t_max + current_offset);
+                Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
+                
+                Eigen::Quaternionf best_q = findBestOrientation(p_f1, p_f2);
+
+                best_iter_grasp.pose_center.position.x = center_grasp.x(); 
+                best_iter_grasp.pose_center.position.y = center_grasp.y(); 
+                best_iter_grasp.pose_center.position.z = center_grasp.z();
+                
+                best_iter_grasp.pose_center.orientation.x = best_q.x(); 
+                best_iter_grasp.pose_center.orientation.y = best_q.y(); 
+                best_iter_grasp.pose_center.orientation.z = best_q.z(); 
+                best_iter_grasp.pose_center.orientation.w = best_q.w();
+                
+                best_iter_grasp.total_score = total;
+                best_iter_grasp.raw_ray_dir = current_ray_dir;
+            }
+
+            
+            if (total >= target_score_) 
+            { 
+                if (check_collision(best_iter_grasp, collision_kdtree_, true, false)) 
+                { 
+                    initial_candidates.push_back(best_iter_grasp);
+                    hit_candidates_.push_back(raw_pose);
+                    
+                    perfect_grasps_count++;
+                    perfect_candidate_found = true;
+                    
+                    if (enable_ray_animation_) 
+                    {
+                        RCLCPP_INFO(this->get_logger(), "GRASP PERFEITO ENCONTRADO! Score: %.4f", total);
+                    }
+                    break; 
+                }
+            }
+        } 
+
+        if (!perfect_candidate_found && found_valid_in_optimization) 
+        {
+            initial_candidates.push_back(best_iter_grasp);
+            hit_candidates_.push_back(raw_pose);
         }
-    }, tbb::simple_partitioner());
+    }
+
+
 
     auto t_loop_end = std::chrono::high_resolution_clock::now();
-
-    // =================================================================================
-    // 6. REDUCTION (Juntar resultados das threads)
-    // =================================================================================
-    
-    std::vector<ScoredGrasp> initial_candidates;
-    initial_candidates.reserve(all_candidates_.size());
-    
-    double acc_inliers_ms = 0.0;
-    double acc_analysis_ms = 0.0;
-    double acc_scoring_ms = 0.0;
-
-    for (const auto& local : tls) {
-        initial_candidates.insert(initial_candidates.end(), local.local_candidates.begin(), local.local_candidates.end());
-        hit_candidates_.insert(hit_candidates_.end(), local.local_hits.begin(), local.local_hits.end());
-        
-        acc_inliers_ms += local.acc_inliers_ms;
-        acc_analysis_ms += local.acc_analysis_ms;
-        acc_scoring_ms += local.acc_scoring_ms;
-    }
-    
-    int perfect_grasps_count = atomic_perfect_count.load();
+    uint64_t c_loop_end = __rdtsc();
 
     if (initial_candidates.empty()) 
     {
@@ -2025,40 +2392,55 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         return geometry_msgs::msg::PoseArray();
     }
 
-    // =================================================================================
-    // 7. ORDENAÇÃO E COLISÃO FINAL
-    // =================================================================================
+    
     uint64_t c_sort_start = __rdtsc();
     auto t_sort_start = std::chrono::high_resolution_clock::now();
     
     std::sort(initial_candidates.begin(), initial_candidates.end(), 
-        [](const ScoredGrasp& a, const ScoredGrasp& b) { return a.total_score > b.total_score; });
+        [](const ScoredGrasp& a, const ScoredGrasp& b) 
+        { 
+            return a.total_score > b.total_score; 
+        });
         
     auto t_sort_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_sort_end = __rdtsc();
 
+    
+    uint64_t c_collision_start = __rdtsc();
     auto t_collision_start = std::chrono::high_resolution_clock::now();
+
     best_grasps_.clear();
     best_grasps_.reserve(num_best_grasps_); 
     
     int checks_count = 0; 
+    
     for (auto& candidate : initial_candidates)
     {
-        if (best_grasps_.size() >= (size_t)num_best_grasps_) break;
+        if (best_grasps_.size() >= (size_t)num_best_grasps_) 
+        {
+            break;
+        }
         
         checks_count++;
-        if (check_collision(candidate, collision_kdtree_, false, true)) {
+        if (check_collision(candidate, collision_kdtree_, false, true)) 
+        {
             best_grasps_.push_back(candidate);
         }
+        
+        
     }
     has_best_ = !best_grasps_.empty();
     
     auto t_collision_end = std::chrono::high_resolution_clock::now();
+    uint64_t c_collision_end = __rdtsc();
     
-   geometry_msgs::msg::PoseArray pose_array;
+   
+    geometry_msgs::msg::PoseArray pose_array;
     pose_array.header.frame_id = "world"; 
     pose_array.header.stamp = this->now(); 
     
-    for(const auto& bg : best_grasps_) {
+    for(const auto& bg : best_grasps_) 
+    {
         pose_array.poses.push_back(bg.pose_center);
     }
 
@@ -2069,67 +2451,42 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     double d_loop = std::chrono::duration<double, std::milli>(t_loop_end - t_loop_start).count();
     double d_sort = std::chrono::duration<double, std::milli>(t_sort_end - t_sort_start).count();
     double d_col = std::chrono::duration<double, std::milli>(t_collision_end - t_collision_start).count();
+
     uint64_t clk_func = c_func_end - c_func_start;
-
-    // --- CÁLCULO DE PROPORÇÃO (NORMALIZAÇÃO) ---
-    // Somamos todo o trabalho de CPU realizado por todas as threads
-    double total_cpu_work = acc_inliers_ms + acc_analysis_ms + acc_scoring_ms;
     
-    // Calculamos o fator de "paralelismo efetivo" para distribuir o d_loop (Wall Time)
-    // Se o CPU work for 0 (muito rápido), evitamos divisão por zero.
-    double wall_ratio = (total_cpu_work > 1e-6) ? (d_loop / total_cpu_work) : 0.0;
-
-    // Estimativa de quanto tempo REAL (Wall Clock) cada etapa contribuiu para o atraso total
-    double wall_inliers = acc_inliers_ms * wall_ratio;
-    double wall_analysis = acc_analysis_ms * wall_ratio;
-    double wall_scoring = acc_scoring_ms * wall_ratio;
-    
-    // Cálculo de porcentagem de carga (Onde o processador mais trabalhou?)
-    double pct_inliers = (total_cpu_work > 1e-6) ? (acc_inliers_ms / total_cpu_work * 100.0) : 0.0;
-    double pct_analysis = (total_cpu_work > 1e-6) ? (acc_analysis_ms / total_cpu_work * 100.0) : 0.0;
-
-    // Speedup estimado (Quantas vezes mais rápido que serial?)
-    // Ex: Se CPU Work = 1.4ms e Wall Time = 0.4ms, Speedup aprox = 3.5x
-    double est_speedup = (d_loop > 1e-6) ? (total_cpu_work / d_loop) : 0.0;
-
-    RCLCPP_INFO(this->get_logger(), "================ BENCHMARK TBB PARALLEL (AJUSTADO) ===============");
-    RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.4f ms", d_func);
-    RCLCPP_INFO(this->get_logger(), "  -> Parallel Loop:      %.4f ms (Speedup Aprox: %.1fx)", d_loop, est_speedup);
-    
-    // Agora mostramos o tempo normalizado (soma deve bater com d_loop) e a % de carga
-    RCLCPP_INFO(this->get_logger(), "     |-> Inliers:        ~%.4f ms (%5.1f%% load)", wall_inliers, pct_inliers);
-    RCLCPP_INFO(this->get_logger(), "     |-> Analysis:       ~%.4f ms (%5.1f%% load)", wall_analysis, pct_analysis);
-    RCLCPP_INFO(this->get_logger(), "     |-> Scoring:        ~%.4f ms", wall_scoring);
+    RCLCPP_INFO(this->get_logger(), "================ BENCHMARK SERIAL (ANIMATION MODE) ===============");
+    RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.4f ms | Clocks: %s", d_func, format_clocks(clk_func).c_str());
+    RCLCPP_INFO(this->get_logger(), "  -> Serial Loop:        %.4f ms", d_loop);
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Inliers SEM hit:  %.4f ms ", acc_inliers_ms2);
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Inliers:  %.4f ms | Clocks: %s", acc_inliers_ms, format_clocks(acc_inliers_clk).c_str());
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Analysis: %.4f ms | Clocks: %s", acc_analysis_ms, format_clocks(acc_analysis_clk).c_str());
+    RCLCPP_INFO(this->get_logger(), "     |-> Total Scoring:  %.4f ms | Clocks: %s", acc_scoring_ms, format_clocks(acc_scoring_clk).c_str());
     
     RCLCPP_INFO(this->get_logger(), "  -> Sort:               %.4f ms", d_sort);
-    RCLCPP_INFO(this->get_logger(), "  -> Collision Final:    %.4f ms (%d checks)", d_col, checks_count);
+    RCLCPP_INFO(this->get_logger(), "  -> Collision Check:    %.4f ms (%d checks)", d_col, checks_count);
     
     size_t num_to_print = std::min((size_t)5, best_grasps_.size());
-   if (num_to_print > 0) {
+    if (num_to_print > 0) 
+    {
         RCLCPP_INFO(this->get_logger(), ">>> TOP %lu SCORES <<<", num_to_print);
-        for (size_t i = 0; i < num_to_print; ++i) {
-             RCLCPP_INFO(this->get_logger(), 
-                "  #%02lu: Tot: %.4f | SymIn: %.4f | SymOut: %.4f | OriIn: %.4f | OriOut: %.4f", 
-                i+1, 
-                best_grasps_[i].total_score,
-                best_grasps_[i].score_symmetry_entry, 
-                best_grasps_[i].score_symmetry_exit,
-                best_grasps_[i].score_orientation_entry, // Campo novo
-                best_grasps_[i].score_orientation_exit   // Campo novo
-             );
+        for (size_t i = 0; i < num_to_print; ++i) 
+        {
+             RCLCPP_INFO(this->get_logger(), "  #%02lu: Score: %.4f", i+1, best_grasps_[i].total_score);
         }
-    } else {
+    } 
+    else 
+    {
         RCLCPP_WARN(this->get_logger(), ">>> NENHUM GRASP ENCONTRADO <<<");
     }
-    RCLCPP_INFO(this->get_logger(), "==================================================================");
+    RCLCPP_INFO(this->get_logger(), "============================================================");
 
-    // Atualiza Stats (Mantemos o raw data para debug, mas você pode salvar o wall_inliers se preferir)
     g_last_run_stats.kd_tree = d_kdtree;
     g_last_run_stats.total_func = d_func;
     g_last_run_stats.loop_tbb = d_loop;
-    g_last_run_stats.max_inliers = wall_inliers; // Salvando o normalizado
-    g_last_run_stats.max_analysis = wall_analysis; // Salvando o normalizado
-    g_last_run_stats.max_scoring = wall_scoring;
+    g_last_run_stats.max_inliers_no_hit = acc_inliers_ms2; 
+    g_last_run_stats.max_inliers = acc_inliers_ms;
+    g_last_run_stats.max_analysis = acc_analysis_ms;
+    g_last_run_stats.max_scoring = acc_scoring_ms;
     g_last_run_stats.sort = d_sort;
     g_last_run_stats.collision = d_col;
     g_last_run_stats.checks = checks_count;

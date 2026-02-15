@@ -128,7 +128,7 @@ def generate_launch_description():
         arguments = [
             '--x', '0', '--y', '0', '--z', '0',
             '--yaw', '0', '--pitch', '0', '--roll', '0',
-            '--frame-id', 'odom', # Pai (Do URDF)
+            '--frame-id', 'map', # Pai (Do URDF)
             '--child-frame-id', 'turtlebot3_waffle/camera_rgb_frame/intel_realsense_r200' # Filho (Do Gazebo)
         ],
         output='screen'
