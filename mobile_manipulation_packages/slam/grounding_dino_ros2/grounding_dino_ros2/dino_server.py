@@ -5,24 +5,33 @@ import json
 import cv2
 import numpy as np
 import os
+import sys
 import torch
 from PIL import Image
-import groundingdino.datasets.transforms as T
-from groundingdino.util.inference import load_model, predict
 
-# --- CONFIGURAÇÃO (Seus caminhos originais) ---
+# --- CONFIGURAÇÃO DE CAMINHOS ---
 HOME = os.path.expanduser("~")
-BASE_PATH = os.path.join(HOME, "pibic/src/mobile_manipulation_packages/GroundingDINO")
+BASE_PATH = os.path.join(HOME, "pibic/src/mobile_manipulation_packages/slam/GroundingDINO")
+
+if BASE_PATH not in sys.path:
+    sys.path.append(BASE_PATH)
+
+try:
+    import groundingdino.datasets.transforms as T
+    from groundingdino.util.inference import load_model, predict
+except ImportError:
+    print(f"ERRO: Não foi possível importar 'groundingdino'. Verifique o caminho: {BASE_PATH}")
+    sys.exit(1)
+
 CONFIG_PATH = os.path.join(BASE_PATH, "groundingdino/config/GroundingDINO_SwinT_OGC.py")
 WEIGHTS_PATH = os.path.join(BASE_PATH, "weights/groundingdino_swint_ogc.pth")
 
-print("Carregando Modelo no Python 3.10...", flush=True)
+print("Carregando Modelo...", flush=True)
 model = load_model(CONFIG_PATH, WEIGHTS_PATH)
 model = model.to("cuda")
-print("Modelo Carregado! Aguardando conexões na porta 5555...", flush=True)
+print("Pronto! Aguardando na porta 5555...", flush=True)
 
 def get_prediction(cv_image, prompt):
-    # Processamento do DINO
     image_pil = Image.fromarray(cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB))
     transform = T.Compose([
         T.RandomResize([800], max_size=1333),
@@ -39,57 +48,57 @@ def get_prediction(cv_image, prompt):
         text_threshold=0.25
     )
 
-    # Prepara resposta JSON
     results = []
-    h, w, _ = cv_image.shape
+    # h, w, _ = cv_image.shape  <-- NÃO PRECISA MAIS DISSO AQUI
+    
     if boxes.shape[0] > 0:
-        boxes_pixel = boxes * torch.Tensor([w, h, w, h])
-        for i, box in enumerate(boxes_pixel):
+        # AQUI ESTAVA O ERRO: Não convertemos para pixels aqui.
+        # Enviamos "cru" (0.0 a 1.0) para o ROS decidir.
+        for i, box in enumerate(boxes):
             results.append({
                 "label": phrases[i],
                 "score": float(logits[i]),
-                "bbox": box.tolist() # [cx, cy, w, h]
+                "bbox": box.tolist() # [cx, cy, w, h] NORMALIZADO (0-1)
             })
     return results
 
 def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind(('localhost', 5555)) # Porta interna
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(('localhost', 5555))
     server.listen(1)
 
     while True:
-        conn, addr = server.accept()
         try:
-            # 1. Recebe tamanho da mensagem (4 bytes)
-            data_size = struct.unpack('>I', conn.recv(4))[0]
+            conn, addr = server.accept()
+            header = conn.recv(4)
+            if not header:
+                conn.close()
+                continue
+            data_size = struct.unpack('>I', header)[0]
             
-            # 2. Recebe a mensagem (Prompt + Imagem codificada)
             data = b""
             while len(data) < data_size:
                 packet = conn.recv(4096)
                 if not packet: break
                 data += packet
             
-            # 3. Decodifica
             request = json.loads(data.decode('utf-8'))
-            prompt = request['prompt']
-            
-            # A imagem vem como lista de bytes, reconstrói numpy
             img_bytes = bytes.fromhex(request['image_hex'])
             nparr = np.frombuffer(img_bytes, np.uint8)
             cv_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-            # 4. Inferência
-            detections = get_prediction(cv_image, prompt)
+            detections = get_prediction(cv_image, request['prompt'])
 
-            # 5. Envia Resposta
             response = json.dumps(detections).encode('utf-8')
             conn.sendall(struct.pack('>I', len(response)) + response)
+            conn.close()
 
         except Exception as e:
-            print(f"Erro no servidor: {e}")
-        finally:
-            conn.close()
+            print(f"Erro: {e}")
+            if 'conn' in locals(): conn.close()
+        except KeyboardInterrupt:
+            break
 
 if __name__ == '__main__':
     start_server()

@@ -8,7 +8,7 @@ def generate_launch_description():
     
     server_script = os.path.join(
         home, 
-        "pibic/src/mobile_manipulation_packages/grounding_dino_ros2/grounding_dino_ros2/dino_server.py"
+        "pibic/src/mobile_manipulation_packages/slam/grounding_dino_ros2/grounding_dino_ros2/dino_server.py"
     )
 
     # 1. Define o processo do Servidor (Começa imediatamente)
@@ -23,7 +23,7 @@ def generate_launch_description():
         executable='dino_node',
         name='grounding_dino_client',
         output='screen',
-        parameters=[{'prompt': 'fire extinguisher . door . number . chair . wall'}]
+        parameters=[{'prompt': 'fire extinguisher . number . chair . fire alarm . cone'}]
     )
 
     return LaunchDescription([
