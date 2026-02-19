@@ -32,6 +32,7 @@ struct ScoredGrasp {
     Eigen::Vector3f raw_p_f1;
     Eigen::Vector3f raw_p_f2;
     double total_score;
+    double total_score_without_bonus;
     float score_symmetry;   
     float score_orientation_entry = 0.0f; 
     float score_orientation_exit = 0.0f;
@@ -78,96 +79,96 @@ public:
     geometry_msgs::msg::PoseArray processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
 
 private:
-    void timerCallback();
-    void loadAndProcess(const std::string& path);
-    
-    std::vector<geometry_msgs::msg::Pose> generateMultiOrientedRays(
-        const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res);
+        void timerCallback();
+        void loadAndProcess(const std::string& path);
         
-    StepAnalysis analyzeLocalCylinder(
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
-        const Eigen::Vector3f& center,
-        const Eigen::Vector3f& ray_dir);
+        std::vector<geometry_msgs::msg::Pose> generateMultiOrientedRays(
+            const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res);
+            
+        StepAnalysis analyzeLocalCylinder(
+            const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+            const Eigen::Vector3f& center,
+            const Eigen::Vector3f& ray_dir);
+            
+        Eigen::Quaternionf findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2);
         
-    Eigen::Quaternionf findBestOrientation(const Eigen::Vector3f& p_f1, const Eigen::Vector3f& p_f2);
-    
-    geometry_msgs::msg::PoseArray evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
+        geometry_msgs::msg::PoseArray evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
 
-    void extractBoundingBoxesFromOBJ(); 
-    bool check_collision(ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug, bool try_rotations);
-    
-    void publishGripperModel();
-    void publishGripperCollisionBoxes();
-    void publishBest();
+        void extractBoundingBoxesFromOBJ(); 
+        bool check_collision(ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug, bool try_rotations);
+        
+        void publishGripperModel();
+        void publishGripperCollisionBoxes();
+        void publishBest();
 
-  
-    std::string object_mesh_path_;
-    std::string gripper_glb_path_;
-    bool publish_object_mesh_;
-    bool publish_gripper_mesh_;
-    bool use_pcd_file;
-    std::string pcd_path_;
-    std::string gripper_mesh_path_;
-    float gripper_mesh_scale_;
-    
-    float mesh_offset_x_, mesh_offset_y_, mesh_offset_z_;
-    float mesh_rot_roll_, mesh_rot_pitch_, mesh_rot_yaw_;
+        Eigen::Vector4f global_centroid;
+        std::string object_mesh_path_;
+        std::string gripper_glb_path_;
+        bool publish_object_mesh_;
+        bool publish_gripper_mesh_;
+        bool use_pcd_file;
+        std::string pcd_path_;
+        std::string gripper_mesh_path_;
+        float gripper_mesh_scale_;
+        
+        float mesh_offset_x_, mesh_offset_y_, mesh_offset_z_;
+        float mesh_rot_roll_, mesh_rot_pitch_, mesh_rot_yaw_;
 
-    int num_benchmark_runs_, animation_delay_ms_;
-    bool enable_ray_animation_;
-    float grid_res_;
-    float cloud_voxel_size_;
-    float cylinder_radius_;
-    float cylinder_height_;
-    float analysis_step_size_;
-    float max_gripper_width_;
-    float finger_offset_;
-    int min_points_per_segment_;
-    float weight_orientation_;
-    float weight_symmetry_;
-    std::vector<float> ray_lengths;
-    
-    bool mean_filter;
-    int mean_filter_k_;
-    
-    int num_best_grasps_;
-    float rotation_step_deg_;
-    int total_orientations_;
-    double target_score_;
+        int num_benchmark_runs_, animation_delay_ms_;
+        bool enable_ray_animation_;
+        float grid_res_;
+        float cloud_voxel_size_;
+        float cylinder_radius_;
+        float cylinder_height_;
+        float analysis_step_size_;
+        float max_gripper_width_;
+        float finger_offset_;
+        int min_points_per_segment_;
+        float weight_orientation_;
+        float weight_symmetry_;
+        std::vector<float> ray_lengths;
+        bool activate_centroid;
+        bool mean_filter;
+        int mean_filter_k_;
+        
+        int num_best_grasps_;
+        float rotation_step_deg_;
+        int total_orientations_;
+        double target_score_;
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; 
-    pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;
-    std::mutex toma;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; 
+        pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;
+        std::mutex toma;
 
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_bbox_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_poses_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_inliers_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_collision_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;
+        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_bbox_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
+        rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_poses_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_inliers_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_collision_;
 
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_object_mesh_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_gripper_model_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_gripper_boxes_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
+        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_object_mesh_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_gripper_model_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_gripper_boxes_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_grasps_cloud_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
 
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_debug_cylinder_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_step_inliers_;
+        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_debug_cylinder_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_debug_step_inliers_;
 
-    rclcpp::TimerBase::SharedPtr timer_;
+        rclcpp::TimerBase::SharedPtr timer_;
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr stored_cloud_;
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr gripper_dense_cloud_; 
-    
-    std::vector<LocalBox> gripper_boxes_; 
+        pcl::PointCloud<pcl::PointXYZ>::Ptr stored_cloud_;
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr gripper_dense_cloud_; 
+        
+        std::vector<LocalBox> gripper_boxes_; 
 
-    Eigen::Vector4f min_pt_, max_pt_;
-    std::vector<geometry_msgs::msg::Pose> all_candidates_;
-    std::vector<geometry_msgs::msg::Pose> hit_candidates_;
-    std::vector<ScoredGrasp> best_grasps_;
-    bool has_best_ = false;
+        Eigen::Vector4f min_pt_, max_pt_;
+        std::vector<geometry_msgs::msg::Pose> all_candidates_;
+        std::vector<geometry_msgs::msg::Pose> hit_candidates_;
+        std::vector<ScoredGrasp> best_grasps_;
+        bool has_best_ = false;
 };
 
 } // namespace vision

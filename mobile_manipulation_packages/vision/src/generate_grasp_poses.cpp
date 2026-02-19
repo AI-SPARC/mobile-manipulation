@@ -139,6 +139,9 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<bool>("enable_ray_animation", true);
     this->declare_parameter<int>("animation_delay_ms", 20);
 
+    this->declare_parameter<bool>("activate_centroid", false);
+
+
     use_pcd_file = this->get_parameter("use_pcd_file").as_bool();
     pcd_path_ = this->get_parameter("pcd_path").as_string();
     
@@ -187,6 +190,7 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     enable_ray_animation_ = this->get_parameter("enable_ray_animation").as_bool();
     animation_delay_ms_ = this->get_parameter("animation_delay_ms").as_int();
 
+    activate_centroid = this->get_parameter("activate_centroid").as_bool();
     
 
     rclcpp::QoS qos_profile(10);
@@ -386,8 +390,8 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
         float rot_x = dis(gen); float rot_y = dis(gen); float rot_z = dis(gen);
 
         
-        Eigen::Vector4f centroid;
-        pcl::compute3DCentroid(*target, centroid);
+    
+        pcl::compute3DCentroid(*target, global_centroid);
 
        
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
@@ -397,14 +401,13 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::processCloud(pcl::PointCloud<p
         transform.rotate(Eigen::AngleAxisf(rot_y, Eigen::Vector3f::UnitY()));
         transform.rotate(Eigen::AngleAxisf(rot_z, Eigen::Vector3f::UnitZ())); 
 
-        transform.translate(-centroid.head<3>());
+        transform.translate(-global_centroid.head<3>());
 
         
         pcl::transformPointCloud(*target, *target, transform);
 
-        
+        pcl::compute3DCentroid(*target, global_centroid);
 
-        
         if (publish_object_mesh_)
         {
             visualization_msgs::msg::Marker mesh_marker;
@@ -1954,6 +1957,34 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     Eigen::Vector3f center_grasp = (p_f1 + p_f2) / 2.0f;
                     Eigen::Quaternionf best_q = findBestOrientation(p_f1, p_f2);
 
+                    float total_with_bonus = total;
+                    if(activate_centroid == true)
+                    {
+                        Eigen::Vector3f centroid_3d = global_centroid.head<3>();
+                    
+                    
+                        float dist_to_centroid = (center_grasp - centroid_3d).norm();
+                        
+                    
+                        float max_expected_dist = (max_pt_.head<3>() - min_pt_.head<3>()).norm() / 2.0f;
+                        
+                        
+                        if (max_expected_dist < 0.001f) max_expected_dist = 0.001f;
+
+                        
+                        float clamped_dist = std::min(dist_to_centroid, max_expected_dist);
+                        
+                    
+                        float proximity_bonus = 1.0f - (clamped_dist / max_expected_dist);
+                        
+                        
+                        float weight_proximity = 0.5f; 
+                        total_with_bonus = total + (proximity_bonus * weight_proximity);
+                    }
+                   
+                    
+                    
+
                     best_iter_grasp.pose_center.position.x = center_grasp.x(); 
                     best_iter_grasp.pose_center.position.y = center_grasp.y(); 
                     best_iter_grasp.pose_center.position.z = center_grasp.z();
@@ -1962,7 +1993,8 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     best_iter_grasp.pose_center.orientation.z = best_q.z(); 
                     best_iter_grasp.pose_center.orientation.w = best_q.w();
                     
-                    best_iter_grasp.total_score = total;
+                    best_iter_grasp.total_score_without_bonus = total;
+                    best_iter_grasp.total_score = total_with_bonus; 
                     best_iter_grasp.score_orientation_entry = score_ang_entry;
                     best_iter_grasp.score_orientation_exit = score_ang_exit;
                     best_iter_grasp.score_symmetry_entry = score_sym_entry;
@@ -1972,21 +2004,23 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     best_iter_grasp.raw_ray_dir = current_ray_dir;
                 }
 
-                if (total >= target_score_) 
-                { 
-                    // [ATENÇÃO] collision_kdtree_ (pcl::KdTreeFLANN) é Thread-Safe para BUSCA (radiusSearch/nearestKSearch)
-                    // desde que não seja modificado (setInputCloud) concorrentemente.
-                    if (check_collision(best_iter_grasp, collision_kdtree_, true, false)) 
+                if(activate_centroid == false)
+                {
+                    if (best_iter_grasp.total_score >= target_score_) 
                     { 
-                        local.local_candidates.push_back(best_iter_grasp);
-                        local.local_hits.push_back(raw_pose);
-                        
-                        atomic_perfect_count++;
-                        perfect_candidate_found = true;
-                        break; 
+                        if (check_collision(best_iter_grasp, collision_kdtree_, true, false)) 
+                        { 
+                            local.local_candidates.push_back(best_iter_grasp);
+                            local.local_hits.push_back(raw_pose);
+                            
+                            atomic_perfect_count++;
+                            perfect_candidate_found = true;
+                            break; 
+                        }
                     }
                 }
-            } // end optimization
+                
+            } 
 
             if (!perfect_candidate_found && found_valid_in_optimization) {
                 local.local_candidates.push_back(best_iter_grasp);
@@ -1997,10 +2031,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     auto t_loop_end = std::chrono::high_resolution_clock::now();
 
-    // =================================================================================
-    // 6. REDUCTION (Juntar resultados das threads)
-    // =================================================================================
-    
+  
     std::vector<ScoredGrasp> initial_candidates;
     initial_candidates.reserve(all_candidates_.size());
     
