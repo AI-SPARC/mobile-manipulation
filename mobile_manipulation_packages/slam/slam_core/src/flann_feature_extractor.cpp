@@ -13,6 +13,7 @@
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "cv_bridge/cv_bridge.hpp"
+#include <nav_msgs/msg/odometry.hpp>
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -80,7 +81,7 @@ public:
         current_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/flann/current_image", 10);
         odometry_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/flann/odometry_matches", 10);
         
-        pose_cov_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/slam/pose_with_covariance", 10);
+        odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/slam/odom", 10);
         graph_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/slam/graph_markers", 10);
         path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/slam/trajectory_path", 10);
 
@@ -119,7 +120,7 @@ private:
     
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr current_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr odometry_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_cov_pub_;
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_markers_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
 
@@ -220,42 +221,43 @@ private:
             gtsam::Marginals marginals(graph_, optimized_estimates_);
             gtsam::Matrix6 covariance_gtsam = marginals.marginalCovariance(keyframe_id_ - 1);
             
-            geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
-            pose_msg.header.stamp = this->now();
-            pose_msg.header.frame_id = "base_link";
+            nav_msgs::msg::Odometry odom_msg;
+            odom_msg.header.stamp = this->now();
+            odom_msg.header.frame_id = "odom";        
+            odom_msg.child_frame_id = "base_link";    
+
+            gtsam::Pose3 base_pose = optimized_pose;
             
-            gtsam::Pose3 base_pose = optimized_pose * T_base_cam_.inverse();
-            
-            pose_msg.pose.pose.position.x = base_pose.z();
-            pose_msg.pose.pose.position.y = base_pose.y();
-            pose_msg.pose.pose.position.z = base_pose.x();
+            odom_msg.pose.pose.position.x = base_pose.x();
+            odom_msg.pose.pose.position.y = base_pose.y();
+            odom_msg.pose.pose.position.z = base_pose.z();
             
             Eigen::Quaterniond q(base_pose.rotation().matrix());
-            pose_msg.pose.pose.orientation.x = q.z();
-            pose_msg.pose.pose.orientation.y = q.y();
-            pose_msg.pose.pose.orientation.z = q.x();
-            pose_msg.pose.pose.orientation.w = q.w();
+            odom_msg.pose.pose.orientation.x = q.x();
+            odom_msg.pose.pose.orientation.y = q.y();
+            odom_msg.pose.pose.orientation.z = q.z();
+            odom_msg.pose.pose.orientation.w = q.w();
 
             for (int i = 0; i < 3; ++i) 
             {
                 for (int j = 0; j < 3; ++j) 
                 {
-                    pose_msg.pose.covariance[i * 6 + j] = covariance_gtsam(i + 3, j + 3);
-                    pose_msg.pose.covariance[(i + 3) * 6 + (j + 3)] = covariance_gtsam(i, j);
-                    pose_msg.pose.covariance[i * 6 + (j + 3)] = covariance_gtsam(i + 3, j);
-                    pose_msg.pose.covariance[(i + 3) * 6 + j] = covariance_gtsam(i, j + 3);
+                    odom_msg.pose.covariance[i * 6 + j] = covariance_gtsam(i + 3, j + 3);
+                    odom_msg.pose.covariance[(i + 3) * 6 + (j + 3)] = covariance_gtsam(i, j);
+                    odom_msg.pose.covariance[i * 6 + (j + 3)] = covariance_gtsam(i + 3, j);
+                    odom_msg.pose.covariance[(i + 3) * 6 + j] = covariance_gtsam(i, j + 3);
                 }
             }
 
-            pose_cov_pub_->publish(pose_msg);
+            odom_pub_->publish(odom_msg);
 
             visualization_msgs::msg::MarkerArray marker_array;
             nav_msgs::msg::Path path_msg;
             path_msg.header.stamp = this->now();
-            path_msg.header.frame_id = "base_link";
+            path_msg.header.frame_id = "odom"; 
 
             visualization_msgs::msg::Marker nodes_marker;
-            nodes_marker.header.frame_id = "base_link";
+            nodes_marker.header.frame_id = "odom"; 
             nodes_marker.header.stamp = this->now();
             nodes_marker.ns = "gtsam_nodes";
             nodes_marker.id = 0;
@@ -270,7 +272,7 @@ private:
             nodes_marker.color.b = 0.0;
 
             visualization_msgs::msg::Marker edges_marker;
-            edges_marker.header.frame_id = "base_link";
+            edges_marker.header.frame_id = "odom"; 
             edges_marker.header.stamp = this->now();
             edges_marker.ns = "gtsam_edges";
             edges_marker.id = 1;
@@ -284,17 +286,16 @@ private:
 
             for (const auto& key_value : optimized_estimates_) 
             {
-                gtsam::Pose3 node_cam_pose = key_value.value.cast<gtsam::Pose3>();
-                gtsam::Pose3 node_base_pose = node_cam_pose * T_base_cam_.inverse();
+                gtsam::Pose3 node_base_pose = key_value.value.cast<gtsam::Pose3>();
 
                 geometry_msgs::msg::Point p;
-                p.x = node_base_pose.z();
+                p.x = node_base_pose.x();
                 p.y = node_base_pose.y();
-                p.z = node_base_pose.x();
+                p.z = node_base_pose.z();
                 nodes_marker.points.push_back(p);
 
                 geometry_msgs::msg::PoseStamped path_pose;
-                path_pose.header.frame_id = "base_link";
+                path_pose.header.frame_id = "odom"; 
                 path_pose.pose.position = p;
                 path_msg.poses.push_back(path_pose);
             }
@@ -311,19 +312,16 @@ private:
 
                     if (optimized_estimates_.exists(key1) && optimized_estimates_.exists(key2)) 
                     {
-                        gtsam::Pose3 pose1_cam = optimized_estimates_.at<gtsam::Pose3>(key1);
-                        gtsam::Pose3 pose2_cam = optimized_estimates_.at<gtsam::Pose3>(key2);
-
-                        gtsam::Pose3 pose1_base = pose1_cam * T_base_cam_.inverse();
-                        gtsam::Pose3 pose2_base = pose2_cam * T_base_cam_.inverse();
+                        gtsam::Pose3 pose1_base = optimized_estimates_.at<gtsam::Pose3>(key1);
+                        gtsam::Pose3 pose2_base = optimized_estimates_.at<gtsam::Pose3>(key2);
 
                         geometry_msgs::msg::Point p1, p2;
-                        p1.x = pose1_base.z();
+                        p1.x = pose1_base.x();
                         p1.y = pose1_base.y();
-                        p1.z = pose1_base.x();
-                        p2.x = pose2_base.z();
+                        p1.z = pose1_base.z();
+                        p2.x = pose2_base.x();
                         p2.y = pose2_base.y();
-                        p2.z = pose2_base.x();
+                        p2.z = pose2_base.z();
                         
                         edges_marker.points.push_back(p1);
                         edges_marker.points.push_back(p2);
@@ -340,7 +338,8 @@ private:
             RCLCPP_INFO(this->get_logger(), "--- RELATORIO GTSAM ---");
             RCLCPP_INFO(this->get_logger(), "Nos Totais no Grafo: %d", (int)optimized_estimates_.size());
             RCLCPP_INFO(this->get_logger(), "Arestas (Fatores) Totais: %d", (int)graph_.size());
-            RCLCPP_INFO(this->get_logger(), "Pose BASE_LINK [X: %7.3f | Y: %7.3f | Z: %7.3f]", base_pose.z(), base_pose.y(), base_pose.x());
+            RCLCPP_INFO(this->get_logger(), "Pose base_link [X: %7.3f | Y: %7.3f | Z: %7.3f | | x_rot: %7.3f | y_rot: %7.3f | z_rot: %7.3f]", 
+            base_pose.x(), base_pose.y(), base_pose.z(), odom_msg.pose.pose.orientation.x, odom_msg.pose.pose.orientation.y, odom_msg.pose.pose.orientation.z);
             RCLCPP_INFO(this->get_logger(), "Covariancia Marginal GTSAM (Trace): %f", covariance_gtsam.trace());
             RCLCPP_INFO(this->get_logger(), "-----------------------");
         } 
@@ -354,6 +353,8 @@ private:
         }
     }
 
+
+
     void image_callback(const sensor_msgs::msg::Image::SharedPtr msg) 
     {
         if (!tf_received_) 
@@ -361,7 +362,7 @@ private:
             try 
             {
                 geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_->lookupTransform(
-                    "Camera_Pseudo_Depth", "base_link", tf2::TimePointZero);
+                    "base_link", "Camera_Pseudo_Depth", tf2::TimePointZero);
 
                 Eigen::Quaterniond q(
                     transform_stamped.transform.rotation.w,
@@ -376,22 +377,12 @@ private:
                     transform_stamped.transform.translation.z
                 );
 
-                gtsam::Pose3 T_base_cam(gtsam::Rot3(q.toRotationMatrix()), gtsam::Point3(t));
                 
-                
-                Eigen::Matrix3d R_cam_opt;
-                R_cam_opt <<  0,  0,  1,
-                             -1,  0,  0,
-                              0, -1,  0;
-                              
-                gtsam::Pose3 T_cam_opt(gtsam::Rot3(R_cam_opt), gtsam::Point3(0, 0, 0));
-                
-                
-                T_base_opt_ = T_base_cam * T_cam_opt;
+                T_base_opt_ = gtsam::Pose3(gtsam::Rot3(q.toRotationMatrix()), gtsam::Point3(t));
                 
                 tf_received_ = true;
-                RCLCPP_INFO(this->get_logger(), "Transformacao base_link -> Camera_Pseudo_Depth -> Optical recebida!");
-            } 
+                RCLCPP_INFO(this->get_logger(), "Transformacao base_link -> Camera recebida e alinhada!");
+            }
             catch (tf2::TransformException &ex) 
             {
                 RCLCPP_WARN(this->get_logger(), "Aguardando TF base_link -> Camera_Pseudo_Depth: %s", ex.what());
@@ -453,13 +444,12 @@ private:
         if (!has_keyframe_) 
         {
             last_keyframe_ = current_frame;
-            last_keyframe_pose_ = cv::Mat::eye(4, 4, CV_64F); 
-            global_pose_ = cv::Mat::eye(4, 4, CV_64F);
             
-            Eigen::Matrix4d global_pose_eigen;
-            cv::cv2eigen(global_pose_, global_pose_eigen);
-            gtsam::Pose3 initial_pose(global_pose_eigen);
-
+            
+            global_pose_ = cv::Mat::eye(4, 4, CV_64F);
+            last_keyframe_pose_ = cv::Mat::eye(4, 4, CV_64F);
+            gtsam::Pose3 initial_pose = gtsam::Pose3();
+            
             auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
                 (gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6).finished());
             
@@ -512,7 +502,7 @@ private:
                 
                 bool pnp_success = cv::solvePnPRansac(
                     object_points, image_points, camera_matrix_, dist_coeffs_,
-                    rvec, tvec, false, 100, 2.0f, 0.99, inliers);
+                    rvec, tvec, false, 100, 2.0f, 0.99, inliers, cv::SOLVEPNP_EPNP);
                 
                 if (pnp_success && inliers.size() >= 15) 
                 {
@@ -535,9 +525,23 @@ private:
                         R.copyTo(T_curr_kf(cv::Rect(0, 0, 3, 3)));
                         tvec.copyTo(T_curr_kf(cv::Rect(3, 0, 1, 3)));
 
+                       
                         cv::Mat T_kf_curr = T_curr_kf.inv();
-                        global_pose_ = last_keyframe_pose_ * T_kf_curr;
+                        Eigen::Matrix4d delta_opt_eigen;
+                        cv::cv2eigen(T_kf_curr, delta_opt_eigen);
+                        gtsam::Pose3 delta_opt(delta_opt_eigen);
 
+                        
+                        gtsam::Pose3 delta_base = T_base_opt_ * delta_opt * T_base_opt_.inverse();
+
+                        Eigen::Matrix4d delta_base_eigen = delta_base.matrix();
+                        cv::Mat delta_base_cv;
+                        cv::eigen2cv(delta_base_eigen, delta_base_cv);
+                        
+                        
+                        global_pose_ = last_keyframe_pose_ * delta_base_cv;
+
+                        
                         double inlier_ratio = 100.0 / std::max((double)inliers.size(), 15.0);
                         double penalty_inliers = inlier_ratio * inlier_ratio; 
                         double penalty_motion = 1.0 + (translation_dist * 2.0) + (rotation_dist * 2.0);
@@ -578,20 +582,17 @@ private:
                         {
                             last_keyframe_ = current_frame;
 
-                            
                             Eigen::MatrixXd cov_eigen;
                             cv::cv2eigen(covariance, cov_eigen);
                             auto noise_model = gtsam::noiseModel::Gaussian::Covariance(cov_eigen);
 
-                            Eigen::Matrix4d relative_pose_eigen;
-                            cv::cv2eigen(T_kf_curr, relative_pose_eigen);
-                            gtsam::Pose3 relative_pose(relative_pose_eigen);
-
+                            
                             graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                                keyframe_id_ - 1, keyframe_id_, relative_pose, noise_model));
+                                keyframe_id_ - 1, keyframe_id_, delta_base, noise_model));
+                                
                             initial_estimates_.insert(keyframe_id_, current_global_pose);
 
-                           
+                            
                             DBoW3::QueryResults results;
                             int max_results = 50; 
                             db_.query(current_frame.descriptors, results, max_results);
@@ -602,14 +603,10 @@ private:
 
                             for (const auto& result : results) 
                             {
-                                
                                 if (keyframe_id_ - result.Id < 3) continue;
 
-                                
-                                std::cout << result.Score << std::endl;
                                 if (result.Score > 0.1) 
                                 {
-                                    
                                     FrameData candidate_kf = keyframe_database_[result.Id];
                                     
                                     std::vector<std::vector<cv::DMatch>> loop_knn_matches;
@@ -622,7 +619,6 @@ private:
                                         }
                                     }
 
-                                    
                                     if (loop_good_matches.size() >= 20) 
                                     {
                                         std::vector<cv::Point3f> loop_obj_points;
@@ -642,7 +638,7 @@ private:
                                             
                                             bool pnp_loop_success = cv::solvePnPRansac(
                                                 loop_obj_points, loop_img_points, camera_matrix_, dist_coeffs_,
-                                                rvec_loop, tvec_loop, false, 100, 2.0f, 0.99, loop_inliers);
+                                                rvec_loop, tvec_loop, false, 100, 2.0f, 0.99, loop_inliers, cv::SOLVEPNP_EPNP);
 
                                             if (pnp_loop_success && loop_inliers.size() >= 20) {
                                                 cv::Mat R_loop;
@@ -661,32 +657,33 @@ private:
                                 }
                             }
 
-                            
                             if (loop_detected) 
                             {
                                 Eigen::Matrix4d relative_loop_eigen;
                                 cv::cv2eigen(T_loop_relative.inv(), relative_loop_eigen); 
-                                gtsam::Pose3 loop_pose(relative_loop_eigen);
+                                gtsam::Pose3 loop_pose_opt(relative_loop_eigen);
+                                
+                                
+                                gtsam::Pose3 loop_pose_base = T_base_opt_ * loop_pose_opt * T_base_opt_.inverse();
 
                                 auto loop_noise = gtsam::noiseModel::Diagonal::Sigmas(
                                     (gtsam::Vector(6) << 0.05, 0.05, 0.05, 0.1, 0.1, 0.1).finished());
 
                                 graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                                    loop_candidate_id, keyframe_id_, loop_pose, loop_noise));
+                                    loop_candidate_id, keyframe_id_, loop_pose_base, loop_noise));
                             }
                             
+                           
                             gtsam::LevenbergMarquardtOptimizer optimizer(graph_, initial_estimates_);
                             gtsam::Values optimized_estimates = optimizer.optimize();
                             optimized_estimates_ = optimized_estimates;
 
-                            
                             gtsam::Pose3 corrected_pose = optimized_estimates_.at<gtsam::Pose3>(keyframe_id_);
                             Eigen::Matrix4d corrected_eigen = corrected_pose.matrix();
                             cv::eigen2cv(corrected_eigen, global_pose_);
 
                             last_keyframe_pose_ = global_pose_.clone();
                             
-                           
                             keyframe_database_[keyframe_id_] = current_frame; 
                             db_.add(current_frame.descriptors); 
 
@@ -694,6 +691,7 @@ private:
 
                             keyframe_id_++;
                         }
+                    
                     }
                 }
             }

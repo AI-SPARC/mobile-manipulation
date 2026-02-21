@@ -44,7 +44,7 @@ def get_prediction(cv_image, prompt):
         model=model,
         image=image_tensor,
         caption=prompt,
-        box_threshold=0.35,
+        box_threshold=0.75,
         text_threshold=0.25
     )
 

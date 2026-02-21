@@ -23,7 +23,7 @@ def generate_launch_description():
         executable='dino_node',
         name='grounding_dino_client',
         output='screen',
-        parameters=[{'prompt': 'fire extinguisher . number . chair . fire alarm . cone'}]
+        parameters=[{'prompt': 'chair . cone .'}]
     )
 
     return LaunchDescription([
