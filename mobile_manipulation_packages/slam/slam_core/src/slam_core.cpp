@@ -805,13 +805,13 @@ private:
                         double var_pitch = base_var_rot * penalty_inliers * penalty_motion;
                         double var_yaw   = base_var_rot * penalty_inliers * penalty_motion;
                         
-                        cv::Mat covariance = cv::Mat::zeros(6, 6, CV_64F);
-                        covariance.at<double>(0, 0) = var_x;
-                        covariance.at<double>(1, 1) = var_y;
-                        covariance.at<double>(2, 2) = var_z;
-                        covariance.at<double>(3, 3) = var_roll;
-                        covariance.at<double>(4, 4) = var_pitch;
-                        covariance.at<double>(5, 5) = var_yaw;
+                        Eigen::MatrixXd cov_eigen = Eigen::MatrixXd::Zero(6, 6);
+                        cov_eigen(0, 0) = var_roll;  
+                        cov_eigen(1, 1) = var_pitch; 
+                        cov_eigen(2, 2) = var_yaw;   
+                        cov_eigen(3, 3) = var_x;     
+                        cov_eigen(4, 4) = var_y;     
+                        cov_eigen(5, 5) = var_z;     
 
                         Eigen::Matrix4d global_pose_eigen;
                         cv::cv2eigen(global_pose_, global_pose_eigen);
@@ -828,8 +828,7 @@ private:
                             RCLCPP_INFO(this->get_logger(), "[GTSAM] Condicao alcancada (Robo andou %.3f m). Criando NOVO KEYFRAME ID %d.", real_dist, keyframe_id_);
                             last_keyframe_ = current_frame;
                             
-                            Eigen::MatrixXd cov_eigen;
-                            cv::cv2eigen(covariance, cov_eigen);
+                          
                             auto noise_model = gtsam::noiseModel::Gaussian::Covariance(cov_eigen);
 
                             graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
@@ -845,6 +844,7 @@ private:
                             Eigen::Matrix4d T_loop_relative = Eigen::Matrix4d::Identity(); 
                             int num_loop_inliers = 0;
                             std::vector<Eigen::Vector3d> loop_pts_cand, loop_pts_curr;
+                            std::vector<int> loop_inliers; 
 
                             if (loop_candidate_id != -1 && keyframe_database_.count(loop_candidate_id)) 
                             {
@@ -858,42 +858,41 @@ private:
 
                                     if (loop_matches.size() >= 60) 
                                     {
-                                        // 1. Extrair os pontos brutos
+                                        
                                         std::vector<cv::Point2f> loop_train_pts, loop_query_pts;
                                         for (const auto& match : loop_matches) 
                                         {
                                             if (match.trainIdx < 0 || match.trainIdx >= (int)loop_kp2.size() || 
                                                 match.queryIdx < 0 || match.queryIdx >= (int)loop_kp1.size()) continue;
                                             
-                                            loop_train_pts.push_back(loop_kp2[match.trainIdx]); // candidate KF
-                                            loop_query_pts.push_back(loop_kp1[match.queryIdx]); // current frame
+                                            loop_train_pts.push_back(loop_kp2[match.trainIdx]); 
+                                            loop_query_pts.push_back(loop_kp1[match.queryIdx]); 
                                         }
 
-                                        // 2. Desdistorcer os pontos (Exatamente como na odometria)
                                         std::vector<cv::Point2f> loop_train_pts_undist, loop_query_pts_undist;
-                                        if (cv::norm(dist_coeffs_) > 0.0001) {
+                                        if (cv::norm(dist_coeffs_) > 0.0001) 
+                                        {
                                             cv::undistortPoints(loop_train_pts, loop_train_pts_undist, camera_matrix_, dist_coeffs_, cv::noArray(), camera_matrix_);
                                             cv::undistortPoints(loop_query_pts, loop_query_pts_undist, camera_matrix_, dist_coeffs_, cv::noArray(), camera_matrix_);
-                                        } else {
+                                        }
+                                        else 
+                                        {
                                             loop_train_pts_undist = loop_train_pts;
                                             loop_query_pts_undist = loop_query_pts;
                                         }
 
                                         
 
-                                        // 3. Construir as Nuvens 3D
                                         for (size_t i = 0; i < loop_train_pts.size(); ++i) 
                                         {
                                             cv::Point2f pt2d_train = loop_train_pts[i]; 
                                             cv::Point2f pt2d_query = loop_query_pts[i]; 
 
-                                            // Profundidade vem dos pixels originais (distorcidos)
                                             float z_cand = get_robust_depth(candidate_kf.depth_image, pt2d_train.x, pt2d_train.y);
                                             float z_curr_loop = get_robust_depth(current_frame.depth_image, pt2d_query.x, pt2d_query.y);
 
                                             if (z_cand > 0.0f && z_curr_loop > 0.0f) 
                                             {
-                                                // X e Y calculados a partir dos pixels desdistorcidos!
                                                 float x_cand = (loop_train_pts_undist[i].x - cx) * z_cand / fx;
                                                 float y_cand = (loop_train_pts_undist[i].y - cy) * z_cand / fy;
                                                 
@@ -905,10 +904,8 @@ private:
                                             }
                                         }
 
-                                        // 4. Executar o Kabsch
                                         if (loop_pts_cand.size() >= 15) 
                                         {
-                                            std::vector<int> loop_inliers;
                                             
                                             bool kabsch_loop_success = solveKabschRansac(loop_pts_cand, loop_pts_curr, 1000, threshold_sq, T_loop_relative, loop_inliers);
 
@@ -930,41 +927,36 @@ private:
                                 
                                 gtsam::Pose3 loop_pose_base = T_base_opt_ * loop_pose_opt * T_base_opt_.inverse();
 
-                                // 1. Extrair a distância percorrida e o ângulo do loop closure atual
                                 double loop_trans_dist = T_loop_relative.block<3,1>(0,3).norm();
                                 double loop_rot_dist = Eigen::AngleAxisd(T_loop_relative.block<3,3>(0,0)).angle();
 
-                                // 2. Calcular a profundidade média baseada nos inliers encontrados pelo Kabsch
+                                
                                 double mean_loop_depth = 0.0;
-                                for (int idx : num_loop_inliers) {
+                                for (int idx : loop_inliers) { 
                                     mean_loop_depth += loop_pts_cand[idx].z(); 
                                 }
-                                mean_loop_depth /= std::max((double)num_loop_inliers.size(), 1.0); // Evitar divisão por zero
+                                mean_loop_depth /= std::max((double)loop_inliers.size(), 1.0); 
 
-                                // 3. A SUA lógica de penalidades adaptada para os dados do Loop
-                                double inlier_ratio = 100.0 / std::max((double)num_loop_inliers.size(), 15.0);
-                                double penalty_inliers = inlier_ratio * inlier_ratio; 
+                                double inlier_ratio = 100.0 / std::max((double)loop_inliers.size(), 15.0); 
+                                double penalty_inliers = inlier_ratio * inlier_ratio;
                                 double penalty_motion = 1.0 + (loop_trans_dist * 2.0) + (loop_rot_dist * 2.0);
                                 double penalty_depth = std::max(1.0, mean_loop_depth * mean_loop_depth * 0.5);
 
                                 double base_var_trans = 0.08; 
                                 double base_var_rot   = 0.25; 
 
-                                // O Z sofre mais impacto por causa do erro da câmera RGB-D
                                 double var_trans_xy = base_var_trans * penalty_inliers * penalty_motion;
                                 double var_trans_z  = base_var_trans * penalty_inliers * penalty_motion * penalty_depth; 
                                 double var_rot      = base_var_rot   * penalty_inliers * penalty_motion;
 
-                                // 4. Montar a Covariância na ordem EXIGIDA pelo GTSAM: (Roll, Pitch, Yaw, X, Y, Z)
                                 Eigen::MatrixXd cov_eigen = Eigen::MatrixXd::Zero(6, 6);
-                                cov_eigen(0, 0) = var_rot;      // Roll
-                                cov_eigen(1, 1) = var_rot;      // Pitch
-                                cov_eigen(2, 2) = var_rot;      // Yaw
-                                cov_eigen(3, 3) = var_trans_xy; // X
-                                cov_eigen(4, 4) = var_trans_xy; // Y
-                                cov_eigen(5, 5) = var_trans_z;  // Z
+                                cov_eigen(0, 0) = var_rot;      
+                                cov_eigen(1, 1) = var_rot;      
+                                cov_eigen(2, 2) = var_rot;      
+                                cov_eigen(3, 3) = var_trans_xy; 
+                                cov_eigen(4, 4) = var_trans_xy; 
+                                cov_eigen(5, 5) = var_trans_z;  
 
-                                // 5. Inserir no GTSAM com o Huber configurado para um valor conservador
                                 auto loop_noise = gtsam::noiseModel::Gaussian::Covariance(cov_eigen);
                                 auto robust_loop_noise = gtsam::noiseModel::Robust::Create(
                                     gtsam::noiseModel::mEstimator::Huber::Create(1.345), loop_noise);
@@ -978,14 +970,11 @@ private:
                             
                             RCLCPP_INFO(this->get_logger(), "[GTSAM] Atualizando ISAM2...");
 
-                            // 1. Alimenta o ISAM2 apenas com os fatores e estimativas NOVOS
                             isam2_.update(graph_, initial_estimates_);
 
-                            // 2. Extrai a trajetória completa otimizada (muito mais rápido que o LM)
                             optimized_estimates_ = isam2_.calculateEstimate();
 
-                            // 3. OBRIGATÓRIO: Limpa as variáveis para a próxima iteração! 
-                            // O ISAM2 já guardou a memória do passado. Se não limpar, o GTSAM acusa erro de matriz singular.
+          
                             graph_.resize(0);
                             initial_estimates_.clear();
 
@@ -1000,17 +989,14 @@ private:
                             {
                                 gtsam::Pose3 relative_gt = initial_gt_pose_.inverse() * latest_gt_pose_;
                                 
-                                // Distâncias em linha reta (Euclidianas) desde o ponto de partida
-                                double slam_dist_euclidean = current_global_pose.translation().norm();
+                                double slam_dist_euclidean = corrected_pose.translation().norm();
                                 double gt_dist_euclidean = relative_gt.translation().norm();
                                 
-                                // Erro absoluto da pose (a distância entre onde o robô acha que está e onde ele realmente está)
-                                double trans_error = (current_global_pose.translation() - relative_gt.translation()).norm();
+                                double trans_error = (corrected_pose.translation() - relative_gt.translation()).norm();
                                 
-                                // A porcentagem de erro (Drift) baseada no caminho TOTAL percorrido
                                 double trans_error_pct = (total_gt_distance_ > 0.001) ? (trans_error / total_gt_distance_) * 100.0 : 0.0;
 
-                                gtsam::Rot3 rot_diff = current_global_pose.rotation().between(relative_gt.rotation());
+                                gtsam::Rot3 rot_diff = corrected_pose.rotation().between(relative_gt.rotation());
                                 double rot_error_rad = gtsam::Rot3::Logmap(rot_diff).norm();
                                 double rot_error_deg = rot_error_rad * (180.0 / M_PI);
 
