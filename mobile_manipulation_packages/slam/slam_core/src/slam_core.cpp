@@ -40,6 +40,9 @@
 #include <opencv2/core/eigen.hpp>
 
 #include <slam_core/DinoLoopNode.hpp>
+#include <slam_core/Mapping.hpp>
+#include <tf2_ros/transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 
 struct FrameData 
 { 
@@ -51,8 +54,18 @@ struct FrameData
 class SlamCoreNode : public rclcpp::Node 
 {
 public:
-    SlamCoreNode(std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node) : Node("slam_core_node") , dino_loop_node_node_(dino_loop_node_node)
+    SlamCoreNode(
+        std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node,
+        std::shared_ptr<slam_core::Mapping> mapping_node
+    ) : Node("slam_core_node") , 
+        dino_loop_node_node_(dino_loop_node_node),
+        mapping_node_(mapping_node)
     {
+        this->declare_parameter<std::string>("main_frame_id", "base_link");
+
+        main_frame_id_ = this->get_parameter("main_frame_id").as_string();
+
+
         rgb_sub_.subscribe(this, "/camera/rgb/image_raw", rmw_qos_profile_sensor_data);
         depth_sub_.subscribe(this, "/camera/depth/image_rect_raw", rmw_qos_profile_sensor_data);
 
@@ -86,6 +99,8 @@ public:
 
         global_pose_ = cv::Mat::eye(4, 4, CV_64F);
 
+        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
+
         last_processed_time_ = this->now();
         RCLCPP_INFO(this->get_logger(), "--- NO DE ODOMETRIA VISUAL E GTSAM INICIADO ---");
         RCLCPP_INFO(this->get_logger(), "Aguardando topico /camera/depth/camera_info...");
@@ -101,6 +116,9 @@ private:
     cv::Mat last_keyframe_pose_;
     FrameData last_keyframe_;
     bool has_keyframe_ = false;
+    
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    std::string main_frame_id_;
 
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_; 
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
@@ -113,6 +131,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
 
     std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node_;
+    std::shared_ptr<slam_core::Mapping> mapping_node_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -166,21 +185,19 @@ private:
         if (!first_gt_received_) 
         {
             initial_gt_pose_ = current_gt_pose;
-            previous_gt_pose_ = current_gt_pose; // Inicializa a pose anterior
-            total_gt_distance_ = 0.0;            // Zera o hodômetro
+            previous_gt_pose_ = current_gt_pose; 
+            total_gt_distance_ = 0.0;            
             first_gt_received_ = true;
         }
         else
         {
-            // Calcula a distância euclidiana entre a pose anterior e a atual
             double step_distance = (current_gt_pose.translation() - previous_gt_pose_.translation()).norm();
             
-            // Acumula na distância total percorrida
             total_gt_distance_ += step_distance;
         }
 
         latest_gt_pose_ = current_gt_pose;
-        previous_gt_pose_ = current_gt_pose; // Atualiza para a próxima iteração
+        previous_gt_pose_ = current_gt_pose; 
         has_gt_ = true;
     }
 
@@ -206,7 +223,7 @@ private:
                 dist_coeffs_.at<double>(i) = msg->d[i];
             }
         }
-
+        mapping_node_->set_camera_info(msg, 1.0);
         camera_info_received_ = true;
         RCLCPP_INFO(this->get_logger(), "Matriz da Camera Carregada! fx:%.1f, fy:%.1f, cx:%.1f, cy:%.1f", fx, fy, cx, cy);
     }
@@ -277,7 +294,7 @@ private:
         return center_depth;
     }
 
-    void publish_gtsam_data(const gtsam::Pose3& optimized_pose)
+    void publish_gtsam_data(const gtsam::Pose3& optimized_pose, const rclcpp::Time& stamp)
     {
         try 
         {
@@ -287,7 +304,7 @@ private:
             gtsam::Matrix6 covariance_gtsam = isam2_.marginalCovariance(keyframe_id_ - 1);
             
             nav_msgs::msg::Odometry odom_msg;
-            odom_msg.header.stamp = this->now();
+            odom_msg.header.stamp = stamp;
             odom_msg.header.frame_id = "odom";        
             odom_msg.child_frame_id = "base_link";    
 
@@ -302,6 +319,27 @@ private:
             odom_msg.pose.pose.orientation.y = q.y();
             odom_msg.pose.pose.orientation.z = q.z();
             odom_msg.pose.pose.orientation.w = q.w();
+
+            
+            geometry_msgs::msg::TransformStamped t;
+            t.header.stamp = stamp;
+            t.header.frame_id = "odom";
+            t.child_frame_id = "base_link";
+
+            t.transform.translation.x = base_pose.x();
+            t.transform.translation.y = base_pose.y();
+            t.transform.translation.z = base_pose.z();
+
+            t.transform.rotation.x = q.x();
+            t.transform.rotation.y = q.y();
+            t.transform.rotation.z = q.z();
+            t.transform.rotation.w = q.w();
+
+            
+            if (tf_broadcaster_) {
+                tf_broadcaster_->sendTransform(t);
+            }
+           
 
             for (int i = 0; i < 3; ++i) 
             {
@@ -318,12 +356,12 @@ private:
 
             visualization_msgs::msg::MarkerArray marker_array;
             nav_msgs::msg::Path path_msg;
-            path_msg.header.stamp = this->now();
+            path_msg.header.stamp = stamp;
             path_msg.header.frame_id = "odom"; 
 
             visualization_msgs::msg::Marker nodes_marker;
             nodes_marker.header.frame_id = "odom"; 
-            nodes_marker.header.stamp = this->now();
+            nodes_marker.header.stamp = stamp;
             nodes_marker.ns = "gtsam_nodes";
             nodes_marker.id = 0;
             nodes_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
@@ -338,7 +376,7 @@ private:
 
             visualization_msgs::msg::Marker edges_marker;
             edges_marker.header.frame_id = "odom"; 
-            edges_marker.header.stamp = this->now();
+            edges_marker.header.stamp = stamp;
             edges_marker.ns = "gtsam_edges";
             edges_marker.id = 1;
             edges_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -418,49 +456,6 @@ private:
         }
     }
 
-    void generate_and_process_dense_cloud(const cv::Mat& depth_img, double fx, double fy, double cx, double cy)
-    {
-        auto full_cloud = std::make_shared<std::vector<cv::Point3f>>();
-        
-        int rows = depth_img.rows;
-        int cols = depth_img.cols;
-
-        full_cloud->reserve(rows * cols);
-
-        if (depth_img.type() == CV_32FC1) 
-        {
-            for (int v = 0; v < rows; ++v) 
-            {
-                const float* row_ptr = depth_img.ptr<float>(v);
-                for (int u = 0; u < cols; ++u) 
-                {
-                    float z = row_ptr[u];
-                    if (z > 0.1f && z < 5.0f) 
-                    {
-                        full_cloud->emplace_back((u - cx) * z / fx, (v - cy) * z / fy, z);
-                    }
-                }
-            }
-        } 
-        else if (depth_img.type() == CV_16UC1) 
-        {
-            for (int v = 0; v < rows; ++v) 
-            {
-                const uint16_t* row_ptr = depth_img.ptr<uint16_t>(v);
-                for (int u = 0; u < cols; ++u) 
-                {
-                    float z = row_ptr[u] * 0.001f; 
-                    if (z > 0.1f && z < 5.0f) 
-                    {
-                        full_cloud->emplace_back((u - cx) * z / fx, (v - cy) * z / fy, z);
-                    }
-                }
-            }
-        }
-
-       dense_clouds_database_[keyframe_id_] = full_cloud;
-    }
-
     void sync_callback(const sensor_msgs::msg::Image::ConstSharedPtr& rgb_msg, const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg) 
     {
         try {
@@ -471,23 +466,39 @@ private:
 
         auto msg_copy = std::make_shared<sensor_msgs::msg::Image>(*rgb_msg);
 
+        
+        std::string camera_frame_id = rgb_msg->header.frame_id;
+
         if (!tf_received_) 
         {
-            try {
-                geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_->lookupTransform(
-                    "base_link", "Camera_Pseudo_Depth", tf2::TimePointZero);
-
-                Eigen::Quaterniond q(transform_stamped.transform.rotation.w, transform_stamped.transform.rotation.x,
-                                    transform_stamped.transform.rotation.y, transform_stamped.transform.rotation.z);
-                Eigen::Vector3d t(transform_stamped.transform.translation.x, transform_stamped.transform.translation.y,
-                                transform_stamped.transform.translation.z);
-
-                T_base_opt_ = gtsam::Pose3(gtsam::Rot3(q.toRotationMatrix()), gtsam::Point3(t));
+            if (main_frame_id_ == camera_frame_id) 
+            {
+                
+                T_base_opt_ = gtsam::Pose3();
                 tf_received_ = true;
-                RCLCPP_INFO(this->get_logger(), "Transformacao base_link -> Camera recebida e alinhada!");
+                RCLCPP_INFO(this->get_logger(), "Frame principal e o mesmo da camera [%s]. Transformacao Extrinseca = Identidade.", main_frame_id_.c_str());
             }
-            catch (tf2::TransformException &ex) {
-                return;
+            else 
+            {
+                try {
+                    
+                    geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_->lookupTransform(
+                        main_frame_id_, camera_frame_id, tf2::TimePointZero);
+
+                    Eigen::Quaterniond q(transform_stamped.transform.rotation.w, transform_stamped.transform.rotation.x,
+                                        transform_stamped.transform.rotation.y, transform_stamped.transform.rotation.z);
+                    Eigen::Vector3d t(transform_stamped.transform.translation.x, transform_stamped.transform.translation.y,
+                                    transform_stamped.transform.translation.z);
+
+                    T_base_opt_ = gtsam::Pose3(gtsam::Rot3(q.toRotationMatrix()), gtsam::Point3(t));
+                    tf_received_ = true;
+                    RCLCPP_INFO(this->get_logger(), "Transformacao %s -> %s recebida e alinhada!", main_frame_id_.c_str(), camera_frame_id.c_str());
+                }
+                catch (tf2::TransformException &ex) {
+                    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
+                                         "Aguardando TF de %s para %s...", main_frame_id_.c_str(), camera_frame_id.c_str());
+                    return;
+                }
             }
         }
 
@@ -599,11 +610,16 @@ private:
 
             msg_copy->header.frame_id = std::to_string(keyframe_id_);
             dino_loop_node_node_->keyframe_callback(msg_copy);
+            mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, last_depth_msg_->image);
+            std::vector<std::pair<int, gtsam::Pose3>> optimized_poses_for_mapping;
+            optimized_poses_for_mapping.push_back(std::make_pair(0, initial_pose));
+        
+            mapping_node_->update_global_map(optimized_poses_for_mapping);
 
             keyframe_id_++;
             has_keyframe_ = true;
             frame_count_++;
-            generate_and_process_dense_cloud(last_depth_msg_->image, fx, fy, cx, cy);
+
             return;
         }
 
@@ -611,15 +627,12 @@ private:
         std::vector<cv::DMatch> matches;
 
         dino_loop_node_node_->compute_matches(current_frame.image, last_keyframe_.image, kp1, kp2, matches);
-
+        
         if (!matches.empty())
         {
             cv::Mat debug_image;
-            
-            // Coloca a imagem atual (esquerda) e o último keyframe (direita) lado a lado
             cv::hconcat(current_frame.image, last_keyframe_.image, debug_image);
 
-            // Itera sobre todos os matches validos e desenha os pontos manualmente
             for (const auto& match : matches) 
             {
                 if (match.queryIdx >= 0 && match.queryIdx < (int)kp1.size() && 
@@ -628,27 +641,18 @@ private:
                     cv::Point2f pt_current = kp1[match.queryIdx];
                     cv::Point2f pt_keyframe = kp2[match.trainIdx];
                     
-                    // Como o keyframe está na metade direita da tela concatenada, 
-                    // somamos a largura da imagem atual ao eixo X do ponto
                     pt_keyframe.x += current_frame.image.cols; 
 
-                    // Desenha os pontos (Raio 3, preenchido)
-                    // Verde na imagem atual (esquerda)
                     cv::circle(debug_image, pt_current, 3, cv::Scalar(0, 255, 0), -1); 
-                    
-                    // Vermelho na imagem do keyframe (direita)
                     cv::circle(debug_image, pt_keyframe, 3, cv::Scalar(0, 0, 255), -1); 
                 }
             }
 
             std_msgs::msg::Header match_header;
             match_header.stamp = now;
-            match_header.frame_id = "Camera_Pseudo_Depth";
+            match_header.frame_id = camera_frame_id; 
             odometry_pub_->publish(*cv_bridge::CvImage(match_header, "bgr8", debug_image).toImageMsg());
         }
-        
-        // RCLCPP_INFO(this->get_logger(), "[ESTATISTICAS DO FRAME] ID Atual: %d | ID Last Keyframe: %d", frame_count_, last_keyframe_.id);
-        // RCLCPP_INFO(this->get_logger(), "[ESTATISTICAS DO FRAME] LightGlue Matches Brutos: %zu", matches.size());
         
         bool tracking_success = false; 
 
@@ -709,11 +713,7 @@ private:
                 pts_curr.push_back(Eigen::Vector3d(x_curr, y_curr, z_curr));
             }
 
-            // RCLCPP_INFO(this->get_logger(), "[ANALISE 2D] Distancia Media do Movimento dos Pixels: %.2f px", (matches.size() > 0 ? sum_pixel_dist / matches.size() : 0));
-            // RCLCPP_INFO(this->get_logger(), "[FILTROS DEPTH] Descartados pelo Filtro de Borda/Ruido: %d", edge_filter_rejected);
-            // RCLCPP_INFO(this->get_logger(), "[RESULTADO] Pares 3D SOBREVIVENTES para o Kabsch: %zu", pts_kf.size());
-
-            if (pts_kf.size() >= 8) 
+            if (pts_kf.size() >= 3) 
             { 
                 Eigen::Matrix4d T_curr_kf;
                 std::vector<int> inliers;
@@ -731,45 +731,14 @@ private:
                     Eigen::AngleAxisd aa(R_kabsch);
                     double rotation_dist = aa.angle(); 
 
-                    double sy = sqrt(R_kabsch(0,0) * R_kabsch(0,0) + R_kabsch(1,0) * R_kabsch(1,0));
-                    bool singular = sy < 1e-6; 
-                    double roll_pnp, pitch_pnp, yaw_pnp;
-                    if (!singular) {
-                        roll_pnp  = atan2(R_kabsch(2,1), R_kabsch(2,2));
-                        pitch_pnp = atan2(-R_kabsch(2,0), sy);
-                        yaw_pnp   = atan2(R_kabsch(1,0), R_kabsch(0,0));
-                    } else {
-                        roll_pnp  = atan2(-R_kabsch(1,2), R_kabsch(1,1));
-                        pitch_pnp = atan2(-R_kabsch(2,0), sy);
-                        yaw_pnp   = 0;
-                    }
-
-                    // RCLCPP_INFO(this->get_logger(), "[GEOMETRIA KABSCH] Status: %s | Total de Inliers (Consenso Geométrico): %zu", kabsch_success ? "SUCESSO" : "FALHA", inliers.size());
-                    
                     Eigen::Matrix4d delta_opt_eigen = T_curr_kf.inverse();
                     gtsam::Pose3 delta_opt(delta_opt_eigen);
 
                     gtsam::Pose3 delta_base = T_base_opt_ * delta_opt * T_base_opt_.inverse();
 
-                    // RCLCPP_INFO(this->get_logger(), "------------------------------------------------------------------");
-                    // RCLCPP_INFO(this->get_logger(), "[1. MATEMÁTICA BRUTA] Como o CENÁRIO se moveu na visao da Camera:");
-                    // RCLCPP_INFO(this->get_logger(), "   TVEC -> X: %7.4f m | Y: %7.4f m | Z: %7.4f m", t_kabsch.x(), t_kabsch.y(), t_kabsch.z());
-                    // RCLCPP_INFO(this->get_logger(), "   RVEC -> Roll: %6.2f° | Pitch: %6.2f° | Yaw: %6.2f°", roll_pnp * (180.0/M_PI), pitch_pnp * (180.0/M_PI), yaw_pnp * (180.0/M_PI));
-                    
                     gtsam::Point3 t_base = delta_base.translation();
                     gtsam::Rot3 r_base = delta_base.rotation();
                     double real_dist = t_base.norm();
-
-                    // RCLCPP_INFO(this->get_logger(), "[2. MOVIMENTO REAL] O que o ROBO efetivamente andou (Referencial base_link):");
-                    // RCLCPP_INFO(this->get_logger(), "   Frente/Tras (Eixo X)  : %8.4f metros", t_base.x());
-                    // RCLCPP_INFO(this->get_logger(), "   Esquerda/Direita (Y)  : %8.4f metros", t_base.y());
-                    // RCLCPP_INFO(this->get_logger(), "   Cima/Baixo (Z)        : %8.4f metros", t_base.z());
-                    // RCLCPP_INFO(this->get_logger(), "   Giro Yaw (Z-axis)     : %8.4f graus", r_base.yaw() * (180.0 / M_PI));
-                    // RCLCPP_INFO(this->get_logger(), "   Inclinacao Pitch (Y)  : %8.4f graus", r_base.pitch() * (180.0 / M_PI));
-                    // RCLCPP_INFO(this->get_logger(), "   Tombamento Roll (X)   : %8.4f graus", r_base.roll() * (180.0 / M_PI));
-                    // RCLCPP_INFO(this->get_logger(), "   DISTANCIA TOTAL 3D    : %8.4f metros", real_dist);
-                    // RCLCPP_INFO(this->get_logger(), "------------------------------------------------------------------");
-
                     
                     if (real_dist > 1.0) 
                     {
@@ -795,8 +764,8 @@ private:
                         mean_depth /= inliers.size();
                         double penalty_depth = std::max(1.0, mean_depth * mean_depth * 0.5);
 
-                        double base_var_trans = 0.08; 
-                        double base_var_rot   = 0.25; 
+                        double base_var_trans = 0.03; 
+                        double base_var_rot   = 0.05; 
 
                         double var_x = base_var_trans * penalty_inliers * penalty_motion;
                         double var_y = base_var_trans * penalty_inliers * penalty_motion;
@@ -817,18 +786,13 @@ private:
                         cv::cv2eigen(global_pose_, global_pose_eigen);
                         gtsam::Pose3 current_global_pose(global_pose_eigen);
 
-                       
+                        // publish_gtsam_data(current_global_pose, msg_copy->header.stamp);
                         
-                        // publish_gtsam_data(current_global_pose);
-
-                        
-                        if (translation_dist > 0.15 || 
-                            rotation_dist > 0.1) 
+                        if (translation_dist > 0.15 || rotation_dist > 0.1) 
                         {
                             RCLCPP_INFO(this->get_logger(), "[GTSAM] Condicao alcancada (Robo andou %.3f m). Criando NOVO KEYFRAME ID %d.", real_dist, keyframe_id_);
                             last_keyframe_ = current_frame;
                             
-                          
                             auto noise_model = gtsam::noiseModel::Gaussian::Covariance(cov_eigen);
 
                             graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
@@ -839,7 +803,8 @@ private:
                             msg_copy->header.frame_id = std::to_string(keyframe_id_);
                             
                             int loop_candidate_id = dino_loop_node_node_->keyframe_callback(msg_copy);
-                            // loop_candidate_id = -1; 
+                            mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, last_depth_msg_->image);
+                            
                             bool loop_detected = false;
                             Eigen::Matrix4d T_loop_relative = Eigen::Matrix4d::Identity(); 
                             int num_loop_inliers = 0;
@@ -848,7 +813,7 @@ private:
 
                             if (loop_candidate_id != -1 && keyframe_database_.count(loop_candidate_id)) 
                             {
-                                if ((keyframe_id_ - loop_candidate_id) >= 3) 
+                                if ((keyframe_id_ - loop_candidate_id) >= 20) 
                                 {
                                     FrameData candidate_kf = keyframe_database_[loop_candidate_id];
                                     
@@ -858,7 +823,6 @@ private:
 
                                     if (loop_matches.size() >= 60) 
                                     {
-                                        
                                         std::vector<cv::Point2f> loop_train_pts, loop_query_pts;
                                         for (const auto& match : loop_matches) 
                                         {
@@ -880,8 +844,6 @@ private:
                                             loop_train_pts_undist = loop_train_pts;
                                             loop_query_pts_undist = loop_query_pts;
                                         }
-
-                                        
 
                                         for (size_t i = 0; i < loop_train_pts.size(); ++i) 
                                         {
@@ -906,7 +868,6 @@ private:
 
                                         if (loop_pts_cand.size() >= 15) 
                                         {
-                                            
                                             bool kabsch_loop_success = solveKabschRansac(loop_pts_cand, loop_pts_curr, 1000, threshold_sq, T_loop_relative, loop_inliers);
 
                                             if (kabsch_loop_success && loop_inliers.size() >= 15) 
@@ -930,7 +891,6 @@ private:
                                 double loop_trans_dist = T_loop_relative.block<3,1>(0,3).norm();
                                 double loop_rot_dist = Eigen::AngleAxisd(T_loop_relative.block<3,3>(0,0)).angle();
 
-                                
                                 double mean_loop_depth = 0.0;
                                 for (int idx : loop_inliers) { 
                                     mean_loop_depth += loop_pts_cand[idx].z(); 
@@ -942,8 +902,8 @@ private:
                                 double penalty_motion = 1.0 + (loop_trans_dist * 2.0) + (loop_rot_dist * 2.0);
                                 double penalty_depth = std::max(1.0, mean_loop_depth * mean_loop_depth * 0.5);
 
-                                double base_var_trans = 0.08; 
-                                double base_var_rot   = 0.25; 
+                                double base_var_trans = 0.025; 
+                                double base_var_rot   = 0.125; 
 
                                 double var_trans_xy = base_var_trans * penalty_inliers * penalty_motion;
                                 double var_trans_z  = base_var_trans * penalty_inliers * penalty_motion * penalty_depth; 
@@ -963,9 +923,27 @@ private:
 
                                 graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
                                     loop_candidate_id, keyframe_id_, loop_pose_base, robust_loop_noise));
+
+                                std::vector<std::pair<int, gtsam::Pose3>> optimized_poses_for_mapping;
+                                for (const auto& key_value : optimized_estimates_) 
+                                {
+                                    int node_id = static_cast<int>(key_value.key);
+                                    gtsam::Pose3 node_pose = key_value.value.cast<gtsam::Pose3>();
+                                    optimized_poses_for_mapping.emplace_back(node_id, node_pose);
+                                }
+                                
+
+                                mapping_node_->update_global_map(optimized_poses_for_mapping);
                                     
                                 RCLCPP_INFO(this->get_logger(), "Loop Noise: Trans_Z=%.3f, Rot=%.3f (Inliers: %d, Depth: %.2f)", 
                                             var_trans_z, var_rot, (int)loop_inliers.size(), mean_loop_depth);
+                            }
+                            else
+                            {
+                                std::vector<std::pair<int, gtsam::Pose3>> optimized_poses_for_mapping;
+                                optimized_poses_for_mapping.push_back(std::make_pair(keyframe_id_, current_global_pose));
+                            
+                                mapping_node_->update_global_map(optimized_poses_for_mapping);
                             }
                             
                             RCLCPP_INFO(this->get_logger(), "[GTSAM] Atualizando ISAM2...");
@@ -974,7 +952,6 @@ private:
 
                             optimized_estimates_ = isam2_.calculateEstimate();
 
-          
                             graph_.resize(0);
                             initial_estimates_.clear();
 
@@ -1013,13 +990,13 @@ private:
                                 RCLCPP_INFO(this->get_logger(), "-------------------------------");
                             }
 
-                            publish_gtsam_data(corrected_pose);
+                           
+
+                            publish_gtsam_data(corrected_pose, msg_copy->header.stamp);
 
                             keyframe_id_++;
-                            generate_and_process_dense_cloud(last_depth_msg_->image, fx, fy, cx, cy);
                             RCLCPP_INFO(this->get_logger(), "[GTSAM] Otimizacao concluida com sucesso.");
                         }
-                                        
                     }
                 }
                 else 
@@ -1029,12 +1006,12 @@ private:
             }
             else 
             {
+                
                 RCLCPP_WARN(this->get_logger(), "[FALHA CRITICA] Pares 3D validos (%zu) insuficientes para resolver a geometria (8 minimos)", pts_kf.size());
             }
         }
     
         frame_count_++;
-
     }
 
 };
@@ -1043,15 +1020,21 @@ int main(int argc, char * argv[])
 {
     rclcpp::init(argc, argv);
 
-    rclcpp::NodeOptions dino_loop_node;
-    dino_loop_node.arguments({"--ros-args", "-r", "__node:=dino_loop_node"});
+    rclcpp::NodeOptions dino_opts;
+    dino_opts.arguments({"--ros-args", "-r", "__node:=dino_loop_node", "-p", "use_sim_time:=true"});
 
-    auto dino_loop_node_node = std::make_shared<slam_core::DinoLoopNode>(dino_loop_node);
-    auto server_node = std::make_shared<SlamCoreNode>(dino_loop_node_node);
+    rclcpp::NodeOptions mapping_opts;
+    mapping_opts.arguments({"--ros-args", "-r", "__node:=mapping_node", "-p", "use_sim_time:=true"});
+
+
+    auto dino_loop_node = std::make_shared<slam_core::DinoLoopNode>(dino_opts);
+    auto mapping_node = std::make_shared<slam_core::Mapping>(mapping_opts);
+    auto server_node = std::make_shared<SlamCoreNode>(dino_loop_node, mapping_node);
 
     rclcpp::executors::MultiThreadedExecutor executor;
     
-    executor.add_node(dino_loop_node_node);
+    executor.add_node(dino_loop_node);
+    executor.add_node(mapping_node);
     executor.add_node(server_node);
     
     executor.spin();

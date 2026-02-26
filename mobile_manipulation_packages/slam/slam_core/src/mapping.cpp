@@ -1,349 +1,280 @@
-#include "slam_core/DinoLoopNode.hpp"
-#include <cv_bridge/cv_bridge.hpp>
-#include <cmath>
-#include <algorithm>
+#include "slam_core/Mapping.hpp"
+#include <chrono>
 #include "rclcpp_components/register_node_macro.hpp"
+#include <pcl/common/transforms.h>
 
 namespace slam_core 
 {
 
-DinoLoopNode::DinoLoopNode(const rclcpp::NodeOptions & options)
-: Node("dino_loop_node", options)
+Mapping::Mapping(const rclcpp::NodeOptions & options)
+: Node("mapping_node", options)
 {
-    this->declare_parameter<std::string>("dino_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx");
-    this->declare_parameter<std::string>("lightglue_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx");
-    this->declare_parameter<float>("similarity_threshold", 0.85f); 
-    this->declare_parameter<int>("min_frame_separation", 20); 
+    this->declare_parameter<float>("voxel_leaf_size", 0.05f); 
+    voxel_leaf_size_ = this->get_parameter("voxel_leaf_size").as_double();
 
-    std::string dino_path = this->get_parameter("dino_onnx_path").as_string();
-    std::string lg_path = this->get_parameter("lightglue_onnx_path").as_string();
-    similarity_threshold_ = this->get_parameter("similarity_threshold").as_double();
-    min_frame_separation_ = this->get_parameter("min_frame_separation").as_int();
+    this->declare_parameter<double>("map_publish_rate", 1.0);
+    map_publish_rate_ = this->get_parameter("map_publish_rate").as_double();
 
-    int d = 384; 
-    inner_index_ = new faiss::IndexFlatIP(d);
-    faiss_index_ = new faiss::IndexIDMap(inner_index_);
-
-    try {
-        Ort::SessionOptions session_options;
-        session_options.SetIntraOpNumThreads(1);
-        
-        session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
-        
-        OrtCUDAProviderOptions cuda_options;
-        cuda_options.device_id = 0;
-        session_options.AppendExecutionProvider_CUDA(cuda_options);
-
-        ort_session_dino_ = std::make_unique<Ort::Session>(ort_env_, dino_path.c_str(), session_options);
-        ort_session_lightglue_ = std::make_unique<Ort::Session>(ort_env_, lg_path.c_str(), session_options);
-
-        Ort::AllocatorWithDefaultOptions allocator;
-        dino_input_name_ = ort_session_dino_->GetInputNameAllocated(0, allocator).get();
-        dino_output_name_ = ort_session_dino_->GetOutputNameAllocated(0, allocator).get();
-
-        for (size_t i = 0; i < ort_session_lightglue_->GetInputCount(); i++) {
-            lg_input_names_str_.push_back(ort_session_lightglue_->GetInputNameAllocated(i, allocator).get());
-        }
-        for (size_t i = 0; i < ort_session_lightglue_->GetOutputCount(); i++) {
-            lg_output_names_str_.push_back(ort_session_lightglue_->GetOutputNameAllocated(i, allocator).get());
-        }
-
-        for (const auto& str : lg_input_names_str_) lg_input_names_.push_back(str.c_str());
-        for (const auto& str : lg_output_names_str_) lg_output_names_.push_back(str.c_str());
-
-    } catch (const Ort::Exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "%s", e.what());
-    }
-}
-
-DinoLoopNode::~DinoLoopNode()
-{
-    delete faiss_index_;
-    delete inner_index_;
-}
-
-void DinoLoopNode::normalize_vector(std::vector<float>& v) 
-{
-    float norm = 0.0f;
-    for (float x : v) norm += x * x;
-    norm = std::sqrt(norm);
-    if (norm > 0.0f) {
-        for (float& x : v) x /= norm;
-    }
-}
-
-
-void DinoLoopNode::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std::vector<cv::Point2f>& kp1, std::vector<cv::Point2f>& kp2, std::vector<cv::DMatch>& matches)
-{
-    kp1.clear(); kp2.clear(); matches.clear();
+    this->declare_parameter<std::string>("main_frame_id", "base_link");
+    this->declare_parameter<std::string>("camera_frame_id", "Camera_Pseudo_Depth");
     
-    if (img1.empty() || img2.empty()) 
-    {
-        return;
-    }
+    main_frame_id_ = this->get_parameter("main_frame_id").as_string();
+    camera_frame_id_ = this->get_parameter("camera_frame_id").as_string();
 
-    cv::Mat mean1, stddev1, mean2, stddev2;
-    cv::meanStdDev(img1, mean1, stddev1);
-    cv::meanStdDev(img2, mean2, stddev2);
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    tf_main_camera_initialized_ = false;
+    T_main_camera_ = Eigen::Matrix4f::Identity();
 
-    if (stddev1.at<double>(0) < 5.0 || stddev2.at<double>(0) < 5.0) 
-    {
-        RCLCPP_WARN(this->get_logger(), "[LightGlue] Frame sem textura detectado. Ignorando match.");
-        return;
-    }
+    global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("~/global_map", 1);
+    
+    double timer_period_sec = 1.0 / map_publish_rate_;
+    map_publish_timer_ = this->create_wall_timer(
+        std::chrono::duration<double>(timer_period_sec),
+        std::bind(&Mapping::publish_map_callback, this));
 
-    try 
-    {
-       
-        int H_INFER = img1.rows;
-        int W_INFER = img1.cols;
+    static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+    geometry_msgs::msg::TransformStamped static_transformStamped;
+    static_transformStamped.header.stamp = this->now();
+    static_transformStamped.header.frame_id = "map";
+    static_transformStamped.child_frame_id = "odom"; 
+    
+    static_transformStamped.transform.translation.x = 0.0;
+    static_transformStamped.transform.translation.y = 0.0;
+    static_transformStamped.transform.translation.z = 0.0;
+    static_transformStamped.transform.rotation.x = 0.0;
+    static_transformStamped.transform.rotation.y = 0.0;
+    static_transformStamped.transform.rotation.z = 0.0;
+    static_transformStamped.transform.rotation.w = 1.0;
+    
+    static_tf_broadcaster_->sendTransform(static_transformStamped);
+    voxel_occupancy_set_.reserve(2000000);
 
-        cv::Mat gray1, gray2;
-        if (img1.channels() == 3) cv::cvtColor(img1, gray1, cv::COLOR_BGR2GRAY); else gray1 = img1.clone();
-        if (img2.channels() == 3) cv::cvtColor(img2, gray2, cv::COLOR_BGR2GRAY); else gray2 = img2.clone();
-
-        cv::Mat float1, float2;
-        gray1.convertTo(float1, CV_32FC1, 1.0 / 255.0);
-        gray2.convertTo(float2, CV_32FC1, 1.0 / 255.0);
-
-        if (!float1.isContinuous()) float1 = float1.clone();
-        if (!float2.isContinuous()) float2 = float2.clone();
-
-        Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-
-        if (lg_input_names_.size() == 1) 
-        {
-            size_t image_size = float1.total();
-            std::vector<float> batched_image(2 * image_size);
-            
-            std::memcpy(batched_image.data(), float1.data, image_size * sizeof(float));
-            std::memcpy(batched_image.data() + image_size, float2.data, image_size * sizeof(float));
-
-            std::vector<int64_t> shape = {2, 1, H_INFER, W_INFER};
-            Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-                memory_info, batched_image.data(), batched_image.size(), shape.data(), shape.size());
-
-            auto outputs = ort_session_lightglue_->Run(
-                Ort::RunOptions{nullptr}, 
-                lg_input_names_.data(), &input_tensor, 1, 
-                lg_output_names_.data(), lg_output_names_.size()
-            );
-
-            int kpts_idx = 0;    
-            int matches_idx = 1; 
-
-            auto kpt_shape = outputs[kpts_idx].GetTensorTypeAndShapeInfo().GetShape();
-            int N = (kpt_shape.size() >= 2) ? kpt_shape[1] : 0; 
-            auto kpt_type = outputs[kpts_idx].GetTensorTypeAndShapeInfo().GetElementType();
-
-            if (kpt_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) 
-            {
-                float* k_ptr = outputs[kpts_idx].GetTensorMutableData<float>();
-                for (int i=0; i<N; i++) kp1.push_back(cv::Point2f(k_ptr[i*2], k_ptr[i*2+1]));
-                
-                float* k1_ptr = k_ptr + (N*2);
-                for (int i=0; i<N; i++) kp2.push_back(cv::Point2f(k1_ptr[i*2], k1_ptr[i*2+1]));
-            } 
-            else if (kpt_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) 
-            {
-                int64_t* k_ptr = outputs[kpts_idx].GetTensorMutableData<int64_t>();
-                for (int i=0; i<N; i++) kp1.push_back(cv::Point2f((float)k_ptr[i*2], (float)k_ptr[i*2+1]));
-                
-                int64_t* k1_ptr = k_ptr + (N*2);
-                for (int i=0; i<N; i++) kp2.push_back(cv::Point2f((float)k1_ptr[i*2], (float)k1_ptr[i*2+1]));
-            }
-
-            auto match_shape = outputs[matches_idx].GetTensorTypeAndShapeInfo().GetShape();
-            int M = (match_shape.size() >= 1) ? match_shape[0] : 0; 
-            auto match_type = outputs[matches_idx].GetTensorTypeAndShapeInfo().GetElementType();
-
-            if (M > 0) 
-            {
-                if (match_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) 
-                {
-                    int64_t* m_ptr = outputs[matches_idx].GetTensorMutableData<int64_t>();
-                    for (int i = 0; i < M; i++) {
-                        matches.push_back(cv::DMatch((int)m_ptr[i*3 + 1], (int)m_ptr[i*3 + 2], 0.0f));
-                    }
-                } 
-                else if (match_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32) 
-                {
-                    int32_t* m_ptr = outputs[matches_idx].GetTensorMutableData<int32_t>();
-                    for (int i = 0; i < M; i++) {
-                        matches.push_back(cv::DMatch(m_ptr[i*3 + 1], m_ptr[i*3 + 2], 0.0f));
-                    }
-                }
-            }
-        }
-        else 
-        {
-            // MODELO LEGADO (Separado)
-            std::vector<int64_t> shape1 = {1, 1, H_INFER, W_INFER};
-            std::vector<int64_t> shape2 = {1, 1, H_INFER, W_INFER};
-
-            Ort::Value tensor1 = Ort::Value::CreateTensor<float>(memory_info, (float*)float1.data, float1.total(), shape1.data(), shape1.size());
-            Ort::Value tensor2 = Ort::Value::CreateTensor<float>(memory_info, (float*)float2.data, float2.total(), shape2.data(), shape2.size());
-
-            std::vector<Ort::Value> inputs;
-            inputs.push_back(std::move(tensor1));
-            inputs.push_back(std::move(tensor2));
-
-            auto outputs = ort_session_lightglue_->Run(
-                Ort::RunOptions{nullptr}, 
-                lg_input_names_.data(), inputs.data(), lg_input_names_.size(), 
-                lg_output_names_.data(), lg_output_names_.size()
-            );
-
-            auto shape_kpts0 = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
-            int N = (shape_kpts0.size() == 3) ? shape_kpts0[1] : shape_kpts0[0];
-            auto type_kpts0 = outputs[0].GetTensorTypeAndShapeInfo().GetElementType();
-            
-            if(type_kpts0 == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
-                float* kpts0_ptr = outputs[0].GetTensorMutableData<float>();
-                for(int i=0; i<N; i++) kp1.push_back(cv::Point2f(kpts0_ptr[i*2], kpts0_ptr[i*2+1]));
-            } else if (type_kpts0 == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
-                int64_t* kpts0_ptr = outputs[0].GetTensorMutableData<int64_t>();
-                for(int i=0; i<N; i++) kp1.push_back(cv::Point2f((float)kpts0_ptr[i*2], (float)kpts0_ptr[i*2+1]));
-            }
-
-            auto shape_kpts1 = outputs[1].GetTensorTypeAndShapeInfo().GetShape();
-            int M_kpts = (shape_kpts1.size() == 3) ? shape_kpts1[1] : shape_kpts1[0];
-            auto type_kpts1 = outputs[1].GetTensorTypeAndShapeInfo().GetElementType();
-
-            if(type_kpts1 == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
-                float* kpts1_ptr = outputs[1].GetTensorMutableData<float>();
-                for(int i=0; i<M_kpts; i++) kp2.push_back(cv::Point2f(kpts1_ptr[i*2], kpts1_ptr[i*2+1]));
-            } else if (type_kpts1 == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
-                int64_t* kpts1_ptr = outputs[1].GetTensorMutableData<int64_t>();
-                for(int i=0; i<M_kpts; i++) kp2.push_back(cv::Point2f((float)kpts1_ptr[i*2], (float)kpts1_ptr[i*2+1]));
-            }
-
-            auto match_shape = outputs[2].GetTensorTypeAndShapeInfo().GetShape();
-            auto type_info = outputs[2].GetTensorTypeAndShapeInfo().GetElementType();
-
-            if (match_shape.size() == 2 && match_shape[1] == 2) 
-            {
-                int K = match_shape[0];
-                if (type_info == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
-                    int64_t* p = outputs[2].GetTensorMutableData<int64_t>();
-                    for(int i=0; i<K; i++) matches.push_back(cv::DMatch((int)p[i*2], (int)p[i*2+1], 0.0f));
-                } else {
-                    int32_t* p = outputs[2].GetTensorMutableData<int32_t>();
-                    for(int i=0; i<K; i++) matches.push_back(cv::DMatch(p[i*2], p[i*2+1], 0.0f));
-                }
-            } 
-            else if (match_shape.size() >= 2) 
-            {
-                int N_matches = match_shape[1];
-                if (type_info == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
-                    int64_t* p = outputs[2].GetTensorMutableData<int64_t>();
-                    for(int i=0; i<N_matches; i++) if(p[i] > -1) matches.push_back(cv::DMatch(i, (int)p[i], 0.0f));
-                } else {
-                    int32_t* p = outputs[2].GetTensorMutableData<int32_t>();
-                    for(int i=0; i<N_matches; i++) if(p[i] > -1) matches.push_back(cv::DMatch(i, (int)p[i], 0.0f));
-                }
-            }
-        }
-    } 
-    catch (const std::exception& e) 
-    {
-        RCLCPP_WARN(this->get_logger(), "[LightGlue] Erro critico C++: %s", e.what());
-        kp1.clear(); kp2.clear(); matches.clear();
-        return; 
-    }
+    RCLCPP_INFO(this->get_logger(), "Mapping Node criado. Publicacao assincrona a %.1f Hz.", map_publish_rate_);
 }
 
+Mapping::~Mapping() {}
 
-
-int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+void Mapping::set_camera_info(const sensor_msgs::msg::CameraInfo::ConstSharedPtr& cam_info, float depth_scale)
 {
-    int current_kf_id;
-    try {
-        current_kf_id = std::stoi(msg->header.frame_id);
-    } catch (...) {
-        return -1;
-    }
+    if (camera_initialized_) return;
+    fx_ = cam_info->k[0]; cx_ = cam_info->k[2];
+    fy_ = cam_info->k[4]; cy_ = cam_info->k[5];
+    depth_scale_ = depth_scale;
+    camera_initialized_ = true;
+}
 
-    cv_bridge::CvImagePtr cv_ptr;
-    try {
-        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8);
-    } catch (...) {
-        return -1;
-    }
+void Mapping::add_keyframe_data(int kf_id, const cv::Mat& rgb_img, const cv::Mat& depth_img)
+{
+    if (!camera_initialized_) return;
+    KeyframeData data;
+    data.rgb = rgb_img.clone();
+    data.depth = depth_img.clone();
+    data.local_cloud = generate_local_cloud(data.rgb, data.depth);
+    keyframe_database_[kf_id] = data;
+}
 
-    if (!ort_session_dino_) return -1;
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(const cv::Mat& rgb, const cv::Mat& depth)
+{
+    if (!tf_main_camera_initialized_) 
+    {
+        if (main_frame_id_ == camera_frame_id_) {
+            T_main_camera_ = Eigen::Matrix4f::Identity();
+            tf_main_camera_initialized_ = true;
+        } else {
+            try {
+                geometry_msgs::msg::TransformStamped tf_stamped = tf_buffer_->lookupTransform(
+                    main_frame_id_, camera_frame_id_, tf2::TimePointZero);
 
-    cv::Mat resized;
-    cv::resize(cv_ptr->image, resized, cv::Size(224, 224));
+                Eigen::Quaternionf q(tf_stamped.transform.rotation.w, tf_stamped.transform.rotation.x,
+                                     tf_stamped.transform.rotation.y, tf_stamped.transform.rotation.z);
+                Eigen::Vector3f t(tf_stamped.transform.translation.x, tf_stamped.transform.translation.y,
+                                  tf_stamped.transform.translation.z);
 
-    std::vector<float> input_tensor_values(1 * 3 * 224 * 224);
-    std::vector<float> mean = {0.485f, 0.456f, 0.406f};
-    std::vector<float> std_dev = {0.229f, 0.224f, 0.225f};
+                T_main_camera_ = Eigen::Matrix4f::Identity();
+                T_main_camera_.block<3,3>(0,0) = q.matrix();
+                T_main_camera_.block<3,1>(0,3) = t;
 
-    for (int c = 0; c < 3; ++c) {
-        for (int h = 0; h < 224; ++h) {
-            for (int w = 0; w < 224; ++w) {
-                float pixel_val = resized.at<cv::Vec3b>(h, w)[c] / 255.0f;
-                input_tensor_values[c * 224 * 224 + h * 224 + w] = (pixel_val - mean[c]) / std_dev[c];
+                tf_main_camera_initialized_ = true;
+            } catch (const tf2::TransformException & ex) {
+                return pcl::PointCloud<pcl::PointXYZRGB>::Ptr(new pcl::PointCloud<pcl::PointXYZRGB>());
             }
         }
     }
 
-    Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    std::vector<int64_t> input_shape = {1, 3, 224, 224};
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_camera(new pcl::PointCloud<pcl::PointXYZRGB>());
+    for (int v = 0; v < depth.rows; v += 2) {
+        for (int u = 0; u < depth.cols; u += 2) {
+            float z = 0.0f;
+            if (depth.type() == CV_32FC1) z = depth.at<float>(v, u);
+            else if (depth.type() == CV_16UC1) z = depth.at<uint16_t>(v, u) / depth_scale_;
+
+            if (z <= 0.1f || z > 40.0f) continue; 
+
+            pcl::PointXYZRGB pt;
+            pt.x = (u - cx_) * z / fx_;
+            pt.y = (v - cy_) * z / fy_;
+            pt.z = z;
+            cv::Vec3b color = rgb.at<cv::Vec3b>(v, u);
+            pt.r = color[2]; pt.g = color[1]; pt.b = color[0];
+            cloud_camera->points.push_back(pt);
+        }
+    }
     
-    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        memory_info, input_tensor_values.data(), input_tensor_values.size(), 
-        input_shape.data(), input_shape.size()
-    );
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_main_frame(new pcl::PointCloud<pcl::PointXYZRGB>());
+    pcl::transformPointCloud(*cloud_camera, *cloud_main_frame, T_main_camera_);
 
-    const char* input_names[] = {dino_input_name_.c_str()};
-    const char* output_names[] = {dino_output_name_.c_str()};
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled_local_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+    pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+    voxel_filter.setInputCloud(cloud_main_frame);
+    voxel_filter.setLeafSize(voxel_leaf_size_, voxel_leaf_size_, voxel_leaf_size_);
+    voxel_filter.filter(*downsampled_local_cloud);
 
-    auto output_tensors = ort_session_dino_->Run(
-        Ort::RunOptions{nullptr}, input_names, &input_tensor, 1, output_names, 1
-    );
+    return downsampled_local_cloud;
+}
 
-    float* floatarr = output_tensors.front().GetTensorMutableData<float>();
-    std::vector<float> current_vector(floatarr, floatarr + 384);
+void Mapping::update_global_map(const std::vector<std::pair<int, gtsam::Pose3>>& optimized_poses)
+{
+    if (optimized_poses.empty()) return; 
 
-    normalize_vector(current_vector); 
+    auto start_time = std::chrono::high_resolution_clock::now();
+    bool is_massive_update = optimized_poses.size() > 1; 
 
-    int best_loop_id = -1;
-    float best_score = 0.0f;
-
-    if (faiss_index_->ntotal > 0) 
+    if (is_massive_update) 
     {
-        int k = faiss_index_->ntotal; 
-        std::vector<float> distances(k);
-        std::vector<faiss::idx_t> labels(k);
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        voxel_occupancy_set_.clear();
 
-        faiss_index_->search(1, current_vector.data(), k, distances.data(), labels.data());
-
-        for (int i = 0; i < k; ++i) 
+        for (const auto& pair : optimized_poses) 
         {
-            if (labels[i] == -1) continue; 
-            
-            if (current_kf_id - labels[i] >= 2) 
+            int kf_id = pair.first;
+            const gtsam::Pose3& new_pose = pair.second;
+
+            if (keyframe_database_.find(kf_id) != keyframe_database_.end()) 
             {
-                if (distances[i] > similarity_threshold_) 
+                auto& kf_data = keyframe_database_[kf_id]; 
+                if (!kf_data.global_cloud_cache || !kf_data.pose.equals(new_pose, 1e-4)) 
                 {
-                    if (best_loop_id == -1) 
+                    if (kf_data.local_cloud && !kf_data.local_cloud->empty()) 
                     {
-                        best_score = distances[i];
-                        best_loop_id = labels[i];
+                        Eigen::Matrix4f T_map_main = new_pose.matrix().cast<float>();
+                        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_map(new pcl::PointCloud<pcl::PointXYZRGB>());
+                        pcl::transformPointCloud(*(kf_data.local_cloud), *cloud_map, T_map_main);
+                        
+                        kf_data.pose = new_pose;
+                        kf_data.global_cloud_cache = cloud_map;
                     }
                 }
-            } 
+                
+                if (kf_data.global_cloud_cache) 
+                {
+                    for (const auto& pt : kf_data.global_cloud_cache->points) 
+                    {
+                        VoxelKey key{
+                            static_cast<int>(std::floor(pt.x / voxel_leaf_size_)),
+                            static_cast<int>(std::floor(pt.y / voxel_leaf_size_)),
+                            static_cast<int>(std::floor(pt.z / voxel_leaf_size_)),
+                            pt.r, pt.g, pt.b
+                        };
+                        voxel_occupancy_set_.insert(key);
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        
+        for (const auto& pair : optimized_poses) 
+        {
+            int kf_id = pair.first;
+            const gtsam::Pose3& new_pose = pair.second;
+
+            if (keyframe_database_.find(kf_id) != keyframe_database_.end()) 
+            {
+                auto& kf_data = keyframe_database_[kf_id]; 
+                
+                if (kf_data.local_cloud && !kf_data.local_cloud->empty()) 
+                {
+                    Eigen::Matrix4f T_map_main = new_pose.matrix().cast<float>();
+                    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_map(new pcl::PointCloud<pcl::PointXYZRGB>());
+                    pcl::transformPointCloud(*(kf_data.local_cloud), *cloud_map, T_map_main);
+                    
+                    kf_data.pose = new_pose;
+                    kf_data.global_cloud_cache = cloud_map;
+                    std::cout << cloud_map->points.size() << std::endl;
+                    
+                    
+                    for (const auto& pt : cloud_map->points) 
+                    {
+                        VoxelKey key{
+                            static_cast<int>(std::floor(pt.x / voxel_leaf_size_)),
+                            static_cast<int>(std::floor(pt.y / voxel_leaf_size_)),
+                            static_cast<int>(std::floor(pt.z / voxel_leaf_size_)),
+                            pt.r, pt.g, pt.b
+                        };
+
+                        if(voxel_occupancy_set_.find(key) == voxel_occupancy_set_.end())
+                        {
+                            voxel_occupancy_set_.insert(key);
+                        }
+                        
+                    }
+                }
+            }
+        }
+
+       
+    }
+
+     auto end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
+
+        RCLCPP_INFO(this->get_logger(), "[MAPPING] Calculo Interno (%s): %.2f ms", 
+                is_massive_update ? "Reconstrucao Total" : "Incremental", ms_double.count());
+    
+}
+
+
+void Mapping::publish_map_callback()
+{
+    if (global_map_pub_->get_subscription_count() == 0) return;
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_to_publish(new pcl::PointCloud<pcl::PointXYZRGB>());
+
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        if (voxel_occupancy_set_.empty()) return;
+
+        cloud_to_publish->points.reserve(voxel_occupancy_set_.size());
+
+        for (const auto& key : voxel_occupancy_set_) 
+        {
+            pcl::PointXYZRGB pt;
+            pt.x = (key.x + 0.5f) * voxel_leaf_size_;
+            pt.y = (key.y + 0.5f) * voxel_leaf_size_;
+            pt.z = (key.z + 0.5f) * voxel_leaf_size_;
+            pt.r = key.r;
+            pt.g = key.g;
+            pt.b = key.b;
+
+            cloud_to_publish->points.push_back(pt);
         }
     }
 
-    faiss::idx_t id = current_kf_id;
-    faiss_index_->add_with_ids(1, current_vector.data(), &id);
+    cloud_to_publish->width = cloud_to_publish->points.size();
+    cloud_to_publish->height = 1;
+    cloud_to_publish->is_dense = false;
 
-    return best_loop_id;
+    sensor_msgs::msg::PointCloud2 output_msg;
+    pcl::toROSMsg(*cloud_to_publish, output_msg);
+    output_msg.header.frame_id = "map"; 
+    output_msg.header.stamp = this->now();
+
+    global_map_pub_->publish(output_msg);
 }
 
-} 
+} // namespace slam_core
 
-RCLCPP_COMPONENTS_REGISTER_NODE(slam_core::DinoLoopNode)
+RCLCPP_COMPONENTS_REGISTER_NODE(slam_core::Mapping)

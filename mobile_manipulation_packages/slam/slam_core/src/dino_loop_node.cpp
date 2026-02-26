@@ -12,7 +12,7 @@ DinoLoopNode::DinoLoopNode(const rclcpp::NodeOptions & options)
 {
     this->declare_parameter<std::string>("dino_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx");
     this->declare_parameter<std::string>("lightglue_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx");
-    this->declare_parameter<float>("similarity_threshold", 0.85f); 
+    this->declare_parameter<float>("similarity_threshold", 0.90f); 
     this->declare_parameter<int>("min_frame_separation", 20); 
 
     std::string dino_path = this->get_parameter("dino_onnx_path").as_string();

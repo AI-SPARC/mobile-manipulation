@@ -27,12 +27,15 @@ find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(faiss REQUIRED)
+find_package(PCL REQUIRED)
+find_package(pcl_conversions REQUIRED)
 
 
 set(ONNXRUNTIME_DIR "/home/momesso/onnxruntime-linux-x64-1.18.0")
 
 add_library(dino_loop_component SHARED
   src/dino_loop_node.cpp
+  src/mapping.cpp
 )
 
 target_include_directories(dino_loop_component PUBLIC
@@ -50,6 +53,12 @@ ament_target_dependencies(dino_loop_component
   std_msgs
   cv_bridge
   OpenCV
+  Eigen3
+  PCL
+  pcl_conversions
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
 )
 
 target_link_libraries(dino_loop_component
