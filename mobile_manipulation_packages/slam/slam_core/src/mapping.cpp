@@ -15,12 +15,8 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("map_publish_rate", 1.0);
     map_publish_rate_ = this->get_parameter("map_publish_rate").as_double();
 
-    this->declare_parameter<std::string>("main_frame_id", "base_link");
-    this->declare_parameter<std::string>("camera_frame_id", "Camera_Pseudo_Depth");
-    
-    main_frame_id_ = this->get_parameter("main_frame_id").as_string();
-    camera_frame_id_ = this->get_parameter("camera_frame_id").as_string();
-
+    // Os frame IDs não são mais pegos por parâmetro no construtor.
+    // Eles serão configurados quando o primeiro CameraInfo chegar.
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     tf_main_camera_initialized_ = false;
@@ -55,12 +51,24 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
 
 Mapping::~Mapping() {}
 
-void Mapping::set_camera_info(const sensor_msgs::msg::CameraInfo::ConstSharedPtr& cam_info, float depth_scale)
+// Atualizado: recebe o main_frame_id e extrai o camera_frame_id do cabeçalho da mensagem
+void Mapping::set_camera_info(const sensor_msgs::msg::CameraInfo::ConstSharedPtr& cam_info, 
+                              const std::string& main_frame_id, 
+                              float depth_scale)
 {
     if (camera_initialized_) return;
+    
     fx_ = cam_info->k[0]; cx_ = cam_info->k[2];
     fy_ = cam_info->k[4]; cy_ = cam_info->k[5];
     depth_scale_ = depth_scale;
+    
+    // Configura os frame IDs dinamicamente
+    main_frame_id_ = main_frame_id;
+    camera_frame_id_ = cam_info->header.frame_id; // Extrai o frame da câmera direto da mensagem
+    
+    RCLCPP_INFO(this->get_logger(), "Camera Inicializada. Main Frame: '%s' | Camera Frame: '%s'", 
+                main_frame_id_.c_str(), camera_frame_id_.c_str());
+
     camera_initialized_ = true;
 }
 
@@ -76,6 +84,8 @@ void Mapping::add_keyframe_data(int kf_id, const cv::Mat& rgb_img, const cv::Mat
 
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(const cv::Mat& rgb, const cv::Mat& depth)
 {
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_camera(new pcl::PointCloud<pcl::PointXYZRGB>());
+
     if (!tf_main_camera_initialized_) 
     {
         if (main_frame_id_ == camera_frame_id_) {
@@ -83,6 +93,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(const cv::M
             tf_main_camera_initialized_ = true;
         } else {
             try {
+                // Tenta buscar a transformação entre o main_frame_id e o frame lido da câmera
                 geometry_msgs::msg::TransformStamped tf_stamped = tf_buffer_->lookupTransform(
                     main_frame_id_, camera_frame_id_, tf2::TimePointZero);
 
@@ -96,13 +107,17 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(const cv::M
                 T_main_camera_.block<3,1>(0,3) = t;
 
                 tf_main_camera_initialized_ = true;
+                RCLCPP_INFO(this->get_logger(), "TF main_frame -> camera_frame obtido com sucesso.");
             } catch (const tf2::TransformException & ex) {
-                return pcl::PointCloud<pcl::PointXYZRGB>::Ptr(new pcl::PointCloud<pcl::PointXYZRGB>());
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                                     "Aguardando TF entre %s e %s...", 
+                                     main_frame_id_.c_str(), camera_frame_id_.c_str());
+                return cloud_camera; // Retorna nuvem vazia se a TF não estiver pronta
             }
         }
     }
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_camera(new pcl::PointCloud<pcl::PointXYZRGB>());
+    // Gera a nuvem local a partir das imagens
     for (int v = 0; v < depth.rows; v += 2) {
         for (int u = 0; u < depth.cols; u += 2) {
             float z = 0.0f;
@@ -203,8 +218,6 @@ void Mapping::update_global_map(const std::vector<std::pair<int, gtsam::Pose3>>&
                     
                     kf_data.pose = new_pose;
                     kf_data.global_cloud_cache = cloud_map;
-                    std::cout << cloud_map->points.size() << std::endl;
-                    
                     
                     for (const auto& pt : cloud_map->points) 
                     {
@@ -219,23 +232,18 @@ void Mapping::update_global_map(const std::vector<std::pair<int, gtsam::Pose3>>&
                         {
                             voxel_occupancy_set_.insert(key);
                         }
-                        
                     }
                 }
             }
         }
-
-       
     }
 
-     auto end_time = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
 
-        RCLCPP_INFO(this->get_logger(), "[MAPPING] Calculo Interno (%s): %.2f ms", 
-                is_massive_update ? "Reconstrucao Total" : "Incremental", ms_double.count());
-    
+    RCLCPP_INFO(this->get_logger(), "[MAPPING] Calculo Interno (%s): %.2f ms", 
+            is_massive_update ? "Reconstrucao Total" : "Incremental", ms_double.count());
 }
-
 
 void Mapping::publish_map_callback()
 {

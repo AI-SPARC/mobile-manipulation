@@ -18,6 +18,8 @@
 #include "nav_msgs/msg/path.hpp"
 #include "cv_bridge/cv_bridge.hpp"
 #include <nav_msgs/msg/odometry.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -66,8 +68,8 @@ public:
         main_frame_id_ = this->get_parameter("main_frame_id").as_string();
 
 
-        rgb_sub_.subscribe(this, "/camera/rgb/image_raw", rmw_qos_profile_sensor_data);
-        depth_sub_.subscribe(this, "/camera/depth/image_rect_raw", rmw_qos_profile_sensor_data);
+        rgb_sub_.subscribe(this, "/camera/camera/color/image_raw", rmw_qos_profile_sensor_data);
+        depth_sub_.subscribe(this, "/camera/camera/depth/image_rect_raw", rmw_qos_profile_sensor_data);
 
         sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(SyncPolicy(3), rgb_sub_, depth_sub_);
         sync_->registerCallback(std::bind(&SlamCoreNode::sync_callback, this, std::placeholders::_1, std::placeholders::_2));
@@ -76,10 +78,12 @@ public:
             "/cmd_vel", 10, std::bind(&SlamCoreNode::cmd_vel_callback, this, std::placeholders::_1));
 
         camera_info_sub_ = this->create_subscription<sensor_msgs::msg::CameraInfo>(
-            "/camera/depth/camera_info", 10, std::bind(&SlamCoreNode::camera_info_callback, this, std::placeholders::_1));
+            "/camera/camera/color/camera_info", 10, std::bind(&SlamCoreNode::camera_info_callback, this, std::placeholders::_1));
 
         gt_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/ground_truth", 10, std::bind(&SlamCoreNode::ground_truth_callback, this, std::placeholders::_1));
+
+        graph_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("~/factor_graph", 1);
 
         current_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/flann/current_image", 10);
         odometry_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/flann/odometry_matches", 10);
@@ -103,7 +107,7 @@ public:
 
         last_processed_time_ = this->now();
         RCLCPP_INFO(this->get_logger(), "--- NO DE ODOMETRIA VISUAL E GTSAM INICIADO ---");
-        RCLCPP_INFO(this->get_logger(), "Aguardando topico /camera/depth/camera_info...");
+   
     }
 
 private:
@@ -116,6 +120,7 @@ private:
     cv::Mat last_keyframe_pose_;
     FrameData last_keyframe_;
     bool has_keyframe_ = false;
+    int tracking_lost_counter_ = 0;
     
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::string main_frame_id_;
@@ -125,6 +130,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr gt_sub_;
     
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr current_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr odometry_pub_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_markers_pub_;
@@ -168,6 +174,97 @@ private:
     message_filters::Subscriber<sensor_msgs::msg::Image> rgb_sub_;
     message_filters::Subscriber<sensor_msgs::msg::Image> depth_sub_;
     std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
+
+    void publish_factor_graph(const gtsam::NonlinearFactorGraph& graph, const gtsam::Values& current_estimate)
+    {
+        if (graph_pub_->get_subscription_count() == 0 || current_estimate.empty()) return;
+
+        visualization_msgs::msg::MarkerArray marker_array;
+
+        // ==========================================
+        // 1. MARCADOR PARA OS NÓS (Esferas)
+        // ==========================================
+        visualization_msgs::msg::Marker nodes_marker;
+        nodes_marker.header.frame_id = "map";
+        nodes_marker.header.stamp = this->now();
+        nodes_marker.ns = "gtsam_nodes";
+        nodes_marker.id = 0;
+        nodes_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+        nodes_marker.action = visualization_msgs::msg::Marker::ADD;
+        nodes_marker.pose.orientation.w = 1.0;
+        
+        // Tamanho das esferas
+        nodes_marker.scale.x = 0.1; 
+        nodes_marker.scale.y = 0.1;
+        nodes_marker.scale.z = 0.1;
+        
+        // Cor (Azul)
+        nodes_marker.color.r = 0.0f;
+        nodes_marker.color.g = 0.5f;
+        nodes_marker.color.b = 1.0f;
+        nodes_marker.color.a = 1.0f;
+
+        // Preenche as coordenadas das esferas
+        for (const auto& key_value : current_estimate) {
+            auto pose = key_value.value.cast<gtsam::Pose3>();
+            geometry_msgs::msg::Point p;
+            p.x = pose.x();
+            p.y = pose.y();
+            p.z = pose.z();
+            nodes_marker.points.push_back(p);
+        }
+        marker_array.markers.push_back(nodes_marker);
+
+        // ==========================================
+        // 2. MARCADOR PARA AS ARESTAS (Linhas)
+        // ==========================================
+        visualization_msgs::msg::Marker edges_marker;
+        edges_marker.header.frame_id = "map";
+        edges_marker.header.stamp = this->now();
+        edges_marker.ns = "gtsam_edges";
+        edges_marker.id = 1;
+        edges_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+        edges_marker.action = visualization_msgs::msg::Marker::ADD;
+        edges_marker.pose.orientation.w = 1.0;
+        
+        // Espessura da linha
+        edges_marker.scale.x = 0.02; 
+        
+        // Cor (Verde para odometria, Vermelho para Loop Closure - opcional)
+        edges_marker.color.r = 0.0f;
+        edges_marker.color.g = 1.0f;
+        edges_marker.color.b = 0.0f;
+        edges_marker.color.a = 0.8f;
+
+        // Varre o grafo procurando as "molas" que conectam duas poses
+        for (const auto& factor : graph) {
+            auto between_factor = boost::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(factor);
+            if (between_factor) {
+                gtsam::Key key1 = between_factor->key1();
+                gtsam::Key key2 = between_factor->key2();
+
+                // Só desenha se ambas as poses já existirem na estimativa atual
+                if (current_estimate.exists(key1) && current_estimate.exists(key2)) {
+                    gtsam::Pose3 pose1 = current_estimate.at<gtsam::Pose3>(key1);
+                    gtsam::Pose3 pose2 = current_estimate.at<gtsam::Pose3>(key2);
+
+                    geometry_msgs::msg::Point p1, p2;
+                    p1.x = pose1.x(); p1.y = pose1.y(); p1.z = pose1.z();
+                    p2.x = pose2.x(); p2.y = pose2.y(); p2.z = pose2.z();
+
+                    edges_marker.points.push_back(p1);
+                    edges_marker.points.push_back(p2);
+                }
+            }
+        }
+        marker_array.markers.push_back(edges_marker);
+
+        // Publica tudo de uma vez
+        graph_pub_->publish(marker_array);
+    }
+
+
+
 
     void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) 
     {
@@ -223,7 +320,7 @@ private:
                 dist_coeffs_.at<double>(i) = msg->d[i];
             }
         }
-        mapping_node_->set_camera_info(msg, 1.0);
+        mapping_node_->set_camera_info(msg, main_frame_id_, 1.0);
         camera_info_received_ = true;
         RCLCPP_INFO(this->get_logger(), "Matriz da Camera Carregada! fx:%.1f, fy:%.1f, cx:%.1f, cy:%.1f", fx, fy, cx, cy);
     }
@@ -275,7 +372,7 @@ private:
 
                 if (dx == 0 && dy == 0) center_depth = d;
 
-                if (d > 0.1f && d < 40.0f) 
+                if (d > 0.1f && d < 100.0f) 
                 {
                     if (d < min_depth) min_depth = d;
                     if (d > max_depth) max_depth = d;
@@ -456,6 +553,9 @@ private:
         }
     }
 
+
+
+
     void sync_callback(const sensor_msgs::msg::Image::ConstSharedPtr& rgb_msg, const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg) 
     {
         try {
@@ -622,6 +722,46 @@ private:
 
             return;
         }
+        else if(tracking_lost_counter_ >= 8)
+        {
+            RCLCPP_WARN(this->get_logger(), "[SEQUESTRO] Robo perdido por muito tempo. Criando nova Ilha no GTSAM!");
+
+
+            keyframe_id_ += 1000; 
+            
+          
+            tracking_lost_counter_ = 0; 
+
+            last_keyframe_ = current_frame;
+
+            Eigen::Matrix4d global_pose_eigen;
+            cv::cv2eigen(global_pose_, global_pose_eigen);
+            gtsam::Pose3 current_global_pose(global_pose_eigen);
+
+            auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 100.0, 100.0, 100.0, 100.0, 100.0, 100.0).finished());
+            
+            graph_.add(gtsam::PriorFactor<gtsam::Pose3>(keyframe_id_, current_global_pose, prior_noise));
+            initial_estimates_.insert(keyframe_id_, current_global_pose);
+            keyframe_database_[keyframe_id_] = current_frame; 
+
+            msg_copy->header.frame_id = std::to_string(keyframe_id_);
+            dino_loop_node_node_->keyframe_callback(msg_copy);
+            mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, last_depth_msg_->image);
+
+            keyframe_id_++;
+            has_keyframe_ = true;
+            frame_count_++;
+
+
+            std::vector<std::pair<int, gtsam::Pose3>> optimized_poses_for_mapping;
+            optimized_poses_for_mapping.push_back(std::make_pair(0, current_global_pose));
+        
+            mapping_node_->update_global_map(optimized_poses_for_mapping);
+
+            
+            return;
+        }
+
 
         std::vector<cv::Point2f> kp1, kp2;
         std::vector<cv::DMatch> matches;
@@ -713,7 +853,7 @@ private:
                 pts_curr.push_back(Eigen::Vector3d(x_curr, y_curr, z_curr));
             }
 
-            if (pts_kf.size() >= 3) 
+            if (pts_kf.size() >= 8) 
             { 
                 Eigen::Matrix4d T_curr_kf;
                 std::vector<int> inliers;
@@ -764,8 +904,8 @@ private:
                         mean_depth /= inliers.size();
                         double penalty_depth = std::max(1.0, mean_depth * mean_depth * 0.5);
 
-                        double base_var_trans = 0.03; 
-                        double base_var_rot   = 0.05; 
+                        double base_var_trans = 0.01; 
+                        double base_var_rot   = 0.07; 
 
                         double var_x = base_var_trans * penalty_inliers * penalty_motion;
                         double var_y = base_var_trans * penalty_inliers * penalty_motion;
@@ -902,8 +1042,8 @@ private:
                                 double penalty_motion = 1.0 + (loop_trans_dist * 2.0) + (loop_rot_dist * 2.0);
                                 double penalty_depth = std::max(1.0, mean_loop_depth * mean_loop_depth * 0.5);
 
-                                double base_var_trans = 0.025; 
-                                double base_var_rot   = 0.125; 
+                                double base_var_trans = 0.01; 
+                                double base_var_rot   = 0.07; 
 
                                 double var_trans_xy = base_var_trans * penalty_inliers * penalty_motion;
                                 double var_trans_z  = base_var_trans * penalty_inliers * penalty_motion * penalty_depth; 
@@ -949,6 +1089,7 @@ private:
                             RCLCPP_INFO(this->get_logger(), "[GTSAM] Atualizando ISAM2...");
 
                             isam2_.update(graph_, initial_estimates_);
+                            publish_factor_graph(graph_, isam2_.calculateEstimate());
 
                             optimized_estimates_ = isam2_.calculateEstimate();
 
@@ -1001,13 +1142,19 @@ private:
                 }
                 else 
                 {
+                    
+                    tracking_lost_counter_++;
                     RCLCPP_WARN(this->get_logger(), "[FALHA CRITICA] Kabsch RANSAC nao obteve consenso (Inliers: %zu/8 minimos necessarios)", inliers.size());
-                }
+                    return;
+                }   
             }
             else 
             {
                 
-                RCLCPP_WARN(this->get_logger(), "[FALHA CRITICA] Pares 3D validos (%zu) insuficientes para resolver a geometria (8 minimos)", pts_kf.size());
+
+                tracking_lost_counter_++;
+                RCLCPP_WARN(this->get_logger(), "[FALHA CRITICA] Pares 3D validos (%zu) insuficientes para resolver a geometria (4 minimos)", pts_kf.size());
+                return;
             }
         }
     

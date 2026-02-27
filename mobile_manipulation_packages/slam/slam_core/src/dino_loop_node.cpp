@@ -26,12 +26,14 @@ DinoLoopNode::DinoLoopNode(const rclcpp::NodeOptions & options)
 
     try {
         Ort::SessionOptions session_options;
-        session_options.SetIntraOpNumThreads(1);
-        
-        session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
-        
+        session_options.SetIntraOpNumThreads(0); 
+
+        session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+            
         OrtCUDAProviderOptions cuda_options;
         cuda_options.device_id = 0;
+        cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchExhaustive;
+        cuda_options.arena_extend_strategy = 0; 
         session_options.AppendExecutionProvider_CUDA(cuda_options);
 
         ort_session_dino_ = std::make_unique<Ort::Session>(ort_env_, dino_path.c_str(), session_options);
@@ -75,6 +77,7 @@ void DinoLoopNode::normalize_vector(std::vector<float>& v)
 
 void DinoLoopNode::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std::vector<cv::Point2f>& kp1, std::vector<cv::Point2f>& kp2, std::vector<cv::DMatch>& matches)
 {
+    auto start_time = std::chrono::high_resolution_clock::now();
     kp1.clear(); kp2.clear(); matches.clear();
     
     if (img1.empty() || img2.empty()) 
@@ -251,12 +254,18 @@ void DinoLoopNode::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std
         kp1.clear(); kp2.clear(); matches.clear();
         return; 
     }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
+
+    RCLCPP_INFO(this->get_logger(), "Tempo do light glue: %.2f ms", ms_double.count());
 }
 
 
 
 int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
+    auto start_time = std::chrono::high_resolution_clock::now();
     int current_kf_id;
     try {
         current_kf_id = std::stoi(msg->header.frame_id);
@@ -273,37 +282,46 @@ int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg
 
     if (!ort_session_dino_) return -1;
 
-    cv::Mat resized;
-    cv::resize(cv_ptr->image, resized, cv::Size(224, 224));
-
+ 
     std::vector<float> input_tensor_values(1 * 3 * 224 * 224);
+    
+    const int DINO_WIDTH = 644;  
+    const int DINO_HEIGHT = 476; 
+    
+    // O blobFromImage faz o resize retangular e aloca a memória
+    cv::Mat blob = cv::dnn::blobFromImage(cv_ptr->image, 1.0, cv::Size(DINO_WIDTH, DINO_HEIGHT), cv::Scalar(), true, false, CV_32F);
+    
     std::vector<float> mean = {0.485f, 0.456f, 0.406f};
     std::vector<float> std_dev = {0.229f, 0.224f, 0.225f};
-
+    float* blob_data = (float*)blob.data;
+    
+    int channel_size = DINO_WIDTH * DINO_HEIGHT;
     for (int c = 0; c < 3; ++c) {
-        for (int h = 0; h < 224; ++h) {
-            for (int w = 0; w < 224; ++w) {
-                float pixel_val = resized.at<cv::Vec3b>(h, w)[c] / 255.0f;
-                input_tensor_values[c * 224 * 224 + h * 224 + w] = (pixel_val - mean[c]) / std_dev[c];
-            }
+        float* channel_ptr = blob_data + c * channel_size;
+        for (int i = 0; i < channel_size; ++i) {
+            channel_ptr[i] = (channel_ptr[i] / 255.0f - mean[c]) / std_dev[c];
         }
     }
 
     Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    std::vector<int64_t> input_shape = {1, 3, 224, 224};
+    
+    // ATENÇÃO: Redes neurais esperam o formato [Batch, Canais, Altura, Largura]
+    std::vector<int64_t> input_shape = {1, 3, DINO_HEIGHT, DINO_WIDTH}; 
     
     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        memory_info, input_tensor_values.data(), input_tensor_values.size(), 
+        memory_info, blob_data, blob.total(), 
         input_shape.data(), input_shape.size()
     );
 
     const char* input_names[] = {dino_input_name_.c_str()};
     const char* output_names[] = {dino_output_name_.c_str()};
 
+    // Inferência
     auto output_tensors = ort_session_dino_->Run(
         Ort::RunOptions{nullptr}, input_names, &input_tensor, 1, output_names, 1
     );
 
+    // O vetor final (CLS Token) continua sendo 384!
     float* floatarr = output_tensors.front().GetTensorMutableData<float>();
     std::vector<float> current_vector(floatarr, floatarr + 384);
 
@@ -341,6 +359,10 @@ int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg
     faiss::idx_t id = current_kf_id;
     faiss_index_->add_with_ids(1, current_vector.data(), &id);
 
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
+
+    RCLCPP_INFO(this->get_logger(), "Tempo do din: %.2f ms", ms_double.count());
     return best_loop_id;
 }
 
