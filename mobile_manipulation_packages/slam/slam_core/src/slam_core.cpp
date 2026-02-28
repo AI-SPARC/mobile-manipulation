@@ -53,6 +53,7 @@ struct FrameData
     cv::Mat depth_image;
     std::string rgb_frame;
     std::string depth_frame;
+    gtsam::Pose3 global_pose;
 };
 
 class SlamCoreNode : public rclcpp::Node 
@@ -329,7 +330,7 @@ private:
 
                 if (dx == 0 && dy == 0) center_depth = d;
 
-                if (d > 0.1f && d < 100.0f) 
+                if (d > 0.1f && d < 7.0f) 
                 {
                     if (d < min_depth) min_depth = d;
                     if (d > max_depth) max_depth = d;
@@ -339,7 +340,7 @@ private:
         }
 
         if (valid_pixels < 6) return -1.0f; 
-        if ((max_depth - min_depth) > 0.05f) return -1.0f; 
+        // if ((max_depth - min_depth) > 0.05f) return -1.0f; 
 
         return center_depth;
     }
@@ -606,7 +607,7 @@ private:
         return true;
     };
 
- 
+    
 
     if (!has_keyframe_) 
     {
@@ -618,7 +619,10 @@ private:
         
         graph_.add(gtsam::PriorFactor<gtsam::Pose3>(keyframe_id_, initial_pose, prior_noise));
         initial_estimates_.insert(keyframe_id_, initial_pose);
-        keyframe_database_[keyframe_id_] = current_frame; 
+
+        current_frame.global_pose = initial_pose; 
+        
+        keyframe_database_[keyframe_id_] = current_frame;
 
         msg_copy->header.frame_id = std::to_string(keyframe_id_);
         dino_loop_node_node_->keyframe_callback(msg_copy);
@@ -650,6 +654,8 @@ private:
         
         graph_.add(gtsam::PriorFactor<gtsam::Pose3>(keyframe_id_, current_global_pose, prior_noise));
         initial_estimates_.insert(keyframe_id_, current_global_pose);
+        current_frame.global_pose = current_global_pose; 
+        
         keyframe_database_[keyframe_id_] = current_frame; 
 
         msg_copy->header.frame_id = std::to_string(keyframe_id_);
@@ -718,7 +724,6 @@ private:
             query_pts_undist = query_pts;
         }
 
-        
         std::vector<cv::Point3f> object_pts_3d; 
         std::vector<cv::Point2f> image_pts_2d;  
         
@@ -727,16 +732,14 @@ private:
             cv::Point2f pt2d_train = train_pts[i]; 
             cv::Point2f pt2d_query = query_pts[i]; 
 
-            
             float z_center = get_robust_depth(last_keyframe_.depth_image, pt2d_train.x, pt2d_train.y);
             
-            if (z_center <= 0.1f || z_center > 5.5f) 
+            if (z_center <= 0.1f || z_center > 7.0) 
             {
                 edge_filter_rejected++; 
                 continue; 
             }
 
-            
             float min_z = z_center, max_z = z_center;
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dx = -1; dx <= 1; ++dx) {
@@ -750,8 +753,7 @@ private:
                 }
             }
             
-        
-            // 3. Monta os pontos validados para o PnP
+          
             float x_kf = (train_pts_undist[i].x - cx) * z_center / fx;
             float y_kf = (train_pts_undist[i].y - cy) * z_center / fy;
             
@@ -762,51 +764,39 @@ private:
         if (object_pts_3d.size() >= 8) 
         { 
             int iterationsCount = 1000;
-            float reprojectionError = 20.0f; 
-            double confidence = 0.85;
+            float reprojectionError = 10.0f; 
+            double confidence = 0.95; 
             
-            // Distorção zerada e alocada
             cv::Mat empty_dist_coeffs = cv::Mat::zeros(4, 1, CV_64F); 
             
-            // ===============================================================
-            // 1. ALOCAÇÃO EXPLÍCITA PARA EVITAR O CRASH [0 x 0]
-            // ===============================================================
+            
             cv::Mat rvec_guess = cv::Mat::zeros(3, 1, CV_64F);
             cv::Mat tvec_guess = cv::Mat::zeros(3, 1, CV_64F);
 
-            // ===============================================================
-            // 2. MATEMÁTICA DO CHUTE INICIAL (EXTRINSIC GUESS)
-            // ===============================================================
+         
             Eigen::Matrix4d global_pose_eigen, last_kf_pose_eigen;
             cv::cv2eigen(global_pose_, global_pose_eigen);
             cv::cv2eigen(last_keyframe_pose_, last_kf_pose_eigen);
 
-            // Calcula o movimento que o robô fez no mapa
             Eigen::Matrix4d delta_base_guess = last_kf_pose_eigen.inverse() * global_pose_eigen;
 
-            // Transfere o movimento do base_link para o camera_link
             gtsam::Pose3 delta_base_gtsam(delta_base_guess);
             gtsam::Pose3 delta_cam_guess = T_base_opt_.inverse() * delta_base_gtsam * T_base_opt_;
 
-            // Inverte porque o PnP precisa da transformação Mundo -> Câmera
             Eigen::Matrix4d T_pnp_guess = delta_cam_guess.inverse().matrix();
 
             Eigen::Matrix3d R_guess = T_pnp_guess.block<3,3>(0,0);
             Eigen::Vector3d t_guess_eigen = T_pnp_guess.block<3,1>(0,3);
 
-            // Converte R_guess (Matriz 3x3) para rvec_guess (Vetor 3x1)
             cv::Mat R_cv;
             cv::eigen2cv(R_guess, R_cv);
             cv::Rodrigues(R_cv, rvec_guess); 
 
-            // Preenche tvec_guess explicitamente
             tvec_guess.at<double>(0) = t_guess_eigen(0);
             tvec_guess.at<double>(1) = t_guess_eigen(1);
             tvec_guess.at<double>(2) = t_guess_eigen(2);
 
-            // ===============================================================
-            // 3. O PnP COM CHUTE INICIAL ATIVADO
-            // ===============================================================
+           
             std::vector<int> inliers;
             
             bool pnp_success = cv::solvePnPRansac(
@@ -814,9 +804,9 @@ private:
                 image_pts_2d,       
                 camera_matrix_,     
                 empty_dist_coeffs,       
-                rvec_guess,         // Passando a matriz pré-calculada e alocada
-                tvec_guess,         // Passando a matriz pré-calculada e alocada
-                true,               // <--- CHUTE INICIAL ATIVADO
+                rvec_guess,         
+                tvec_guess,         
+                true,               
                 iterationsCount, 
                 reprojectionError, 
                 confidence, 
@@ -824,11 +814,12 @@ private:
                 cv::SOLVEPNP_ITERATIVE 
             );
             
-            if (pnp_success && inliers.size() >= 8) 
+            if (pnp_success && inliers.size() >= 8 && !rvec_guess.empty() && !tvec_guess.empty()) 
             {
                 std::vector<Eigen::Vector3d> inlier_pts_kf, inlier_pts_curr;
                 std::vector<double> inlier_weights;
 
+                
                 cv::Mat R_ransac;
                 cv::Rodrigues(rvec_guess, R_ransac);
                 Eigen::Matrix3d R_eigen;
@@ -847,7 +838,6 @@ private:
                     float y_curr = (image_pts_2d[idx].y - cy) * z_est / fy;
                     inlier_pts_curr.push_back(Eigen::Vector3d(x_curr, y_curr, z_est));
 
-                    
                     inlier_weights.push_back(1.0 / (object_pts_3d[idx].z * object_pts_3d[idx].z));
                 }
                 
@@ -906,6 +896,29 @@ private:
                     cv::cv2eigen(global_pose_, global_pose_eigen);
                     gtsam::Pose3 current_global_pose(global_pose_eigen);
 
+                    // if (has_gt_) 
+                    // {
+                    //     gtsam::Pose3 relative_gt = initial_gt_pose_.inverse() * latest_gt_pose_;
+                        
+                    
+                        
+                    //     double trans_error = (current_global_pose.translation() - relative_gt.translation()).norm();
+                    //     double trans_error_pct = (total_gt_distance_ > 0.001) ? (trans_error / total_gt_distance_) * 100.0 : 0.0;
+
+                    //     gtsam::Rot3 rot_diff = current_global_pose.rotation().between(relative_gt.rotation());
+                    //     double rot_error_rad = gtsam::Rot3::Logmap(rot_diff).norm();
+                    //     double rot_error_deg = rot_error_rad * (180.0 / M_PI);
+                    //     double gt_rot_rad = gtsam::Rot3::Logmap(relative_gt.rotation()).norm();
+                    //     double gt_rot_deg = gt_rot_rad * (180.0 / M_PI);
+                    //     double rot_error_pct = (gt_rot_deg > 0.001) ? (rot_error_deg / gt_rot_deg) * 100.0 : 0.0;
+
+                    //     RCLCPP_INFO(this->get_logger(), "--- COMPARACAO GROUND TRUTH ---");
+                    //     RCLCPP_INFO(this->get_logger(), "Erro Absoluto Translacao        : %.4f m (%.2f%%)", trans_error, trans_error_pct);
+                    //     RCLCPP_INFO(this->get_logger(), "Erro Absoluto Rotacao           : %.2f° (%.2f%%)", rot_error_deg, rot_error_pct);
+                    // }
+
+                    // publish_gtsam_data(current_global_pose, msg_copy->header.stamp);
+
                     if (translation_dist > 0.15 || rotation_dist > 0.1) 
                     {
                         last_keyframe_ = current_frame;
@@ -923,7 +936,6 @@ private:
                         bool loop_detected = false;
                         Eigen::Matrix4d T_loop_relative = Eigen::Matrix4d::Identity(); 
                         int num_loop_inliers = 0;
-                        
                         
                         std::vector<cv::Point3f> loop_object_pts_3d; 
                         std::vector<cv::Point2f> loop_image_pts_2d;  
@@ -960,13 +972,12 @@ private:
                                     {
                                         float z_cand = get_robust_depth(candidate_kf.depth_image, loop_train_pts[i].x, loop_train_pts[i].y);
 
-                                        if (z_cand > 0.1f && z_cand < 5.5f) 
+                                        if (z_cand > 0.1f && z_cand < 7.0) 
                                         {
                                             float x_cand = (loop_train_pts_undist[i].x - cx) * z_cand / fx;
                                             float y_cand = (loop_train_pts_undist[i].y - cy) * z_cand / fy;
                                             
                                             loop_object_pts_3d.push_back(cv::Point3f(x_cand, y_cand, z_cand));
-                                            
                                             loop_image_pts_2d.push_back(loop_query_pts_undist[i]);
                                         }
                                     }
@@ -974,15 +985,14 @@ private:
                                     if (loop_object_pts_3d.size() >= 15) 
                                     {
                                         cv::Mat rvec_loop, tvec_loop;
-                                        cv::Mat empty_dist_coeffs; 
+                                        cv::Mat empty_loop_coeffs = cv::Mat::zeros(4, 1, CV_64F); 
                                         
-                                        // PnP com RANSAC
                                         bool pnp_loop_success = cv::solvePnPRansac(
-                                            loop_object_pts_3d, loop_image_pts_2d, camera_matrix_, empty_dist_coeffs, 
-                                            rvec_loop, tvec_loop, false, 1000, 12.0f, 0.99, loop_inliers, cv::SOLVEPNP_SQPNP
+                                            loop_object_pts_3d, loop_image_pts_2d, camera_matrix_, empty_loop_coeffs, 
+                                            rvec_loop, tvec_loop, false, 1000, 10.0f, 0.95, loop_inliers, cv::SOLVEPNP_SQPNP
                                         );
                                         
-                                        if (pnp_loop_success && loop_inliers.size() >= 15) 
+                                        if (pnp_loop_success && loop_inliers.size() >= 15 && !rvec_loop.empty() && !tvec_loop.empty()) 
                                         {
                                             cv::Mat R_loop;
                                             cv::Rodrigues(rvec_loop, R_loop);
@@ -1064,13 +1074,16 @@ private:
                         cv::eigen2cv(corrected_eigen, global_pose_);
 
                         last_keyframe_pose_ = global_pose_.clone();
-                        keyframe_database_[keyframe_id_] = current_frame; 
+                        current_frame.global_pose = corrected_pose; 
+        
+                        keyframe_database_[keyframe_id_] = current_frame;
 
                         if (has_gt_) 
                         {
                             gtsam::Pose3 relative_gt = initial_gt_pose_.inverse() * latest_gt_pose_;
-                            double slam_dist_euclidean = corrected_pose.translation().norm();
-                            double gt_dist_euclidean = relative_gt.translation().norm();
+                            
+                            
+                            
                             double trans_error = (corrected_pose.translation() - relative_gt.translation()).norm();
                             double trans_error_pct = (total_gt_distance_ > 0.001) ? (trans_error / total_gt_distance_) * 100.0 : 0.0;
 
@@ -1095,7 +1108,7 @@ private:
             {
                 tracking_lost_counter_++;
                 RCLCPP_WARN(this->get_logger(), 
-                    "[Rastreamento Perdido] Kabsch RANSAC falhou ou não obteve consenso. "
+                    "[Rastreamento Perdido] PnP RANSAC falhou ou não obteve consenso. "
                     "Apenas %zu inliers de 8 necessarios. (Causa: Movimento muito brusco ou ruido extremo)", 
                     inliers.size());
                 return;
