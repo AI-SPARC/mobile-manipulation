@@ -9,18 +9,14 @@ namespace slam_core
 Mapping::Mapping(const rclcpp::NodeOptions & options)
 : Node("mapping_node", options)
 {
-    this->declare_parameter<float>("voxel_leaf_size", 0.05f); 
+    this->declare_parameter<float>("voxel_leaf_size", 0.01f); 
     voxel_leaf_size_ = this->get_parameter("voxel_leaf_size").as_double();
 
     this->declare_parameter<double>("map_publish_rate", 1.0);
     map_publish_rate_ = this->get_parameter("map_publish_rate").as_double();
 
-    // Os frame IDs não são mais pegos por parâmetro no construtor.
-    // Eles serão configurados quando o primeiro CameraInfo chegar.
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    tf_main_camera_initialized_ = false;
-    T_main_camera_ = Eigen::Matrix4f::Identity();
 
     global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("~/global_map", 1);
     
@@ -51,7 +47,6 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
 
 Mapping::~Mapping() {}
 
-// Atualizado: recebe o main_frame_id e extrai o camera_frame_id do cabeçalho da mensagem
 void Mapping::set_camera_info(const sensor_msgs::msg::CameraInfo::ConstSharedPtr& cam_info, 
                               const std::string& main_frame_id, 
                               float depth_scale)
@@ -61,84 +56,133 @@ void Mapping::set_camera_info(const sensor_msgs::msg::CameraInfo::ConstSharedPtr
     fx_ = cam_info->k[0]; cx_ = cam_info->k[2];
     fy_ = cam_info->k[4]; cy_ = cam_info->k[5];
     depth_scale_ = depth_scale;
-    
-    // Configura os frame IDs dinamicamente
     main_frame_id_ = main_frame_id;
-    camera_frame_id_ = cam_info->header.frame_id; // Extrai o frame da câmera direto da mensagem
     
-    RCLCPP_INFO(this->get_logger(), "Camera Inicializada. Main Frame: '%s' | Camera Frame: '%s'", 
-                main_frame_id_.c_str(), camera_frame_id_.c_str());
-
+    RCLCPP_INFO(this->get_logger(), "Mapping: Camera Info Inicializada. Main Frame vinculado a: '%s'", main_frame_id_.c_str());
     camera_initialized_ = true;
 }
 
-void Mapping::add_keyframe_data(int kf_id, const cv::Mat& rgb_img, const cv::Mat& depth_img)
+void Mapping::add_keyframe_data(int kf_id, const cv::Mat& rgb_img, const cv::Mat& depth_img, 
+                                const std::string& rgb_frame, const std::string& depth_frame)
 {
     if (!camera_initialized_) return;
     KeyframeData data;
     data.rgb = rgb_img.clone();
     data.depth = depth_img.clone();
-    data.local_cloud = generate_local_cloud(data.rgb, data.depth);
+    
+    // Passa os frames detectados em tempo real para o gerador de nuvens
+    data.local_cloud = generate_local_cloud(data.rgb, data.depth, rgb_frame, depth_frame);
     keyframe_database_[kf_id] = data;
 }
 
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(const cv::Mat& rgb, const cv::Mat& depth)
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(
+    const cv::Mat& rgb, const cv::Mat& depth, const std::string& rgb_frame, const std::string& depth_frame)
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_camera(new pcl::PointCloud<pcl::PointXYZRGB>());
 
-    if (!tf_main_camera_initialized_) 
+    // 1. TF do Base Link para a Câmera de Profundidade (Onde a geometria 3D nasce)
+    Eigen::Matrix4f T_main_depth = Eigen::Matrix4f::Identity();
+    if (main_frame_id_ != depth_frame) 
     {
-        if (main_frame_id_ == camera_frame_id_) {
-            T_main_camera_ = Eigen::Matrix4f::Identity();
-            tf_main_camera_initialized_ = true;
-        } else {
-            try {
-                // Tenta buscar a transformação entre o main_frame_id e o frame lido da câmera
-                geometry_msgs::msg::TransformStamped tf_stamped = tf_buffer_->lookupTransform(
-                    main_frame_id_, camera_frame_id_, tf2::TimePointZero);
+        try {
+            geometry_msgs::msg::TransformStamped tf_stamped = tf_buffer_->lookupTransform(
+                main_frame_id_, depth_frame, tf2::TimePointZero);
 
-                Eigen::Quaternionf q(tf_stamped.transform.rotation.w, tf_stamped.transform.rotation.x,
-                                     tf_stamped.transform.rotation.y, tf_stamped.transform.rotation.z);
-                Eigen::Vector3f t(tf_stamped.transform.translation.x, tf_stamped.transform.translation.y,
-                                  tf_stamped.transform.translation.z);
+            Eigen::Quaternionf q(tf_stamped.transform.rotation.w, tf_stamped.transform.rotation.x,
+                                 tf_stamped.transform.rotation.y, tf_stamped.transform.rotation.z);
+            Eigen::Vector3f t(tf_stamped.transform.translation.x, tf_stamped.transform.translation.y,
+                              tf_stamped.transform.translation.z);
 
-                T_main_camera_ = Eigen::Matrix4f::Identity();
-                T_main_camera_.block<3,3>(0,0) = q.matrix();
-                T_main_camera_.block<3,1>(0,3) = t;
-
-                tf_main_camera_initialized_ = true;
-                RCLCPP_INFO(this->get_logger(), "TF main_frame -> camera_frame obtido com sucesso.");
-            } catch (const tf2::TransformException & ex) {
-                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-                                     "Aguardando TF entre %s e %s...", 
-                                     main_frame_id_.c_str(), camera_frame_id_.c_str());
-                return cloud_camera; // Retorna nuvem vazia se a TF não estiver pronta
-            }
+            T_main_depth.block<3,3>(0,0) = q.matrix();
+            T_main_depth.block<3,1>(0,3) = t;
+        } catch (const tf2::TransformException & ex) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                                 "Mapeamento: Aguardando TF entre %s e %s...", 
+                                 main_frame_id_.c_str(), depth_frame.c_str());
+            return cloud_camera; // Falhou, retorna nuvem vazia e tenta na próxima
         }
     }
 
-    // Gera a nuvem local a partir das imagens
+    // 2. TF da Câmera de Profundidade para a Câmera RGB (Ajuste Automático de Parallax)
+    Eigen::Matrix4f T_rgb_depth = Eigen::Matrix4f::Identity();
+    bool has_rgb_offset = false;
+    
+    if (rgb_frame != depth_frame) 
+    {
+        try {
+            geometry_msgs::msg::TransformStamped tf_color = tf_buffer_->lookupTransform(
+                rgb_frame, depth_frame, tf2::TimePointZero);
+            
+            Eigen::Quaternionf q(tf_color.transform.rotation.w, tf_color.transform.rotation.x,
+                                 tf_color.transform.rotation.y, tf_color.transform.rotation.z);
+            Eigen::Vector3f t(tf_color.transform.translation.x, tf_color.transform.translation.y,
+                              tf_color.transform.translation.z);
+            
+            T_rgb_depth.block<3,3>(0,0) = q.matrix();
+            T_rgb_depth.block<3,1>(0,3) = t;
+
+            // Se houver qualquer deslocamento físico entre as câmeras, ativamos o Offset
+            if (t.norm() > 0.001 || std::abs(q.w() - 1.0) > 0.001) {
+                has_rgb_offset = true;
+            }
+        } catch (const tf2::TransformException & ex) {
+            // Se falhar, assumimos que as imagens já estão perfeitamente sobrepostas (Aligned)
+        }
+    }
+
+    // 3. Geração da Nuvem
     for (int v = 0; v < depth.rows; v += 2) {
         for (int u = 0; u < depth.cols; u += 2) {
             float z = 0.0f;
             if (depth.type() == CV_32FC1) z = depth.at<float>(v, u);
             else if (depth.type() == CV_16UC1) z = depth.at<uint16_t>(v, u) / depth_scale_;
 
-            if (z <= 0.1f || z > 40.0f) continue; 
+            if (z <= 0.1f || z > 40.0f) 
+            {
+                continue; 
+            }
+            // Ponto 3D no Frame da Profundidade
+            float x_d = (u - cx_) * z / fx_;
+            float y_d = (v - cy_) * z / fy_;
+            float z_d = z;
 
-            pcl::PointXYZRGB pt;
-            pt.x = (u - cx_) * z / fx_;
-            pt.y = (v - cy_) * z / fy_;
-            pt.z = z;
-            cv::Vec3b color = rgb.at<cv::Vec3b>(v, u);
-            pt.r = color[2]; pt.g = color[1]; pt.b = color[0];
-            cloud_camera->points.push_back(pt);
+            int u_rgb = u;
+            int v_rgb = v;
+
+            // Se o RGB e o Depth estiverem em lugares diferentes, projeta o 3D no Frame RGB para pegar a cor certa
+            if (has_rgb_offset) 
+            {
+                Eigen::Vector4f p_d(x_d, y_d, z_d, 1.0f);
+                Eigen::Vector4f p_rgb = T_rgb_depth * p_d;
+                
+                if (p_rgb.z() > 0) {
+                    u_rgb = std::round((p_rgb.x() * fx_ / p_rgb.z()) + cx_);
+                    v_rgb = std::round((p_rgb.y() * fy_ / p_rgb.z()) + cy_);
+                } 
+                else 
+                {
+                    continue; // Ponto está atrás da câmera RGB
+                }
+            }
+
+            // Atribui a cor se o pixel calculado estiver dentro da imagem RGB
+            if (u_rgb >= 0 && u_rgb < rgb.cols && v_rgb >= 0 && v_rgb < rgb.rows) {
+                pcl::PointXYZRGB pt;
+                pt.x = x_d; pt.y = y_d; pt.z = z_d;
+                
+                cv::Vec3b color = rgb.at<cv::Vec3b>(v_rgb, u_rgb);
+                pt.r = color[2]; pt.g = color[1]; pt.b = color[0];
+                
+                cloud_camera->points.push_back(pt);
+            }
         }
     }
     
+    // Transforma toda a nuvem do Depth Frame para o Main Frame (Base Link)
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_main_frame(new pcl::PointCloud<pcl::PointXYZRGB>());
-    pcl::transformPointCloud(*cloud_camera, *cloud_main_frame, T_main_camera_);
+    pcl::transformPointCloud(*cloud_camera, *cloud_main_frame, T_main_depth);
 
+    // Downsample com Voxel Grid
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled_local_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
     pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
     voxel_filter.setInputCloud(cloud_main_frame);

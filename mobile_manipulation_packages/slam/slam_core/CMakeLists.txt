@@ -22,7 +22,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
-
+find_package(trajectory_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
@@ -111,12 +111,38 @@ install(TARGETS dino_loop_component
   RUNTIME DESTINATION bin
 )
 
-install(TARGETS slam_core
+
+add_executable(add_noise src/add_noise.cpp)
+ament_target_dependencies(add_noise 
+  trajectory_msgs 
+  rclcpp 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_ros 
+  PCL
+  vision_msgs
+  std_msgs
+  Eigen3
+  cv_bridge
+  OpenCV
+)
+target_link_libraries(add_noise ${GLEW_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp Eigen3::Eigen)
+
+
+install(TARGETS 
+  slam_core
+  add_noise
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(
-  DIRECTORY launch
+  DIRECTORY 
+  launch
   DESTINATION share/${PROJECT_NAME}
 )
 

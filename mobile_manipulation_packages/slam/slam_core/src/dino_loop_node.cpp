@@ -12,13 +12,11 @@ DinoLoopNode::DinoLoopNode(const rclcpp::NodeOptions & options)
 {
     this->declare_parameter<std::string>("dino_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx");
     this->declare_parameter<std::string>("lightglue_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx");
-    this->declare_parameter<float>("similarity_threshold", 0.90f); 
-    this->declare_parameter<int>("min_frame_separation", 20); 
+    this->declare_parameter<float>("similarity_threshold", 0.85f); 
 
     std::string dino_path = this->get_parameter("dino_onnx_path").as_string();
     std::string lg_path = this->get_parameter("lightglue_onnx_path").as_string();
     similarity_threshold_ = this->get_parameter("similarity_threshold").as_double();
-    min_frame_separation_ = this->get_parameter("min_frame_separation").as_int();
 
     int d = 384; 
     inner_index_ = new faiss::IndexFlatIP(d);
@@ -258,7 +256,7 @@ void DinoLoopNode::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
 
-    RCLCPP_INFO(this->get_logger(), "Tempo do light glue: %.2f ms", ms_double.count());
+    // RCLCPP_INFO(this->get_logger(), "Tempo do light glue: %.2f ms", ms_double.count());
 }
 
 
