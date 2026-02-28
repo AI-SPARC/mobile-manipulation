@@ -6,7 +6,8 @@ def generate_launch_description():
     # Parâmetros separados para cada nó
     slam_parameters = {
         'use_sim_time': True,
-        'main_frame_id': 'base_link'
+        'main_frame_id': 'base_link',
+        'use_imu': True
     }
 
     add_noise_parameters = {

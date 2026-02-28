@@ -73,8 +73,10 @@ public:
         imu_integration_node_(imu_integration_node)
     {
         this->declare_parameter<std::string>("main_frame_id", "base_link");
-        main_frame_id_ = this->get_parameter("main_frame_id").as_string();
+        this->declare_parameter<bool>("use_imu", false);
 
+        main_frame_id_ = this->get_parameter("main_frame_id").as_string();
+        use_imu = this->get_parameter("use_imu").as_bool();
        
         rclcpp::QoS sensor_qos = rclcpp::SensorDataQoS();
         rclcpp::QoS default_qos(10);                     
@@ -174,6 +176,7 @@ private:
     gtsam::Pose3 latest_gt_pose_;
     bool has_gt_ = false;
     bool first_gt_received_ = false;
+    bool use_imu = false;
 
     std::vector<FrameData> history_frames_;
     
@@ -638,19 +641,20 @@ private:
         graph_.add(gtsam::PriorFactor<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose, prior_noise_pose));
         initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose);
 
-    
-        gtsam::Vector3 initial_velocity(0.0, 0.0, 0.0);
-        auto prior_noise_vel = gtsam::noiseModel::Isotropic::Sigma(3, 0.1); 
-        graph_.add(gtsam::PriorFactor<gtsam::Vector3>(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity, prior_noise_vel));
-        initial_estimates_.insert(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity);
+        if (use_imu) 
+        {
+            gtsam::Vector3 initial_velocity(0.0, 0.0, 0.0);
+            auto prior_noise_vel = gtsam::noiseModel::Isotropic::Sigma(3, 0.1); 
+            graph_.add(gtsam::PriorFactor<gtsam::Vector3>(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity, prior_noise_vel));
+            initial_estimates_.insert(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity);
 
-        
-        gtsam::imuBias::ConstantBias initial_bias; 
-        auto prior_noise_bias = gtsam::noiseModel::Isotropic::Sigma(6, 1e-3);
-        graph_.add(gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0), initial_bias, prior_noise_bias));
-        initial_estimates_.insert(gtsam::symbol_shorthand::B(0), initial_bias);
+            gtsam::imuBias::ConstantBias initial_bias; 
+            auto prior_noise_bias = gtsam::noiseModel::Isotropic::Sigma(6, 1e-3);
+            graph_.add(gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0), initial_bias, prior_noise_bias));
+            initial_estimates_.insert(gtsam::symbol_shorthand::B(0), initial_bias);
 
-        current_bias_ = initial_bias;
+            current_bias_ = initial_bias;
+        }
 
         current_frame.global_pose = initial_pose; 
         keyframe_database_[keyframe_id_] = current_frame;
@@ -687,17 +691,29 @@ private:
         cv::cv2eigen(global_pose_, global_pose_eigen);
         gtsam::Pose3 current_global_pose(global_pose_eigen);
 
-        
         auto prior_noise_pose = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 100.0, 100.0, 100.0, 100.0, 100.0, 100.0).finished());
         graph_.add(gtsam::PriorFactor<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_), current_global_pose, prior_noise_pose));
         initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), current_global_pose);
         
-        
-        gtsam::Vector3 initial_velocity(0.0, 0.0, 0.0);
-        auto prior_noise_vel = gtsam::noiseModel::Isotropic::Sigma(3, 10.0); 
-        graph_.add(gtsam::PriorFactor<gtsam::Vector3>(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity, prior_noise_vel));
-        initial_estimates_.insert(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity);
-        
+        if (use_imu) 
+        {
+            gtsam::Vector3 initial_velocity(0.0, 0.0, 0.0);
+            auto prior_noise_vel = gtsam::noiseModel::Isotropic::Sigma(3, 10.0); 
+            graph_.add(gtsam::PriorFactor<gtsam::Vector3>(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity, prior_noise_vel));
+            initial_estimates_.insert(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity);
+
+            gtsam::imuBias::ConstantBias initial_bias; 
+            auto prior_noise_bias = gtsam::noiseModel::Isotropic::Sigma(6, 1e-1); 
+            graph_.add(gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0), initial_bias, prior_noise_bias));
+            initial_estimates_.insert(gtsam::symbol_shorthand::B(0), initial_bias);
+
+            current_bias_ = initial_bias;
+
+            if (imu_integration_node_) 
+            {
+                imu_integration_node_->getAndResetPreintegratedMeasurements(current_bias_);
+            }
+        }
        
         current_frame.global_pose = current_global_pose; 
         keyframe_database_[keyframe_id_] = current_frame; 
@@ -705,6 +721,17 @@ private:
         msg_copy->header.frame_id = std::to_string(keyframe_id_);
         dino_loop_node_node_->keyframe_callback(msg_copy);
         // mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, current_frame.depth_image, rgb_frame, depth_frame);
+
+        
+        isam2_.update(graph_, initial_estimates_);
+        if (use_imu) 
+        {
+            isam2_.update(); 
+        }
+        optimized_estimates_ = isam2_.calculateEstimate();
+        
+        graph_.resize(0);
+        initial_estimates_.clear();
 
         keyframe_id_++;
         has_keyframe_ = true;
@@ -967,17 +994,22 @@ private:
                         auto visual_noise = gtsam::noiseModel::Gaussian::Covariance(cov_eigen);
 
 
-                        auto preint_imu = imu_integration_node_->getAndResetPreintegratedMeasurements(current_bias_);
+                        
+
+                        if(use_imu)
+                        {
+                            auto preint_imu = imu_integration_node_->getAndResetPreintegratedMeasurements(current_bias_);
 
                        
-                        graph_.add(gtsam::ImuFactor(
-                            gtsam::symbol_shorthand::X(keyframe_id_ - 1), gtsam::symbol_shorthand::V(keyframe_id_ - 1), 
-                            gtsam::symbol_shorthand::X(keyframe_id_),     gtsam::symbol_shorthand::V(keyframe_id_),     
-                            gtsam::symbol_shorthand::B(0),                                                            
-                            *preint_imu
-                        ));
+                            graph_.add(gtsam::ImuFactor(
+                                gtsam::symbol_shorthand::X(keyframe_id_ - 1), gtsam::symbol_shorthand::V(keyframe_id_ - 1), 
+                                gtsam::symbol_shorthand::X(keyframe_id_),     gtsam::symbol_shorthand::V(keyframe_id_),     
+                                gtsam::symbol_shorthand::B(0),                                                            
+                                *preint_imu
+                            ));
+                        }
 
-                        
+
                         graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
                             gtsam::symbol_shorthand::X(keyframe_id_ - 1), 
                             gtsam::symbol_shorthand::X(keyframe_id_), 
@@ -1028,17 +1060,23 @@ private:
                                 if (loop_matches.size() >= 60) 
                                 {
                                     std::vector<cv::Point2f> loop_train_pts, loop_query_pts;
-                                    for (const auto& match : loop_matches) {
+                                    for (const auto& match : loop_matches) 
+                                    {
                                         if (match.trainIdx < 0 || match.trainIdx >= (int)loop_kp2.size() || match.queryIdx < 0 || match.queryIdx >= (int)loop_kp1.size()) continue;
+                                        
                                         loop_train_pts.push_back(loop_kp2[match.trainIdx]); 
                                         loop_query_pts.push_back(loop_kp1[match.queryIdx]); 
                                     }
 
                                     std::vector<cv::Point2f> loop_train_pts_undist, loop_query_pts_undist;
-                                    if (cv::norm(dist_coeffs_) > 0.0001) {
+
+                                    if (cv::norm(dist_coeffs_) > 0.0001) 
+                                    {
                                         cv::undistortPoints(loop_train_pts, loop_train_pts_undist, camera_matrix_, dist_coeffs_, cv::noArray(), camera_matrix_);
                                         cv::undistortPoints(loop_query_pts, loop_query_pts_undist, camera_matrix_, dist_coeffs_, cv::noArray(), camera_matrix_);
-                                    } else {
+                                    } 
+                                    else 
+                                    {
                                         loop_train_pts_undist = loop_train_pts;
                                         loop_query_pts_undist = loop_query_pts;
                                     }
@@ -1121,9 +1159,8 @@ private:
                             auto robust_loop_noise = gtsam::noiseModel::Robust::Create(
                                 gtsam::noiseModel::mEstimator::Huber::Create(1.345), loop_noise);
 
-                            // Aresta de Loop Closure (SÓ VISUAL, ligando o passado ao presente)
                             graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                                gtsam::symbol_shorthand::X(loop_candidate_id), // Liga à pose antiga do mapa!
+                                gtsam::symbol_shorthand::X(loop_candidate_id), 
                                 gtsam::symbol_shorthand::X(keyframe_id_), 
                                 loop_pose_base, 
                                 robust_loop_noise
@@ -1157,8 +1194,10 @@ private:
 
                         gtsam::Pose3 corrected_pose = optimized_estimates_.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_));
 
-                        current_bias_ = optimized_estimates_.at<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0));
-
+                        if(use_imu)
+                        {
+                            current_bias_ = optimized_estimates_.at<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0));
+                        }
                         graph_.resize(0);
                         initial_estimates_.clear();
 
