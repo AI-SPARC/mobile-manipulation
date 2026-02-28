@@ -35,16 +35,20 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/Marginals.h>
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/navigation/ImuBias.h> 
 
 #include "opencv2/opencv.hpp"
 #include "opencv2/features2d.hpp"
 #include "opencv2/calib3d.hpp" 
 #include <opencv2/core/eigen.hpp>
 
-#include <slam_core/DinoLoopNode.hpp>
-#include <slam_core/Mapping.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+
+#include <slam_core/DinoLoopNode.hpp>
+#include <slam_core/Mapping.hpp>
+#include <slam_core/ImuIntegration.hpp>
 
 struct FrameData 
 { 
@@ -61,10 +65,12 @@ class SlamCoreNode : public rclcpp::Node
 public:
     SlamCoreNode(
         std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node,
-        std::shared_ptr<slam_core::Mapping> mapping_node
+        std::shared_ptr<slam_core::Mapping> mapping_node,
+        std::shared_ptr<slam_core::ImuIntegration> imu_integration_node
     ) : Node("slam_core_node") , 
         dino_loop_node_node_(dino_loop_node_node),
-        mapping_node_(mapping_node)
+        mapping_node_(mapping_node),
+        imu_integration_node_(imu_integration_node)
     {
         this->declare_parameter<std::string>("main_frame_id", "base_link");
         main_frame_id_ = this->get_parameter("main_frame_id").as_string();
@@ -144,7 +150,9 @@ private:
 
     std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node_;
     std::shared_ptr<slam_core::Mapping> mapping_node_;
+    std::shared_ptr<slam_core::ImuIntegration> imu_integration_node_;
 
+    
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     bool tf_received_ = false;
@@ -159,6 +167,8 @@ private:
     bool camera_info_received_ = false; 
     gtsam::Pose3 T_base_opt_;
     cv::Mat global_pose_;
+
+    gtsam::imuBias::ConstantBias current_bias_;
 
     gtsam::Pose3 initial_gt_pose_;
     gtsam::Pose3 latest_gt_pose_;
@@ -349,8 +359,9 @@ private:
     {
         try 
         {
-            if (!optimized_estimates_.exists(keyframe_id_ - 1)) return;
-            gtsam::Matrix6 covariance_gtsam = isam2_.marginalCovariance(keyframe_id_ - 1);
+            // CORREÇÃO 1: Usa o Símbolo X na verificação E na extração da covariância
+            if (!optimized_estimates_.exists(gtsam::symbol_shorthand::X(keyframe_id_ - 1))) return;
+            gtsam::Matrix6 covariance_gtsam = isam2_.marginalCovariance(gtsam::symbol_shorthand::X(keyframe_id_ - 1));
             
             nav_msgs::msg::Odometry odom_msg;
             odom_msg.header.stamp = stamp;
@@ -433,6 +444,10 @@ private:
 
             for (const auto& key_value : optimized_estimates_) 
             {
+                // CORREÇÃO 2: Pula as Velocidades (V) e os Biases (B) para não quebrar o cast para Pose3
+                gtsam::Symbol sym(key_value.key);
+                if (sym.chr() != 'x') continue;
+
                 gtsam::Pose3 node_base_pose = key_value.value.cast<gtsam::Pose3>();
 
                 geometry_msgs::msg::Point p;
@@ -447,9 +462,11 @@ private:
                 path_msg.poses.push_back(path_pose);
             }
 
-            for (size_t i = 0; i < graph_.size(); ++i) 
+            const gtsam::NonlinearFactorGraph& isam_graph = isam2_.getFactorsUnsafe();
+
+            for (size_t i = 0; i < isam_graph.size(); ++i) 
             {
-                auto factor = graph_.at(i);
+                auto factor = isam_graph.at(i);
                 auto between_factor = boost::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(factor);
                 
                 if (between_factor) 
@@ -480,7 +497,7 @@ private:
 
             RCLCPP_INFO(this->get_logger(), "--- RELATORIO GTSAM ---");
             RCLCPP_INFO(this->get_logger(), "Nos Totais no Grafo: %d", (int)optimized_estimates_.size());
-            RCLCPP_INFO(this->get_logger(), "Arestas (Fatores) Totais: %d", (int)graph_.size());
+            RCLCPP_INFO(this->get_logger(), "Arestas (Fatores) Totais: %d", (int)isam2_.getFactorsUnsafe().size());
             RCLCPP_INFO(this->get_logger(), "Pose %s [X: %7.3f | Y: %7.3f | Z: %7.3f]", main_frame_id_.c_str(), base_pose.x(), base_pose.y(), base_pose.z());
             RCLCPP_INFO(this->get_logger(), "-----------------------");
         } 
@@ -615,22 +632,42 @@ private:
         global_pose_ = cv::Mat::eye(4, 4, CV_64F);
         last_keyframe_pose_ = cv::Mat::eye(4, 4, CV_64F);
         gtsam::Pose3 initial_pose = gtsam::Pose3();
-        auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6).finished());
         
-        graph_.add(gtsam::PriorFactor<gtsam::Pose3>(keyframe_id_, initial_pose, prior_noise));
-        initial_estimates_.insert(keyframe_id_, initial_pose);
+        
+        auto prior_noise_pose = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6).finished());
+        graph_.add(gtsam::PriorFactor<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose, prior_noise_pose));
+        initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose);
+
+    
+        gtsam::Vector3 initial_velocity(0.0, 0.0, 0.0);
+        auto prior_noise_vel = gtsam::noiseModel::Isotropic::Sigma(3, 0.1); 
+        graph_.add(gtsam::PriorFactor<gtsam::Vector3>(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity, prior_noise_vel));
+        initial_estimates_.insert(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity);
+
+        
+        gtsam::imuBias::ConstantBias initial_bias; 
+        auto prior_noise_bias = gtsam::noiseModel::Isotropic::Sigma(6, 1e-3);
+        graph_.add(gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0), initial_bias, prior_noise_bias));
+        initial_estimates_.insert(gtsam::symbol_shorthand::B(0), initial_bias);
+
+        current_bias_ = initial_bias;
 
         current_frame.global_pose = initial_pose; 
-        
         keyframe_database_[keyframe_id_] = current_frame;
 
         msg_copy->header.frame_id = std::to_string(keyframe_id_);
         dino_loop_node_node_->keyframe_callback(msg_copy);
-        mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, current_frame.depth_image, rgb_frame, depth_frame);
+        // mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, current_frame.depth_image, rgb_frame, depth_frame);
         
         std::vector<std::pair<int, gtsam::Pose3>> optimized_poses_for_mapping;
         optimized_poses_for_mapping.push_back(std::make_pair(0, initial_pose));
         // mapping_node_->update_global_map(optimized_poses_for_mapping);
+
+        isam2_.update(graph_, initial_estimates_);
+        optimized_estimates_ = isam2_.calculateEstimate();
+        
+        graph_.resize(0);
+        initial_estimates_.clear();
 
         keyframe_id_++;
         has_keyframe_ = true;
@@ -650,17 +687,24 @@ private:
         cv::cv2eigen(global_pose_, global_pose_eigen);
         gtsam::Pose3 current_global_pose(global_pose_eigen);
 
-        auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 100.0, 100.0, 100.0, 100.0, 100.0, 100.0).finished());
         
-        graph_.add(gtsam::PriorFactor<gtsam::Pose3>(keyframe_id_, current_global_pose, prior_noise));
-        initial_estimates_.insert(keyframe_id_, current_global_pose);
+        auto prior_noise_pose = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 100.0, 100.0, 100.0, 100.0, 100.0, 100.0).finished());
+        graph_.add(gtsam::PriorFactor<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_), current_global_pose, prior_noise_pose));
+        initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), current_global_pose);
+        
+        
+        gtsam::Vector3 initial_velocity(0.0, 0.0, 0.0);
+        auto prior_noise_vel = gtsam::noiseModel::Isotropic::Sigma(3, 10.0); 
+        graph_.add(gtsam::PriorFactor<gtsam::Vector3>(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity, prior_noise_vel));
+        initial_estimates_.insert(gtsam::symbol_shorthand::V(keyframe_id_), initial_velocity);
+        
+       
         current_frame.global_pose = current_global_pose; 
-        
         keyframe_database_[keyframe_id_] = current_frame; 
 
         msg_copy->header.frame_id = std::to_string(keyframe_id_);
         dino_loop_node_node_->keyframe_callback(msg_copy);
-        mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, current_frame.depth_image, rgb_frame, depth_frame);
+        // mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, current_frame.depth_image, rgb_frame, depth_frame);
 
         keyframe_id_++;
         has_keyframe_ = true;
@@ -765,7 +809,7 @@ private:
         { 
             int iterationsCount = 1000;
             float reprojectionError = 10.0f; 
-            double confidence = 0.95; 
+            double confidence = 0.96; 
             
             cv::Mat empty_dist_coeffs = cv::Mat::zeros(4, 1, CV_64F); 
             
@@ -899,9 +943,7 @@ private:
                     // if (has_gt_) 
                     // {
                     //     gtsam::Pose3 relative_gt = initial_gt_pose_.inverse() * latest_gt_pose_;
-                        
                     
-                        
                     //     double trans_error = (current_global_pose.translation() - relative_gt.translation()).norm();
                     //     double trans_error_pct = (total_gt_distance_ > 0.001) ? (trans_error / total_gt_distance_) * 100.0 : 0.0;
 
@@ -922,16 +964,49 @@ private:
                     if (translation_dist > 0.15 || rotation_dist > 0.1) 
                     {
                         last_keyframe_ = current_frame;
-                        auto noise_model = gtsam::noiseModel::Gaussian::Covariance(cov_eigen);
+                        auto visual_noise = gtsam::noiseModel::Gaussian::Covariance(cov_eigen);
 
+
+                        auto preint_imu = imu_integration_node_->getAndResetPreintegratedMeasurements(current_bias_);
+
+                       
+                        graph_.add(gtsam::ImuFactor(
+                            gtsam::symbol_shorthand::X(keyframe_id_ - 1), gtsam::symbol_shorthand::V(keyframe_id_ - 1), 
+                            gtsam::symbol_shorthand::X(keyframe_id_),     gtsam::symbol_shorthand::V(keyframe_id_),     
+                            gtsam::symbol_shorthand::B(0),                                                            
+                            *preint_imu
+                        ));
+
+                        
                         graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                            keyframe_id_ - 1, keyframe_id_, delta_base, noise_model));
-                            
-                        initial_estimates_.insert(keyframe_id_, current_global_pose);
+                            gtsam::symbol_shorthand::X(keyframe_id_ - 1), 
+                            gtsam::symbol_shorthand::X(keyframe_id_), 
+                            delta_base, 
+                            visual_noise
+                        ));
+
+                        initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), current_global_pose);
+
+
+                        gtsam::Vector3 last_vel(0.0, 0.0, 0.0); 
+                        
+                        if (optimized_estimates_.exists(gtsam::symbol_shorthand::V(keyframe_id_ - 1))) 
+                        {
+                            last_vel = optimized_estimates_.at<gtsam::Vector3>(gtsam::symbol_shorthand::V(keyframe_id_ - 1));
+                        } 
+                        else 
+                        {
+                            RCLCPP_WARN(this->get_logger(), 
+                                "[SALVAMENTO] Velocidade V(%d) nao encontrada na arvore. Usando (0,0,0) para evitar crash.", 
+                                keyframe_id_ - 1);
+                        }
+                        
+                        initial_estimates_.insert(gtsam::symbol_shorthand::V(keyframe_id_), last_vel);
+                        
                         msg_copy->header.frame_id = std::to_string(keyframe_id_);
                         
                         int loop_candidate_id = dino_loop_node_node_->keyframe_callback(msg_copy);
-                        mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, current_frame.depth_image, rgb_frame, depth_frame);
+                        // mapping_node_->add_keyframe_data(keyframe_id_, current_frame.image, current_frame.depth_image, rgb_frame, depth_frame);
                         
                         bool loop_detected = false;
                         Eigen::Matrix4d T_loop_relative = Eigen::Matrix4d::Identity(); 
@@ -1046,12 +1121,26 @@ private:
                             auto robust_loop_noise = gtsam::noiseModel::Robust::Create(
                                 gtsam::noiseModel::mEstimator::Huber::Create(1.345), loop_noise);
 
+                            // Aresta de Loop Closure (SÓ VISUAL, ligando o passado ao presente)
                             graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                                loop_candidate_id, keyframe_id_, loop_pose_base, robust_loop_noise));
+                                gtsam::symbol_shorthand::X(loop_candidate_id), // Liga à pose antiga do mapa!
+                                gtsam::symbol_shorthand::X(keyframe_id_), 
+                                loop_pose_base, 
+                                robust_loop_noise
+                            ));
 
                             std::vector<std::pair<int, gtsam::Pose3>> optimized_poses_for_mapping;
-                            for (const auto& key_value : optimized_estimates_) {
-                                optimized_poses_for_mapping.emplace_back(static_cast<int>(key_value.key), key_value.value.cast<gtsam::Pose3>());
+                            for (const auto& key_value : optimized_estimates_) 
+                            {
+                                gtsam::Symbol sym(key_value.key);
+                                
+                                if (sym.chr() == 'x') 
+                                {
+                                    optimized_poses_for_mapping.emplace_back(
+                                        static_cast<int>(sym.index()), 
+                                        key_value.value.cast<gtsam::Pose3>()
+                                    );
+                                }
                             }
                             // mapping_node_->update_global_map(optimized_poses_for_mapping);
                         }
@@ -1066,10 +1155,13 @@ private:
                         publish_factor_graph(graph_, isam2_.calculateEstimate());
                         optimized_estimates_ = isam2_.calculateEstimate();
 
+                        gtsam::Pose3 corrected_pose = optimized_estimates_.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_));
+
+                        current_bias_ = optimized_estimates_.at<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0));
+
                         graph_.resize(0);
                         initial_estimates_.clear();
 
-                        gtsam::Pose3 corrected_pose = optimized_estimates_.at<gtsam::Pose3>(keyframe_id_);
                         Eigen::Matrix4d corrected_eigen = corrected_pose.matrix();
                         cv::eigen2cv(corrected_eigen, global_pose_);
 
@@ -1141,14 +1233,20 @@ int main(int argc, char * argv[])
     rclcpp::NodeOptions mapping_opts;
     mapping_opts.arguments({"--ros-args", "-r", "__node:=mapping_node", "-p", "use_sim_time:=true"});
 
+    rclcpp::NodeOptions imu_integration_opts;
+    imu_integration_opts.arguments({"--ros-args", "-r", "__node:=imu_integration_node", "-p", "use_sim_time:=true"});
+
     auto dino_loop_node = std::make_shared<slam_core::DinoLoopNode>(dino_opts);
     auto mapping_node = std::make_shared<slam_core::Mapping>(mapping_opts);
-    auto server_node = std::make_shared<SlamCoreNode>(dino_loop_node, mapping_node);
+    auto imu_integration_node = std::make_shared<slam_core::ImuIntegration>(imu_integration_opts);
+
+    auto server_node = std::make_shared<SlamCoreNode>(dino_loop_node, mapping_node, imu_integration_node);
 
     rclcpp::executors::MultiThreadedExecutor executor;
     
     executor.add_node(dino_loop_node);
     executor.add_node(mapping_node);
+    executor.add_node(imu_integration_node);
     executor.add_node(server_node);
     
     executor.spin();
