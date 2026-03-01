@@ -163,6 +163,16 @@ private:
         rclcpp::Time time;
     };
 
+    struct LoopFactorData
+    {
+        int from_id;
+        int to_id;
+        gtsam::Pose3 delta_loop;
+        gtsam::SharedNoiseModel loop_noise;
+    };
+
+    std::vector<LoopFactorData> pending_loop_factors_;
+
 
     bool loop_detected = false;
     bool first_gt_received_ = false;
@@ -987,16 +997,7 @@ private:
                         {
                             keyframe_id_++; 
 
-                            {
-                                std::lock_guard<std::mutex> lock(frame_process_result_mutex);
-                                
-                                frame_process_result[camera_id].delta_base = delta_base;
-                                frame_process_result[camera_id].visual_noise = visual_noise;
-                                frame_process_result[camera_id].estimate = current_global_pose;
-                                frame_process_result[camera_id].target_keyframe_id = keyframe_id_; 
-                                frame_process_result[camera_id].is_new = true;
-                                frame_process_result[camera_id].time = current_stamp;
-                            }
+                           
 
                             msg_copy->header.frame_id = std::to_string(keyframe_id_);
                             int loop_candidate_id;
@@ -1098,7 +1099,8 @@ private:
 
                             if (local_loop_detected) 
                             {
-                                Eigen::Matrix4d relative_loop_eigen = T_loop_relative.inverse(); 
+                                // A CORREÇÃO: Usa a matriz diretamente!
+                                Eigen::Matrix4d relative_loop_eigen = T_loop_relative; 
                                 gtsam::Pose3 loop_pose_opt(relative_loop_eigen);
                                 gtsam::Pose3 loop_pose_base = T_base_opt_ * loop_pose_opt * T_base_opt_.inverse();
 
@@ -1128,14 +1130,26 @@ private:
 
                                 {
                                     std::lock_guard<std::mutex> lock(frame_process_result_mutex);
-                                    graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                                        gtsam::symbol_shorthand::X(loop_candidate_id), 
-                                        gtsam::symbol_shorthand::X(keyframe_id_), 
-                                        loop_pose_base, 
-                                        robust_loop_noise
-                                    ));
+                                    LoopFactorData new_loop;
+                                    new_loop.from_id = loop_candidate_id;
+                                    new_loop.to_id = keyframe_id_;
+                                    new_loop.delta_loop = loop_pose_base;
+                                    new_loop.loop_noise = robust_loop_noise;
+                                    pending_loop_factors_.push_back(new_loop);
+                                    
                                     loop_detected = true;
                                 }
+                            }
+                            
+                            {
+                                std::lock_guard<std::mutex> lock(frame_process_result_mutex);
+                                
+                                frame_process_result[camera_id].delta_base = delta_base;
+                                frame_process_result[camera_id].visual_noise = visual_noise;
+                                frame_process_result[camera_id].estimate = current_global_pose;
+                                frame_process_result[camera_id].target_keyframe_id = keyframe_id_; 
+                                frame_process_result[camera_id].is_new = true;
+                                frame_process_result[camera_id].time = current_stamp;
                             }
 
                             last_keyframe_pose_[camera_id] = global_pose_[camera_id].clone();
@@ -1190,10 +1204,7 @@ private:
 
     void process_gtsam()
     {
-        if (!has_keyframe_ || keyframe_id_ == 0) 
-        {
-            return; 
-        }
+        if (!has_keyframe_ || keyframe_id_ == 0) return; 
 
         std::lock_guard<std::mutex> lock(frame_process_result_mutex);
 
@@ -1221,9 +1232,12 @@ private:
                     frame_process_result[i].visual_noise
                 ));
 
-                if(loop_detected == false && i == 0)
+                if(i == 0) 
                 {
-                    initial_estimates_.insert(gtsam::symbol_shorthand::X(kf_id), frame_process_result[i].estimate);
+                    if (!initial_estimates_.exists(gtsam::symbol_shorthand::X(kf_id))) 
+                    {
+                        initial_estimates_.insert(gtsam::symbol_shorthand::X(kf_id), frame_process_result[i].estimate);
+                    }
                 }
                 
                 RCLCPP_INFO(this->get_logger(), "Toma: %d: %.3f s", i, frame_process_result[i].time.seconds());
@@ -1231,6 +1245,21 @@ private:
                 frame_process_result[i].is_new = false; 
                 has_new_factors = true;
             }
+        }
+
+        if (!pending_loop_factors_.empty()) 
+        {
+            for (const auto& loop_factor : pending_loop_factors_) 
+            {
+                graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
+                    gtsam::symbol_shorthand::X(loop_factor.from_id), 
+                    gtsam::symbol_shorthand::X(loop_factor.to_id), 
+                    loop_factor.delta_loop, 
+                    loop_factor.loop_noise
+                ));
+            }
+            pending_loop_factors_.clear(); 
+            has_new_factors = true;
         }
 
         if(has_new_factors)
@@ -1265,13 +1294,6 @@ private:
                 publish_gtsam_data(corrected_pose, last_processed_time_);
             }
         }
-
-        if(loop_detected) 
-        {
-            loop_detected = false;
-        }
-            
-        tracking_success = false;
     }
 
 };
