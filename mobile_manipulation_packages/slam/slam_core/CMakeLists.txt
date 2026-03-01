@@ -37,6 +37,7 @@ add_library(dino_loop_component SHARED
   src/dino_loop_node.cpp
   src/mapping.cpp
   src/imu_integration.cpp
+  src/camera_integration.cpp
 )
 
 target_include_directories(dino_loop_component PUBLIC
