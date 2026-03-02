@@ -395,11 +395,14 @@ private:
         {
             int hypothetical_from_id = 0; 
 
+            auto robust_loop_noise = gtsam::noiseModel::Robust::Create(
+                gtsam::noiseModel::mEstimator::Huber::Create(1.345), result.visual_noise);
+
             state.graph.add(gtsam::BetweenFactor<gtsam::Pose3>(
                 gtsam::symbol_shorthand::X(hypothetical_from_id), 
                 gtsam::symbol_shorthand::X(state.keyframe_id), 
                 result.delta_base,
-                result.visual_noise
+                robust_loop_noise 
             ));
             
             RCLCPP_INFO(this->get_logger(), "[Robo %d] Loop Closure recebido e adicionado ao Grafo!", robot_id);

@@ -3,6 +3,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     
+    num_robots = 1
     
     robots_config = {
         'robot_0': 1,  
@@ -50,6 +51,7 @@ def generate_launch_description():
             'use_sim_time': True,
             'main_frame_id': 'base_link', 
             'use_imu': True,
+            'num_robots': num_robots,
             'num_cameras': num_cameras, 
             'robot_namespace': robot_ns, 
             'use_ground_truth': True     
