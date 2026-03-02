@@ -29,6 +29,7 @@ find_package(GTSAM REQUIRED)
 find_package(faiss REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(slam_interfaces REQUIRED)
 
 
 set(ONNXRUNTIME_DIR "/home/momesso/onnxruntime-linux-x64-1.18.0")
@@ -97,6 +98,7 @@ ament_target_dependencies(slam_core
   rtabmap_msgs
   cv_bridge
   visualization_msgs
+  slam_interfaces
 )
 
 target_link_libraries(slam_core
@@ -133,12 +135,48 @@ ament_target_dependencies(add_noise
   cv_bridge
   OpenCV
 )
+
 target_link_libraries(add_noise ${GLEW_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp Eigen3::Eigen)
+
+
+add_executable(gtsam_and_loop_closure src/gtsam_and_loop_closure.cpp)
+ament_target_dependencies(gtsam_and_loop_closure 
+  trajectory_msgs 
+  rclcpp 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  tf2_ros 
+  PCL
+  vision_msgs
+  std_msgs
+  Eigen3
+  cv_bridge
+  OpenCV
+  slam_interfaces
+  GTSAM
+)
+
+target_link_libraries(
+  gtsam_and_loop_closure 
+  ${GLEW_LIBRARIES} 
+  ${PCL_LIBRARIES} 
+  ${OpenCV_LIBS} 
+  gtsam 
+  yaml-cpp 
+  Eigen3::Eigen
+)
+
 
 
 install(TARGETS 
   slam_core
   add_noise
+  gtsam_and_loop_closure
   DESTINATION lib/${PROJECT_NAME}
 )
 

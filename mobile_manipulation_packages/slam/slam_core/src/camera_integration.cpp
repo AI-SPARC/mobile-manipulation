@@ -70,7 +70,9 @@ bool CameraIntegration::get_latest_frame(int cam_id, CameraData& out_data)
     std::lock_guard<std::mutex> lock(sync_mutex_);
     
     auto& buffer = camera_buffers_[cam_id];
-    if (buffer.empty()) {
+    if (buffer.empty()) 
+    {
+
         return false;
     }
 

@@ -12,7 +12,6 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
-#include <gtsam/nonlinear/ISAM2.h>
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/camera_info.hpp" 
@@ -41,6 +40,7 @@
 #include <gtsam/nonlinear/Marginals.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/navigation/ImuBias.h> 
+#include <gtsam/nonlinear/ISAM2.h>
 
 #include "opencv2/opencv.hpp"
 #include "opencv2/features2d.hpp"
@@ -49,6 +49,8 @@
 
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+
+#include "slam_interfaces/msg/gtsam_data.hpp"
 
 #include <slam_core/DinoLoopNode.hpp>
 #include <slam_core/Mapping.hpp>
@@ -63,8 +65,9 @@ public:
         std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node,
         std::shared_ptr<slam_core::Mapping> mapping_node,
         std::shared_ptr<slam_core::ImuIntegration> imu_integration_node,
-        std::shared_ptr<slam_core::CameraIntegration> camera_integration_node
-    ) : Node("slam_core_node") , 
+        std::shared_ptr<slam_core::CameraIntegration> camera_integration_node,
+        const rclcpp::NodeOptions & options = rclcpp::NodeOptions()
+    ) : Node("slam_core_node", options) , 
         dino_loop_node_node_(dino_loop_node_node),
         mapping_node_(mapping_node),
         imu_integration_node_(imu_integration_node),
@@ -72,13 +75,16 @@ public:
     {
         this->declare_parameter<std::string>("main_frame_id", "base_link");
         this->declare_parameter<bool>("use_imu", false);
-        this->declare_parameter("num_cameras", 1);
+        this->declare_parameter<int>("num_cameras", 1);
+        
+        this->declare_parameter<std::string>("robot_namespace", "robot_0"); 
 
         main_frame_id_ = this->get_parameter("main_frame_id").as_string();
         use_imu = this->get_parameter("use_imu").as_bool();
-        
-
         num_cameras_ = this->get_parameter("num_cameras").as_int();
+
+        std::string robot_ns = this->get_parameter("robot_namespace").as_string();
+        std::string ns_prefix = "/" + robot_ns;
 
         {
             std::lock_guard<std::mutex> lock(frame_process_result_mutex);
@@ -97,29 +103,41 @@ public:
             threads_.emplace_back(&SlamCoreNode::execute_visual_process, this, i);
         }
 
-        
-       
         rclcpp::QoS sensor_qos = rclcpp::SensorDataQoS();
         rclcpp::QoS default_qos(10);                     
        
+       
         gt_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/ground_truth", default_qos, std::bind(&SlamCoreNode::ground_truth_callback, this, std::placeholders::_1));
+            ns_prefix + "/ground_truth", default_qos, std::bind(&SlamCoreNode::ground_truth_callback, this, std::placeholders::_1));
         
-        current_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/flann/current_image", sensor_qos);
-        odometry_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/flann/odometry_matches", sensor_qos);
+        current_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
+            ns_prefix + "/flann/current_image", sensor_qos);
+            
+        odometry_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
+            ns_prefix + "/flann/odometry_matches", sensor_qos);
         
-        graph_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("~/factor_graph", default_qos);
-        odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/slam/odom", default_qos);
-        graph_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/slam/graph_markers", default_qos);
-        path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/slam/trajectory_path", default_qos);
+        graph_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            ns_prefix + "/slam/factor_graph", default_qos);
+            
+        odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(
+            ns_prefix + "/slam/odom", default_qos);
+            
+        graph_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            ns_prefix + "/slam/graph_markers", default_qos);
+            
+        path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
+            ns_prefix + "/slam/trajectory_path", default_qos);
 
+        factor_pub_ = this->create_publisher<slam_interfaces::msg::GtsamData>(
+            ns_prefix + "/slam/camera_factors", 10);
+        
+       
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
         orb_ = cv::ORB::create(1000);
         local_matcher_ = cv::BFMatcher::create(cv::NORM_HAMMING);
 
-        
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
 
         last_processed_time_ = this->now();
@@ -129,7 +147,7 @@ public:
             std::bind(&SlamCoreNode::process_gtsam, this)
         );
 
-        RCLCPP_INFO(this->get_logger(), "--- NO DE ODOMETRIA VISUAL E GTSAM INICIADO ---");
+        RCLCPP_INFO(this->get_logger(), "--- NO DE ODOMETRIA VISUAL INICIADO PARA O ROBO: %s ---", robot_ns.c_str());
     }
 
     ~SlamCoreNode() {
@@ -228,6 +246,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr odometry_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_markers_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_pub_;
+    rclcpp::Publisher<slam_interfaces::msg::GtsamData>::SharedPtr factor_pub_;
 
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr gt_sub_;
@@ -354,8 +373,6 @@ private:
         has_gt_ = true;
     }
 
-   
-
     float get_robust_depth(const cv::Mat& depth_img, float x_f, float y_f) 
     {
         int x = std::round(x_f);
@@ -396,158 +413,7 @@ private:
         return center_depth;
     }
 
-    void publish_gtsam_data(const gtsam::Pose3& optimized_pose, const rclcpp::Time& stamp)
-    {
-        try 
-        {
-            if (!optimized_estimates_.exists(gtsam::symbol_shorthand::X(keyframe_id_ - 1))) return;
-            gtsam::Matrix6 covariance_gtsam = isam2_.marginalCovariance(gtsam::symbol_shorthand::X(keyframe_id_ - 1));
-            
-            nav_msgs::msg::Odometry odom_msg;
-            odom_msg.header.stamp = stamp;
-            odom_msg.header.frame_id = "odom";        
-            odom_msg.child_frame_id = main_frame_id_;    
-
-            gtsam::Pose3 base_pose = optimized_pose;
-            
-            odom_msg.pose.pose.position.x = base_pose.x();
-            odom_msg.pose.pose.position.y = base_pose.y();
-            odom_msg.pose.pose.position.z = base_pose.z();
-            
-            Eigen::Quaterniond q(base_pose.rotation().matrix());
-            odom_msg.pose.pose.orientation.x = q.x();
-            odom_msg.pose.pose.orientation.y = q.y();
-            odom_msg.pose.pose.orientation.z = q.z();
-            odom_msg.pose.pose.orientation.w = q.w();
-            
-            geometry_msgs::msg::TransformStamped t;
-            t.header.stamp = stamp;
-            t.header.frame_id = "odom";
-            t.child_frame_id = main_frame_id_;
-            t.transform.translation.x = base_pose.x();
-            t.transform.translation.y = base_pose.y();
-            t.transform.translation.z = base_pose.z();
-            t.transform.rotation.x = q.x();
-            t.transform.rotation.y = q.y();
-            t.transform.rotation.z = q.z();
-            t.transform.rotation.w = q.w();
-
-            if (tf_broadcaster_) {
-                tf_broadcaster_->sendTransform(t);
-            }
-           
-            for (int i = 0; i < 3; ++i) 
-            {
-                for (int j = 0; j < 3; ++j) 
-                {
-                    odom_msg.pose.covariance[i * 6 + j] = covariance_gtsam(i + 3, j + 3);
-                    odom_msg.pose.covariance[(i + 3) * 6 + (j + 3)] = covariance_gtsam(i, j);
-                    odom_msg.pose.covariance[i * 6 + (j + 3)] = covariance_gtsam(i + 3, j);
-                    odom_msg.pose.covariance[(i + 3) * 6 + j] = covariance_gtsam(i, j + 3);
-                }
-            }
-
-            odom_pub_->publish(odom_msg);
-
-            visualization_msgs::msg::MarkerArray marker_array;
-            nav_msgs::msg::Path path_msg;
-            path_msg.header.stamp = stamp;
-            path_msg.header.frame_id = "odom"; 
-
-            visualization_msgs::msg::Marker nodes_marker;
-            nodes_marker.header.frame_id = "odom"; 
-            nodes_marker.header.stamp = stamp;
-            nodes_marker.ns = "gtsam_nodes";
-            nodes_marker.id = 0;
-            nodes_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
-            nodes_marker.action = visualization_msgs::msg::Marker::ADD;
-            nodes_marker.scale.x = 0.05;
-            nodes_marker.scale.y = 0.05;
-            nodes_marker.scale.z = 0.05;
-            nodes_marker.color.a = 1.0;
-            nodes_marker.color.r = 0.0;
-            nodes_marker.color.g = 1.0;
-            nodes_marker.color.b = 0.0;
-
-            visualization_msgs::msg::Marker edges_marker;
-            edges_marker.header.frame_id = "odom"; 
-            edges_marker.header.stamp = stamp;
-            edges_marker.ns = "gtsam_edges";
-            edges_marker.id = 1;
-            edges_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
-            edges_marker.action = visualization_msgs::msg::Marker::ADD;
-            edges_marker.scale.x = 0.02;
-            edges_marker.color.a = 1.0;
-            edges_marker.color.r = 1.0;
-            edges_marker.color.g = 0.0;
-            edges_marker.color.b = 0.0;
-
-            for (const auto& key_value : optimized_estimates_) 
-            {
-                // CORREÇÃO 2: Pula as Velocidades (V) e os Biases (B) para não quebrar o cast para Pose3
-                gtsam::Symbol sym(key_value.key);
-                if (sym.chr() != 'x') continue;
-
-                gtsam::Pose3 node_base_pose = key_value.value.cast<gtsam::Pose3>();
-
-                geometry_msgs::msg::Point p;
-                p.x = node_base_pose.x();
-                p.y = node_base_pose.y();
-                p.z = node_base_pose.z();
-                nodes_marker.points.push_back(p);
-
-                geometry_msgs::msg::PoseStamped path_pose;
-                path_pose.header.frame_id = "odom"; 
-                path_pose.pose.position = p;
-                path_msg.poses.push_back(path_pose);
-            }
-
-            const gtsam::NonlinearFactorGraph& isam_graph = isam2_.getFactorsUnsafe();
-
-            for (size_t i = 0; i < isam_graph.size(); ++i) 
-            {
-                auto factor = isam_graph.at(i);
-                auto between_factor = boost::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(factor);
-                
-                if (between_factor) 
-                {
-                    gtsam::Key key1 = between_factor->front();
-                    gtsam::Key key2 = between_factor->back();
-
-                    if (optimized_estimates_.exists(key1) && optimized_estimates_.exists(key2)) 
-                    {
-                        gtsam::Pose3 pose1_base = optimized_estimates_.at<gtsam::Pose3>(key1);
-                        gtsam::Pose3 pose2_base = optimized_estimates_.at<gtsam::Pose3>(key2);
-
-                        geometry_msgs::msg::Point p1, p2;
-                        p1.x = pose1_base.x(); p1.y = pose1_base.y(); p1.z = pose1_base.z();
-                        p2.x = pose2_base.x(); p2.y = pose2_base.y(); p2.z = pose2_base.z();
-                        
-                        edges_marker.points.push_back(p1);
-                        edges_marker.points.push_back(p2);
-                    }
-                }
-            }
-
-            marker_array.markers.push_back(nodes_marker);
-            marker_array.markers.push_back(edges_marker);
-
-            graph_markers_pub_->publish(marker_array);
-            path_pub_->publish(path_msg);
-
-            RCLCPP_INFO(this->get_logger(), "--- RELATORIO GTSAM ---");
-            RCLCPP_INFO(this->get_logger(), "Nos Totais no Grafo: %d", (int)optimized_estimates_.size());
-            RCLCPP_INFO(this->get_logger(), "Arestas (Fatores) Totais: %d", (int)isam2_.getFactorsUnsafe().size());
-            RCLCPP_INFO(this->get_logger(), "Pose %s [X: %7.3f | Y: %7.3f | Z: %7.3f]", main_frame_id_.c_str(), base_pose.x(), base_pose.y(), base_pose.z());
-            RCLCPP_INFO(this->get_logger(), "-----------------------");
-        } 
-        catch (const gtsam::IndeterminantLinearSystemException& e) {
-            RCLCPP_WARN(this->get_logger(), "GTSAM IndeterminantLinearSystemException: Grafo instavel no momento.");
-        }
-        catch (const std::exception& e) {
-            RCLCPP_WARN(this->get_logger(), "Erro na publicacao dos dados do GTSAM: %s", e.what());
-        }
-    }
+    
 
     bool solveWeightedKabsch(const std::vector<Eigen::Vector3d>& pts_source, 
                          const std::vector<Eigen::Vector3d>& pts_target, 
@@ -622,6 +488,7 @@ private:
                 if (camera_id == 0) 
                 {
                     found = camera_integration_node_->get_latest_frame(camera_id, cam_data);
+                    
                 } 
                 else 
                 {
@@ -653,6 +520,7 @@ private:
                 }
                 continue; 
             }
+            
 
           
             auto current_time = this->now();
@@ -662,14 +530,15 @@ private:
             current_frame.id = frame_count_;
             current_frame.rgb_frame = cam_data.rgb->header.frame_id;
             current_frame.depth_frame = cam_data.depth->header.frame_id;
-
-            try {
+            try 
+            {
                 current_frame.image = cv_bridge::toCvCopy(cam_data.rgb, sensor_msgs::image_encodings::BGR8)->image.clone();
                 current_frame.depth_image = cv_bridge::toCvCopy(cam_data.depth, cam_data.depth->encoding)->image.clone();
-            } catch (cv_bridge::Exception& e) {
+            } 
+            catch (cv_bridge::Exception& e) 
+            {
                 continue; 
-            }
-
+            }   
             if (camera_info_received_.find(camera_id) == camera_info_received_.end() || !camera_info_received_[camera_id]) 
             {
                 auto info_msg = cam_data.info; 
@@ -677,10 +546,13 @@ private:
                 double fy = info_msg->k[4]; double cy = info_msg->k[5];
                 camera_matrix_[camera_id] = (cv::Mat_<double>(3, 3) << fx, 0, cx, 0, fy, cy, 0, 0, 1);
                 
-                if (!info_msg->d.empty()) {
+                if (!info_msg->d.empty()) 
+                {
                     dist_coeffs_[camera_id] = cv::Mat(info_msg->d.size(), 1, CV_64F);
                     for (size_t i = 0; i < info_msg->d.size(); ++i) dist_coeffs_[camera_id].at<double>(i) = info_msg->d[i];
-                } else {
+                } 
+                else 
+                {
                     dist_coeffs_[camera_id] = cv::Mat::zeros(4, 1, CV_64F);
                 }
                 
@@ -690,13 +562,16 @@ private:
 
             auto msg_copy = std::make_shared<sensor_msgs::msg::Image>(*cam_data.rgb);
 
-            // TF CHECK
             if (!tf_received_) 
             {
-                if (main_frame_id_ == current_frame.rgb_frame) {
+                if (main_frame_id_ == current_frame.rgb_frame) 
+                {
                     T_base_opt_ = gtsam::Pose3(); tf_received_ = true;
-                } else {
-                    try {
+                } 
+                else 
+                {
+                    try 
+                    {
                         geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_->lookupTransform(
                             main_frame_id_, current_frame.rgb_frame, tf2::TimePointZero);
                         Eigen::Quaterniond q(transform_stamped.transform.rotation.w, transform_stamped.transform.rotation.x,
@@ -705,9 +580,15 @@ private:
                                         transform_stamped.transform.translation.z);
                         T_base_opt_ = gtsam::Pose3(gtsam::Rot3(q.toRotationMatrix()), gtsam::Point3(t));
                         tf_received_ = true;
-                    } catch (...) { continue; }
+                    } 
+                    catch (const tf2::TransformException & ex) 
+                    { 
+                        RCLCPP_WARN(this->get_logger(), "[Cam %d] Falha no TF: %s", camera_id, ex.what());
+                        continue; 
+                    }
                 }
             }
+           
 
             
             if (last_keyframe_.find(camera_id) == last_keyframe_.end()) 
@@ -719,12 +600,14 @@ private:
                 if (camera_id == 0) 
                 {
                     keyframe_id_ = 0; 
-                    gtsam::Pose3 initial_pose = gtsam::Pose3();
-                    auto prior_noise_pose = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6).finished());
-                    graph_.add(gtsam::PriorFactor<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose, prior_noise_pose));
-                    initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose);
+
+                    // gtsam::Pose3 initial_pose = gtsam::Pose3();
+                    // auto prior_noise_pose = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6).finished());
+                    // graph_.add(gtsam::PriorFactor<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose, prior_noise_pose));
+                    // initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose);
 
                     msg_copy->header.frame_id = std::to_string(keyframe_id_);
+
                     {
                         std::lock_guard<std::mutex> lock_compute(compute_mutex);
                         dino_loop_node_node_->keyframe_callback(msg_copy);
@@ -781,6 +664,8 @@ private:
                     cv::circle(debug_image, pt_keyframe, 3, cv::Scalar(0, 0, 255), -1); 
                 }
             }
+
+            
             std_msgs::msg::Header match_header;
             match_header.stamp = current_time; 
             match_header.frame_id = current_frame.rgb_frame; 
@@ -1208,9 +1093,6 @@ private:
 
         std::lock_guard<std::mutex> lock(frame_process_result_mutex);
 
-        bool has_new_factors = false;
-        int latest_kf_id_processed = -1; 
-
         for(int i = 0; i < frame_process_result.size(); i++)
         {
             if (frame_process_result[i].is_new) 
@@ -1223,75 +1105,52 @@ private:
                     continue; 
                 }
 
-                latest_kf_id_processed = std::max(latest_kf_id_processed, kf_id); 
+                slam_interfaces::msg::GtsamData msg;
+                msg.keyframe = kf_id;
 
-                graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                    gtsam::symbol_shorthand::X(kf_id - 1), 
-                    gtsam::symbol_shorthand::X(kf_id), 
-                    frame_process_result[i].delta_base, 
-                    frame_process_result[i].visual_noise
-                ));
+                gtsam::Point3 t = frame_process_result[i].delta_base.translation();
+                gtsam::Quaternion q = frame_process_result[i].delta_base.rotation().toQuaternion();
 
-                if(i == 0) 
+                msg.delta_base.pose.position.x = t.x();
+                msg.delta_base.pose.position.y = t.y();
+                msg.delta_base.pose.position.z = t.z();
+                msg.delta_base.pose.orientation.x = q.x();
+                msg.delta_base.pose.orientation.y = q.y();
+                msg.delta_base.pose.orientation.z = q.z();
+                msg.delta_base.pose.orientation.w = q.w();
+
+                auto gaussian_noise = boost::dynamic_pointer_cast<gtsam::noiseModel::Gaussian>(frame_process_result[i].visual_noise);
+                if (gaussian_noise) 
                 {
-                    if (!initial_estimates_.exists(gtsam::symbol_shorthand::X(kf_id))) 
+                    Eigen::MatrixXd cov_matrix = gaussian_noise->covariance();
+                    for (int r = 0; r < 6; ++r) 
                     {
-                        initial_estimates_.insert(gtsam::symbol_shorthand::X(kf_id), frame_process_result[i].estimate);
+                        for (int c = 0; c < 6; ++c) 
+                        {
+                            msg.delta_base.covariance[r * 6 + c] = cov_matrix(r, c);
+                        }
                     }
                 }
-                
-                RCLCPP_INFO(this->get_logger(), "Toma: %d: %.3f s", i, frame_process_result[i].time.seconds());
 
-                frame_process_result[i].is_new = false; 
-                has_new_factors = true;
-            }
-        }
+                gtsam::Point3 est_t = frame_process_result[i].estimate.translation();
+                gtsam::Quaternion est_q = frame_process_result[i].estimate.rotation().toQuaternion();
 
-        if (!pending_loop_factors_.empty()) 
-        {
-            for (const auto& loop_factor : pending_loop_factors_) 
-            {
-                graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                    gtsam::symbol_shorthand::X(loop_factor.from_id), 
-                    gtsam::symbol_shorthand::X(loop_factor.to_id), 
-                    loop_factor.delta_loop, 
-                    loop_factor.loop_noise
-                ));
-            }
-            pending_loop_factors_.clear(); 
-            has_new_factors = true;
-        }
+                msg.estimate.position.x = est_t.x();
+                msg.estimate.position.y = est_t.y();
+                msg.estimate.position.z = est_t.z();
+                msg.estimate.orientation.x = est_q.x();
+                msg.estimate.orientation.y = est_q.y();
+                msg.estimate.orientation.z = est_q.z();
+                msg.estimate.orientation.w = est_q.w();
 
-        if(has_new_factors)
-        {
-            isam2_.update(graph_, initial_estimates_);
-            publish_factor_graph(graph_, isam2_.calculateEstimate());
-            optimized_estimates_ = isam2_.calculateEstimate();
-            
-            graph_.resize(0);
-            initial_estimates_.clear();
-
-            if (latest_kf_id_processed != -1 && optimized_estimates_.exists(gtsam::symbol_shorthand::X(latest_kf_id_processed))) 
-            {
-                gtsam::Pose3 corrected_pose = optimized_estimates_.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(latest_kf_id_processed));
-
-                if (has_gt_) 
-                {
-                    gtsam::Pose3 relative_gt = initial_gt_pose_.inverse() * latest_gt_pose_;
-                    
-                    double trans_error = (corrected_pose.translation() - relative_gt.translation()).norm();
-                    double trans_error_pct = (total_gt_distance_ > 0.001) ? (trans_error / total_gt_distance_) * 100.0 : 0.0;
-
-                    gtsam::Rot3 rot_diff = corrected_pose.rotation().between(relative_gt.rotation());
-                    double rot_error_rad = gtsam::Rot3::Logmap(rot_diff).norm();
-                    double rot_error_deg = rot_error_rad * (180.0 / M_PI);
-                    
-                    RCLCPP_INFO(this->get_logger(), "--- COMPARACAO GROUND TRUTH (KF %d) ---", latest_kf_id_processed);
-                    RCLCPP_INFO(this->get_logger(), "Erro Absoluto Translacao        : %.4f m (%.2f%%)", trans_error, trans_error_pct);
-                    RCLCPP_INFO(this->get_logger(), "Erro Absoluto Rotacao           : %.2f°", rot_error_deg);
+                if (factor_pub_)
+                 {
+                    factor_pub_->publish(msg);
                 }
 
-                publish_gtsam_data(corrected_pose, last_processed_time_);
+                RCLCPP_INFO(this->get_logger(), "[Pub] Fator enviado: Camera %d -> KF %d", i, kf_id);
+
+                frame_process_result[i].is_new = false; 
             }
         }
     }
@@ -1302,25 +1161,60 @@ int main(int argc, char * argv[])
 {
     rclcpp::init(argc, argv);
 
+    rclcpp::NodeOptions global_options;
+
+    std::string current_robot_ns = "robot_0";
+    int current_num_cameras = 1;
+
+    
+    {
+        auto temp_node = std::make_shared<rclcpp::Node>("slam_core", global_options);
+        current_robot_ns = temp_node->declare_parameter<std::string>("robot_namespace", "robot_0");
+        current_num_cameras = temp_node->declare_parameter<int>("num_cameras", 1);
+    } 
+
+  
     rclcpp::NodeOptions dino_opts;
     dino_opts.arguments({"--ros-args", "-r", "__node:=dino_loop_node", "-p", "use_sim_time:=true"});
+    dino_opts.parameter_overrides({
+        {"robot_namespace", current_robot_ns}
+    });
 
     rclcpp::NodeOptions mapping_opts;
     mapping_opts.arguments({"--ros-args", "-r", "__node:=mapping_node", "-p", "use_sim_time:=true"});
+    mapping_opts.parameter_overrides({
+        {"robot_namespace", current_robot_ns}
+    });
 
-    rclcpp::NodeOptions imu_integration_opts;
-    imu_integration_opts.arguments({"--ros-args", "-r", "__node:=imu_integration_node", "-p", "use_sim_time:=true"});
+    rclcpp::NodeOptions imu_opts;
+    imu_opts.arguments({"--ros-args", "-r", "__node:=imu_integration_node", "-p", "use_sim_time:=true"});
+    imu_opts.parameter_overrides({
+        {"robot_namespace", current_robot_ns}
+    });
 
-    rclcpp::NodeOptions camera_integration_opts;
-    camera_integration_opts.arguments({"--ros-args", "-r", "__node:=camera_integration_node", "-p", "use_sim_time:=true"});
+    rclcpp::NodeOptions camera_opts;
+    camera_opts.arguments({"--ros-args", "-r", "__node:=camera_integration_node", "-p", "use_sim_time:=true"});
+    camera_opts.parameter_overrides({
+        {"robot_namespace", current_robot_ns},
+        {"num_cameras", current_num_cameras}
+    });
 
+    
     auto dino_loop_node = std::make_shared<slam_core::DinoLoopNode>(dino_opts);
     auto mapping_node = std::make_shared<slam_core::Mapping>(mapping_opts);
-    auto imu_integration_node = std::make_shared<slam_core::ImuIntegration>(imu_integration_opts);
-    auto camera_integration_node = std::make_shared<slam_core::CameraIntegration>(camera_integration_opts);
+    auto imu_integration_node = std::make_shared<slam_core::ImuIntegration>(imu_opts);
+    auto camera_integration_node = std::make_shared<slam_core::CameraIntegration>(camera_opts);
 
-    auto server_node = std::make_shared<SlamCoreNode>(dino_loop_node, mapping_node, imu_integration_node, camera_integration_node);
+ 
+    auto server_node = std::make_shared<SlamCoreNode>(
+        dino_loop_node, 
+        mapping_node, 
+        imu_integration_node, 
+        camera_integration_node,
+        global_options 
+    );
 
+  
     rclcpp::executors::MultiThreadedExecutor executor;
     
     executor.add_node(dino_loop_node);
