@@ -9,10 +9,12 @@ CameraIntegration::CameraIntegration(const rclcpp::NodeOptions & options)
 {
     num_cameras_ = this->declare_parameter("num_cameras", 1);
     sync_timeout_sec_ = this->declare_parameter("sync_timeout_sec", 0.05); 
+    
+    std::string robot_ns = this->declare_parameter<std::string>("robot_namespace", "robot_0");
 
     camera_buffers_.resize(num_cameras_);
 
-    RCLCPP_INFO(this->get_logger(), "Iniciando agregador otimizado para %d camera(s).", num_cameras_);
+    RCLCPP_INFO(this->get_logger(), "[%s] Iniciando agregador otimizado para %d camera(s).", robot_ns.c_str(), num_cameras_);
 
     for (int i = 0; i < num_cameras_; i++) 
     {
@@ -22,7 +24,7 @@ CameraIntegration::CameraIntegration(const rclcpp::NodeOptions & options)
         rclcpp::SubscriptionOptions sub_opt;
         sub_opt.callback_group = cam.cb_group;
 
-        std::string ns = "/camera_" + std::to_string(i);
+        std::string ns = "/" + robot_ns + "/camera_" + std::to_string(i);
 
         cam.rgb_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
             this, ns + "/rgb/image_raw", rmw_qos_profile_sensor_data, sub_opt);
