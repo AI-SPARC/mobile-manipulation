@@ -10,6 +10,8 @@ namespace slam_core
 ImuIntegration::ImuIntegration(const rclcpp::NodeOptions & options)
 : Node("imu_integration", options), last_imu_time_(-1.0), is_first_imu_(true)
 {
+    std::string robot_ns = this->declare_parameter<std::string>("robot_namespace", "robot_0");
+
     imu_params_ = gtsam::PreintegrationParams::MakeSharedU(9.81);
     
     double gyro_noise = 1e-5;
@@ -25,10 +27,13 @@ ImuIntegration::ImuIntegration(const rclcpp::NodeOptions & options)
     
     imu_integrator_ = boost::make_shared<gtsam::PreintegratedImuMeasurements>(imu_params_, prior_bias);
 
-    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-        "/chassis/imu", 200, std::bind(&ImuIntegration::imu_callback, this, std::placeholders::_1));
+    std::string imu_topic = "/" + robot_ns + "/chassis/imu";
 
-    RCLCPP_INFO(this->get_logger(), "No de Pre-Integracao da IMU (GTSAM) Iniciado!");
+    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+        imu_topic, 200, std::bind(&ImuIntegration::imu_callback, this, std::placeholders::_1));
+
+    RCLCPP_INFO(this->get_logger(), "[%s] No de Pre-Integracao da IMU (GTSAM) Iniciado! Escutando: %s", 
+                robot_ns.c_str(), imu_topic.c_str());
 }
 
 ImuIntegration::~ImuIntegration() {}
@@ -64,13 +69,11 @@ void ImuIntegration::imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
     imu_integrator_->integrateMeasurement(measured_acc, measured_omega, dt);
 }
 
-// ATENÇÃO: Retorna boost::shared_ptr
 boost::shared_ptr<gtsam::PreintegratedImuMeasurements> 
 ImuIntegration::getAndResetPreintegratedMeasurements(const gtsam::imuBias::ConstantBias& current_bias)
 {
     std::lock_guard<std::mutex> lock(imu_mutex_);
 
-    // ATENÇÃO: Copiando com boost::make_shared
     auto preint_measurements_copy = boost::make_shared<gtsam::PreintegratedImuMeasurements>(*imu_integrator_);
     
     imu_integrator_->resetIntegrationAndSetBias(current_bias);

@@ -15,10 +15,13 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("map_publish_rate", 1.0);
     map_publish_rate_ = this->get_parameter("map_publish_rate").as_double();
 
+    std::string robot_ns = this->declare_parameter<std::string>("robot_namespace", "robot_0");
+
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-    global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("~/global_map", 1);
+    std::string map_topic = "/" + robot_ns + "/slam/global_map";
+    global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(map_topic, 1);
     
     double timer_period_sec = 1.0 / map_publish_rate_;
     map_publish_timer_ = this->create_wall_timer(
@@ -28,8 +31,10 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
     geometry_msgs::msg::TransformStamped static_transformStamped;
     static_transformStamped.header.stamp = this->now();
-    static_transformStamped.header.frame_id = "map";
-    static_transformStamped.child_frame_id = "odom"; 
+    
+  
+    static_transformStamped.header.frame_id = robot_ns + "/map";
+    static_transformStamped.child_frame_id = robot_ns + "/odom"; 
     
     static_transformStamped.transform.translation.x = 0.0;
     static_transformStamped.transform.translation.y = 0.0;
@@ -42,7 +47,8 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
     static_tf_broadcaster_->sendTransform(static_transformStamped);
     voxel_occupancy_set_.reserve(2000000);
 
-    RCLCPP_INFO(this->get_logger(), "Mapping Node criado. Publicacao assincrona a %.1f Hz.", map_publish_rate_);
+    RCLCPP_INFO(this->get_logger(), "[%s] Mapping Node criado. Publicacao assincrona a %.1f Hz.", 
+                robot_ns.c_str(), map_publish_rate_);
 }
 
 Mapping::~Mapping() {}
