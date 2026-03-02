@@ -159,6 +159,7 @@ ament_target_dependencies(gtsam_and_loop_closure
   OpenCV
   slam_interfaces
   GTSAM
+  visualization_msgs
 )
 
 target_link_libraries(

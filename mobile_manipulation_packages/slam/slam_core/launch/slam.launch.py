@@ -73,4 +73,15 @@ def generate_launch_description():
 
         nodes_to_start.append(slam_core_node)
 
+    gtsam_node = Node(
+        package='slam_core',     
+        executable='gtsam_and_loop_closure',  
+        name='slam_core',     
+        output='screen',                 
+        parameters=[slam_parameters],
+        remappings=slam_core_remappings 
+    )
+
+    nodes_to_start.append(gtsam_node)
+
     return LaunchDescription(nodes_to_start)

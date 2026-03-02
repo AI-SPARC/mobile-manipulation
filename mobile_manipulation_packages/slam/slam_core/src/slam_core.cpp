@@ -601,11 +601,43 @@ private:
                 {
                     keyframe_id_ = 0; 
 
-                    // gtsam::Pose3 initial_pose = gtsam::Pose3();
-                    // auto prior_noise_pose = gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6).finished());
-                    // graph_.add(gtsam::PriorFactor<gtsam::Pose3>(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose, prior_noise_pose));
-                    // initial_estimates_.insert(gtsam::symbol_shorthand::X(keyframe_id_), initial_pose);
+                    
+                    slam_interfaces::msg::GtsamData init_msg;
+                    init_msg.keyframe = keyframe_id_;
 
+                    
+                    init_msg.delta_base.pose.position.x = 0.0;
+                    init_msg.delta_base.pose.position.y = 0.0;
+                    init_msg.delta_base.pose.position.z = 0.0;
+                    init_msg.estimate.position.x = 0.0;
+                    init_msg.estimate.position.y = 0.0;
+                    init_msg.estimate.position.z = 0.0;
+
+                   
+                    init_msg.delta_base.pose.orientation.x = 0.0;
+                    init_msg.delta_base.pose.orientation.y = 0.0;
+                    init_msg.delta_base.pose.orientation.z = 0.0;
+                    init_msg.delta_base.pose.orientation.w = 1.0;
+                    init_msg.estimate.orientation.x = 0.0;
+                    init_msg.estimate.orientation.y = 0.0;
+                    init_msg.estimate.orientation.z = 0.0;
+                    init_msg.estimate.orientation.w = 1.0;
+
+                    for (int r = 0; r < 6; ++r) 
+                    {
+                        for (int c = 0; c < 6; ++c) 
+                        {
+                            if (r == c) init_msg.delta_base.covariance[r * 6 + c] = 1e-6;
+                            else        init_msg.delta_base.covariance[r * 6 + c] = 0.0;
+                        }
+                    }
+
+                    if (factor_pub_) 
+                    {
+                        factor_pub_->publish(init_msg);
+                        RCLCPP_INFO(this->get_logger(), "[Cam 0] Fator de inicializacao enviado para o no GTSAM.");
+                    }
+                   
                     msg_copy->header.frame_id = std::to_string(keyframe_id_);
 
                     {
@@ -613,12 +645,10 @@ private:
                         dino_loop_node_node_->keyframe_callback(msg_copy);
                     }
                     
-                    
                     current_target_timestamp_ = cam_data.stamp; 
                     has_keyframe_ = true; 
                 }
 
-               
                 last_processed_timestamp_[camera_id] = cam_data.stamp;
                 continue; 
             }
@@ -665,7 +695,7 @@ private:
                 }
             }
 
-            
+
             std_msgs::msg::Header match_header;
             match_header.stamp = current_time; 
             match_header.frame_id = current_frame.rgb_frame; 

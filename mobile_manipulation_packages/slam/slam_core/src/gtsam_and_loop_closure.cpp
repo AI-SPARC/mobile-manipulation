@@ -2,11 +2,16 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <cmath>
 #include <rclcpp/rclcpp.hpp>
 
 #include <geometry_msgs/msg/pose_with_covariance.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include "slam_interfaces/msg/gtsam_data.hpp"
 
@@ -64,6 +69,11 @@ public:
         if(use_ground_truth_) RCLCPP_INFO(this->get_logger(), "Comparacao com Ground Truth ATIVADA.");
 
         robot_states_.reserve(num_robots);
+        odom_pubs_.reserve(num_robots);
+        graph_markers_pubs_.reserve(num_robots);
+        path_pubs_.reserve(num_robots);
+
+        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
 
         for (int i = 0; i < num_robots; ++i) 
         {
@@ -82,6 +92,7 @@ public:
             rclcpp::SubscriptionOptions sub_options;
             sub_options.callback_group = cb_group;
 
+            
             std::string factor_topic = "/robot_" + std::to_string(i) + "/slam/camera_factors";
             auto factor_sub = this->create_subscription<slam_interfaces::msg::GtsamData>(
                 factor_topic, 10,
@@ -92,6 +103,7 @@ public:
             );
             subs_.push_back(factor_sub);
 
+           
             if (use_ground_truth_)
             {
                 std::string gt_topic = "/robot_" + std::to_string(i) + "/ground_truth";
@@ -104,6 +116,14 @@ public:
                 );
                 gt_subs_.push_back(gt_sub);
             }
+
+            std::string odom_topic = "/robot_" + std::to_string(i) + "/odom";
+            std::string marker_topic = "/robot_" + std::to_string(i) + "/gtsam_graph";
+            std::string path_topic = "/robot_" + std::to_string(i) + "/gtsam_path";
+
+            odom_pubs_.push_back(this->create_publisher<nav_msgs::msg::Odometry>(odom_topic, 10));
+            graph_markers_pubs_.push_back(this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_topic, 10));
+            path_pubs_.push_back(this->create_publisher<nav_msgs::msg::Path>(path_topic, 10));
         }
     }
 
@@ -111,20 +131,31 @@ private:
     std::vector<std::unique_ptr<RobotSlamState>> robot_states_;
     std::vector<rclcpp::Subscription<slam_interfaces::msg::GtsamData>::SharedPtr> subs_;
     std::vector<rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr> gt_subs_;
+    
+    std::vector<rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr> odom_pubs_;
+    std::vector<rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr> graph_markers_pubs_;
+    std::vector<rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr> path_pubs_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+
     std::vector<rclcpp::CallbackGroup::SharedPtr> cb_groups_;
     bool use_ground_truth_;
 
-    void publish_gtsam_data(const gtsam::Pose3& optimized_pose, const rclcpp::Time& stamp)
+    void publish_gtsam_data(int robot_id, const gtsam::Pose3& optimized_pose, const rclcpp::Time& stamp)
     {
+        auto& state = *robot_states_[robot_id];
+        
+        std::string odom_frame = "robot_" + std::to_string(robot_id) + "/odom";
+        std::string main_frame_id = "base_link";
+
         try 
         {
-            if (!optimized_estimates_.exists(gtsam::symbol_shorthand::X(keyframe_id_ - 1))) return;
-            gtsam::Matrix6 covariance_gtsam = isam2_.marginalCovariance(gtsam::symbol_shorthand::X(keyframe_id_ - 1));
+            if (!state.optimized_estimates.exists(gtsam::symbol_shorthand::X(state.keyframe_id))) return;
+            gtsam::Matrix6 covariance_gtsam = state.isam2.marginalCovariance(gtsam::symbol_shorthand::X(state.keyframe_id));
             
             nav_msgs::msg::Odometry odom_msg;
             odom_msg.header.stamp = stamp;
-            odom_msg.header.frame_id = "odom";        
-            odom_msg.child_frame_id = main_frame_id_;    
+            odom_msg.header.frame_id = odom_frame;        
+            odom_msg.child_frame_id = main_frame_id;    
 
             gtsam::Pose3 base_pose = optimized_pose;
             
@@ -140,8 +171,8 @@ private:
             
             geometry_msgs::msg::TransformStamped t;
             t.header.stamp = stamp;
-            t.header.frame_id = "odom";
-            t.child_frame_id = main_frame_id_;
+            t.header.frame_id = odom_frame;
+            t.child_frame_id = main_frame_id;
             t.transform.translation.x = base_pose.x();
             t.transform.translation.y = base_pose.y();
             t.transform.translation.z = base_pose.z();
@@ -165,15 +196,15 @@ private:
                 }
             }
 
-            odom_pub_->publish(odom_msg);
+            odom_pubs_[robot_id]->publish(odom_msg);
 
             visualization_msgs::msg::MarkerArray marker_array;
             nav_msgs::msg::Path path_msg;
             path_msg.header.stamp = stamp;
-            path_msg.header.frame_id = "odom"; 
+            path_msg.header.frame_id = odom_frame; 
 
             visualization_msgs::msg::Marker nodes_marker;
-            nodes_marker.header.frame_id = "odom"; 
+            nodes_marker.header.frame_id = odom_frame; 
             nodes_marker.header.stamp = stamp;
             nodes_marker.ns = "gtsam_nodes";
             nodes_marker.id = 0;
@@ -188,7 +219,7 @@ private:
             nodes_marker.color.b = 0.0;
 
             visualization_msgs::msg::Marker edges_marker;
-            edges_marker.header.frame_id = "odom"; 
+            edges_marker.header.frame_id = odom_frame; 
             edges_marker.header.stamp = stamp;
             edges_marker.ns = "gtsam_edges";
             edges_marker.id = 1;
@@ -200,9 +231,8 @@ private:
             edges_marker.color.g = 0.0;
             edges_marker.color.b = 0.0;
 
-            for (const auto& key_value : optimized_estimates_) 
+            for (const auto& key_value : state.optimized_estimates) 
             {
-                // CORREÇÃO 2: Pula as Velocidades (V) e os Biases (B) para não quebrar o cast para Pose3
                 gtsam::Symbol sym(key_value.key);
                 if (sym.chr() != 'x') continue;
 
@@ -215,12 +245,12 @@ private:
                 nodes_marker.points.push_back(p);
 
                 geometry_msgs::msg::PoseStamped path_pose;
-                path_pose.header.frame_id = "odom"; 
+                path_pose.header.frame_id = odom_frame; 
                 path_pose.pose.position = p;
                 path_msg.poses.push_back(path_pose);
             }
 
-            const gtsam::NonlinearFactorGraph& isam_graph = isam2_.getFactorsUnsafe();
+            const gtsam::NonlinearFactorGraph& isam_graph = state.isam2.getFactorsUnsafe();
 
             for (size_t i = 0; i < isam_graph.size(); ++i) 
             {
@@ -232,10 +262,10 @@ private:
                     gtsam::Key key1 = between_factor->front();
                     gtsam::Key key2 = between_factor->back();
 
-                    if (optimized_estimates_.exists(key1) && optimized_estimates_.exists(key2)) 
+                    if (state.optimized_estimates.exists(key1) && state.optimized_estimates.exists(key2)) 
                     {
-                        gtsam::Pose3 pose1_base = optimized_estimates_.at<gtsam::Pose3>(key1);
-                        gtsam::Pose3 pose2_base = optimized_estimates_.at<gtsam::Pose3>(key2);
+                        gtsam::Pose3 pose1_base = state.optimized_estimates.at<gtsam::Pose3>(key1);
+                        gtsam::Pose3 pose2_base = state.optimized_estimates.at<gtsam::Pose3>(key2);
 
                         geometry_msgs::msg::Point p1, p2;
                         p1.x = pose1_base.x(); p1.y = pose1_base.y(); p1.z = pose1_base.z();
@@ -250,23 +280,22 @@ private:
             marker_array.markers.push_back(nodes_marker);
             marker_array.markers.push_back(edges_marker);
 
-            graph_markers_pub_->publish(marker_array);
-            path_pub_->publish(path_msg);
+            graph_markers_pubs_[robot_id]->publish(marker_array);
+            path_pubs_[robot_id]->publish(path_msg);
 
-            RCLCPP_INFO(this->get_logger(), "--- RELATORIO GTSAM ---");
-            RCLCPP_INFO(this->get_logger(), "Nos Totais no Grafo: %d", (int)optimized_estimates_.size());
-            RCLCPP_INFO(this->get_logger(), "Arestas (Fatores) Totais: %d", (int)isam2_.getFactorsUnsafe().size());
-            RCLCPP_INFO(this->get_logger(), "Pose %s [X: %7.3f | Y: %7.3f | Z: %7.3f]", main_frame_id_.c_str(), base_pose.x(), base_pose.y(), base_pose.z());
+            RCLCPP_INFO(this->get_logger(), "[Robo %d] --- RELATORIO GTSAM ---", robot_id);
+            RCLCPP_INFO(this->get_logger(), "[Robo %d] Nos Totais no Grafo: %d", robot_id, (int)state.optimized_estimates.size());
+            RCLCPP_INFO(this->get_logger(), "[Robo %d] Arestas (Fatores) Totais: %d", robot_id, (int)state.isam2.getFactorsUnsafe().size());
+            RCLCPP_INFO(this->get_logger(), "[Robo %d] Pose odom->%s [X: %.3f | Y: %.3f | Z: %.3f]", robot_id, main_frame_id.c_str(), base_pose.x(), base_pose.y(), base_pose.z());
             RCLCPP_INFO(this->get_logger(), "-----------------------");
         } 
         catch (const gtsam::IndeterminantLinearSystemException& e) {
-            RCLCPP_WARN(this->get_logger(), "GTSAM IndeterminantLinearSystemException: Grafo instavel no momento.");
+            RCLCPP_WARN(this->get_logger(), "[Robo %d] GTSAM IndeterminantLinearSystemException: Grafo instavel no momento.", robot_id);
         }
         catch (const std::exception& e) {
-            RCLCPP_WARN(this->get_logger(), "Erro na publicacao dos dados do GTSAM: %s", e.what());
+            RCLCPP_WARN(this->get_logger(), "[Robo %d] Erro na publicacao dos dados do GTSAM: %s", robot_id, e.what());
         }
     }
-   
    
     void ground_truth_callback(int robot_id, const nav_msgs::msg::Odometry::SharedPtr msg)
     {
@@ -297,7 +326,6 @@ private:
         state.has_gt = true;
     }
 
-   
     void factor_callback(int robot_id, const slam_interfaces::msg::GtsamData::SharedPtr msg)
     {
         FrameProcessResult result;
@@ -331,7 +359,6 @@ private:
         process_gtsam(robot_id, result, is_loop_closure);
     }
 
-    
     void process_gtsam(int robot_id, const FrameProcessResult& result, bool is_loop)
     {
         auto& state = *robot_states_[robot_id]; 
@@ -392,7 +419,6 @@ private:
             RCLCPP_INFO(this->get_logger(), "[Robo %d] Pose X: %.3f | Y: %.3f | Z: %.3f", 
                         robot_id, corrected_pose.x(), corrected_pose.y(), corrected_pose.z());
 
-            // --- COMPARAÇÃO COM O GROUND TRUTH ---
             if (use_ground_truth_ && state.has_gt) 
             {
                 gtsam::Pose3 relative_gt = state.initial_gt_pose.inverse() * state.latest_gt_pose;
@@ -408,6 +434,8 @@ private:
                 RCLCPP_INFO(this->get_logger(), "[Robo %d] Erro Absoluto Translacao        : %.4f m (%.2f%%)", robot_id, trans_error, trans_error_pct);
                 RCLCPP_INFO(this->get_logger(), "[Robo %d] Erro Absoluto Rotacao           : %.2f°", robot_id, rot_error_deg);
             }
+
+            publish_gtsam_data(robot_id, corrected_pose, this->now());
         }
     }
 };
