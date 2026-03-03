@@ -1,8 +1,8 @@
-#include "slam_core/DinoExtractor.hpp"
+#include "slam_feature_matching/DinoExtractor.hpp"
 #include <iostream>
 #include <chrono>
 
-namespace slam_core 
+namespace slam_feature_matching 
 {
 
 DinoExtractor::DinoExtractor(const std::string& dino_onnx_path)
@@ -76,4 +76,4 @@ std::vector<float> DinoExtractor::process_image_and_find_loop(const cv::Mat& ima
     return current_vector;
 }
 
-} // namespace slam_core
+} // namespace slam_feature_matching

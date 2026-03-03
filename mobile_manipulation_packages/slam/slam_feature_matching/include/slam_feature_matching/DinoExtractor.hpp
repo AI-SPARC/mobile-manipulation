@@ -1,5 +1,5 @@
-#ifndef SLAM_CORE_DINO_EXTRACTOR_HPP
-#define SLAM_CORE_DINO_EXTRACTOR_HPP
+#ifndef SLAM_FEATURE_MATCHING_DINO_EXTRACTOR_HPP
+#define SLAM_FEATURE_MATCHING_DINO_EXTRACTOR_HPP
 
 #include <string>
 #include <vector>
@@ -7,7 +7,7 @@
 #include <opencv2/opencv.hpp>
 #include <onnxruntime_cxx_api.h>
 
-namespace slam_core 
+namespace slam_feature_matching 
 {
 
 class DinoExtractor 
@@ -25,6 +25,6 @@ private:
     std::string dino_output_name_;
 };
 
-} // namespace slam_core
+} // namespace slam_feature_matching
 
-#endif // SLAM_CORE_DINO_EXTRACTOR_HPP
+#endif // SLAM_FEATURE_MATCHING_DINO_EXTRACTOR_HPP

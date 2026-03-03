@@ -1,5 +1,5 @@
-#ifndef SLAM_CORE_LIGHTGLUE_MATCHER_HPP
-#define SLAM_CORE_LIGHTGLUE_MATCHER_HPP
+#ifndef SLAM_FEATURE_MATCHING_LIGHTGLUE_MATCHER_HPP
+#define SLAM_FEATURE_MATCHING_LIGHTGLUE_MATCHER_HPP
 
 #include <string>
 #include <vector>
@@ -7,7 +7,7 @@
 #include <opencv2/opencv.hpp>
 #include <onnxruntime_cxx_api.h>
 
-namespace slam_core 
+namespace slam_feature_matching 
 {
 
 class LightGlueMatcher 
@@ -29,6 +29,6 @@ private:
     std::vector<const char*> lg_output_names_;
 };
 
-} // namespace slam_core
+} // namespace slam_feature_matching
 
-#endif // SLAM_CORE_LIGHTGLUE_MATCHER_HPP
+#endif // SLAM_FEATURE_MATCHING_LIGHTGLUE_MATCHER_HPP

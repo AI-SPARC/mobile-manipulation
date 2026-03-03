@@ -1,8 +1,8 @@
-#include "slam_core/FaissLoopDetector.hpp"
+#include "slam_feature_matching/FaissLoopDetector.hpp"
 #include <cmath>
 #include <iostream>
 
-namespace slam_core 
+namespace slam_feature_matching 
 {
 
 FaissLoopDetector::FaissLoopDetector(float similarity_threshold)
@@ -72,4 +72,4 @@ std::pair<int, int> FaissLoopDetector::process_feature_and_find_loop(int robot_i
     return {best_loop_robot_id, best_loop_kf_id};
 }
 
-} // namespace slam_core
+} // namespace slam_feature_matching

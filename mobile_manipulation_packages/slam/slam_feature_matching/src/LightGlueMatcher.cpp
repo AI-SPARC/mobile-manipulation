@@ -1,8 +1,8 @@
-#include "slam_core/LightGlueMatcher.hpp"
+#include "slam_feature_matching/LightGlueMatcher.hpp"
 #include <iostream>
 #include <chrono>
 
-namespace slam_core 
+namespace slam_feature_matching 
 {
 
 LightGlueMatcher::LightGlueMatcher(const std::string& lightglue_onnx_path)
@@ -224,4 +224,4 @@ void LightGlueMatcher::compute_matches(const cv::Mat& img1, const cv::Mat& img2,
     }
 }
 
-} // namespace slam_core
+} // namespace slam_feature_matching

@@ -1,12 +1,12 @@
-#ifndef SLAM_CORE_FAISS_LOOP_DETECTOR_HPP
-#define SLAM_CORE_FAISS_LOOP_DETECTOR_HPP
+#ifndef SLAM_FEATURE_MATCHING_FAISS_LOOP_DETECTOR_HPP
+#define SLAM_FEATURE_MATCHING_FAISS_LOOP_DETECTOR_HPP
 
 #include <vector>
 #include <utility>
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIDMap.h>
 
-namespace slam_core 
+namespace slam_feature_matching 
 {
 
 class FaissLoopDetector 
@@ -25,6 +25,6 @@ private:
     faiss::IndexIDMap* faiss_index_;
 };
 
-} // namespace slam_core
+} // namespace slam_feature_matching
 
-#endif // SLAM_CORE_FAISS_LOOP_DETECTOR_HPP
+#endif // SLAM_FEATURE_MATCHING_FAISS_LOOP_DETECTOR_HPP
