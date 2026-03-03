@@ -7,7 +7,7 @@ def generate_launch_description():
     
     robots_config = {
         'robot_0': 1,  
-        # 'robot_1': 1,   
+        #  'robot_1': 1,   
     }
 
     add_noise_parameters = {

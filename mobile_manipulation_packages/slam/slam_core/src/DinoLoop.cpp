@@ -1,23 +1,17 @@
-#include "slam_core/DinoLoopNode.hpp"
-#include <cv_bridge/cv_bridge.hpp>
+#include "slam_core/DinoLoop.hpp"
 #include <cmath>
 #include <algorithm>
-#include "rclcpp_components/register_node_macro.hpp"
+#include <iostream>
+#include <chrono>
 
 namespace slam_core 
 {
 
-DinoLoopNode::DinoLoopNode(const rclcpp::NodeOptions & options)
-: Node("dino_loop_node", options)
+DinoLoop::DinoLoop(const std::string& dino_onnx_path, 
+                   const std::string& lightglue_onnx_path, 
+                   float similarity_threshold)
+: similarity_threshold_(similarity_threshold)
 {
-    this->declare_parameter<std::string>("dino_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx");
-    this->declare_parameter<std::string>("lightglue_onnx_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx");
-    this->declare_parameter<float>("similarity_threshold", 0.85f); 
-
-    std::string dino_path = this->get_parameter("dino_onnx_path").as_string();
-    std::string lg_path = this->get_parameter("lightglue_onnx_path").as_string();
-    similarity_threshold_ = this->get_parameter("similarity_threshold").as_double();
-
     int d = 384; 
     inner_index_ = new faiss::IndexFlatIP(d);
     faiss_index_ = new faiss::IndexIDMap(inner_index_);
@@ -25,7 +19,6 @@ DinoLoopNode::DinoLoopNode(const rclcpp::NodeOptions & options)
     try {
         Ort::SessionOptions session_options;
         session_options.SetIntraOpNumThreads(0); 
-
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
             
         OrtCUDAProviderOptions cuda_options;
@@ -34,35 +27,41 @@ DinoLoopNode::DinoLoopNode(const rclcpp::NodeOptions & options)
         cuda_options.arena_extend_strategy = 0; 
         session_options.AppendExecutionProvider_CUDA(cuda_options);
 
-        ort_session_dino_ = std::make_unique<Ort::Session>(ort_env_, dino_path.c_str(), session_options);
-        ort_session_lightglue_ = std::make_unique<Ort::Session>(ort_env_, lg_path.c_str(), session_options);
+        ort_session_dino_ = std::make_unique<Ort::Session>(ort_env_, dino_onnx_path.c_str(), session_options);
+        ort_session_lightglue_ = std::make_unique<Ort::Session>(ort_env_, lightglue_onnx_path.c_str(), session_options);
 
         Ort::AllocatorWithDefaultOptions allocator;
+        
         dino_input_name_ = ort_session_dino_->GetInputNameAllocated(0, allocator).get();
         dino_output_name_ = ort_session_dino_->GetOutputNameAllocated(0, allocator).get();
 
-        for (size_t i = 0; i < ort_session_lightglue_->GetInputCount(); i++) {
+        for (size_t i = 0; i < ort_session_lightglue_->GetInputCount(); i++) 
+        {
             lg_input_names_str_.push_back(ort_session_lightglue_->GetInputNameAllocated(i, allocator).get());
         }
-        for (size_t i = 0; i < ort_session_lightglue_->GetOutputCount(); i++) {
+
+        for (size_t i = 0; i < ort_session_lightglue_->GetOutputCount(); i++) 
+        {
             lg_output_names_str_.push_back(ort_session_lightglue_->GetOutputNameAllocated(i, allocator).get());
         }
 
         for (const auto& str : lg_input_names_str_) lg_input_names_.push_back(str.c_str());
         for (const auto& str : lg_output_names_str_) lg_output_names_.push_back(str.c_str());
 
-    } catch (const Ort::Exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "%s", e.what());
+    } 
+    catch (const Ort::Exception& e) 
+    {
+        std::cerr << "[DinoLoop ERROR] Falha ao carregar modelos ONNX: " << e.what() << std::endl;
     }
 }
 
-DinoLoopNode::~DinoLoopNode()
+DinoLoop::~DinoLoop()
 {
     delete faiss_index_;
     delete inner_index_;
 }
 
-void DinoLoopNode::normalize_vector(std::vector<float>& v) 
+void DinoLoop::normalize_vector(std::vector<float>& v) 
 {
     float norm = 0.0f;
     for (float x : v) norm += x * x;
@@ -72,8 +71,7 @@ void DinoLoopNode::normalize_vector(std::vector<float>& v)
     }
 }
 
-
-void DinoLoopNode::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std::vector<cv::Point2f>& kp1, std::vector<cv::Point2f>& kp2, std::vector<cv::DMatch>& matches)
+void DinoLoop::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std::vector<cv::Point2f>& kp1, std::vector<cv::Point2f>& kp2, std::vector<cv::DMatch>& matches)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
     kp1.clear(); kp2.clear(); matches.clear();
@@ -89,13 +87,12 @@ void DinoLoopNode::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std
 
     if (stddev1.at<double>(0) < 5.0 || stddev2.at<double>(0) < 5.0) 
     {
-        RCLCPP_WARN(this->get_logger(), "[LightGlue] Frame sem textura detectado. Ignorando match.");
+        std::cout << "[LightGlue WARNING] Frame sem textura detectado. Ignorando match." << std::endl;
         return;
     }
 
     try 
     {
-       
         int H_INFER = img1.rows;
         int W_INFER = img1.cols;
 
@@ -248,46 +245,26 @@ void DinoLoopNode::compute_matches(const cv::Mat& img1, const cv::Mat& img2, std
     } 
     catch (const std::exception& e) 
     {
-        RCLCPP_WARN(this->get_logger(), "[LightGlue] Erro critico C++: %s", e.what());
+        std::cerr << "[LightGlue ERROR] Erro critico C++: " << e.what() << std::endl;
         kp1.clear(); kp2.clear(); matches.clear();
         return; 
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
-
-    // RCLCPP_INFO(this->get_logger(), "Tempo do light glue: %.2f ms", ms_double.count());
+    // std::cout << "[LightGlue] Tempo: " << ms_double.count() << " ms\n";
 }
 
-
-
-int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+int DinoLoop::process_image_and_find_loop(int current_kf_id, const cv::Mat& image)
 {
     auto start_time = std::chrono::high_resolution_clock::now();
-    int current_kf_id;
-    try {
-        current_kf_id = std::stoi(msg->header.frame_id);
-    } catch (...) {
-        return -1;
-    }
 
-    cv_bridge::CvImagePtr cv_ptr;
-    try {
-        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8);
-    } catch (...) {
-        return -1;
-    }
+    if (!ort_session_dino_ || image.empty()) return -1;
 
-    if (!ort_session_dino_) return -1;
-
- 
-    std::vector<float> input_tensor_values(1 * 3 * 224 * 224);
-    
     const int DINO_WIDTH = 644;  
     const int DINO_HEIGHT = 476; 
     
-    // O blobFromImage faz o resize retangular e aloca a memória
-    cv::Mat blob = cv::dnn::blobFromImage(cv_ptr->image, 1.0, cv::Size(DINO_WIDTH, DINO_HEIGHT), cv::Scalar(), true, false, CV_32F);
+    cv::Mat blob = cv::dnn::blobFromImage(image, 1.0, cv::Size(DINO_WIDTH, DINO_HEIGHT), cv::Scalar(), true, false, CV_32F);
     
     std::vector<float> mean = {0.485f, 0.456f, 0.406f};
     std::vector<float> std_dev = {0.229f, 0.224f, 0.225f};
@@ -302,8 +279,6 @@ int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg
     }
 
     Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    
-    // ATENÇÃO: Redes neurais esperam o formato [Batch, Canais, Altura, Largura]
     std::vector<int64_t> input_shape = {1, 3, DINO_HEIGHT, DINO_WIDTH}; 
     
     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
@@ -314,12 +289,10 @@ int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg
     const char* input_names[] = {dino_input_name_.c_str()};
     const char* output_names[] = {dino_output_name_.c_str()};
 
-    // Inferência
     auto output_tensors = ort_session_dino_->Run(
         Ort::RunOptions{nullptr}, input_names, &input_tensor, 1, output_names, 1
     );
 
-    // O vetor final (CLS Token) continua sendo 384!
     float* floatarr = output_tensors.front().GetTensorMutableData<float>();
     std::vector<float> current_vector(floatarr, floatarr + 384);
 
@@ -360,10 +333,14 @@ int DinoLoopNode::keyframe_callback(const sensor_msgs::msg::Image::SharedPtr msg
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
 
-    RCLCPP_INFO(this->get_logger(), "Tempo do din: %.2f ms", ms_double.count());
+    std::cout << "[DINO] KF " << current_kf_id << " processado em " << ms_double.count() << " ms" << std::endl;
+    
+    if (best_loop_id != -1) 
+    {
+        std::cout << "[DINO] Loop potencial detectado com KF " << best_loop_id << " (Score: " << best_score << ")" << std::endl;
+    }
+    
     return best_loop_id;
 }
 
-} 
-
-RCLCPP_COMPONENTS_REGISTER_NODE(slam_core::DinoLoopNode)
+} // namespace slam_core

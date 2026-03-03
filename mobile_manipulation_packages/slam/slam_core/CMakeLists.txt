@@ -31,17 +31,17 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(slam_interfaces REQUIRED)
 
-
 set(ONNXRUNTIME_DIR "/home/momesso/onnxruntime-linux-x64-1.18.0")
 
-add_library(dino_loop_component SHARED
-  src/dino_loop_node.cpp
+
+add_library(slam_core_lib SHARED
+  src/DinoLoop.cpp       
   src/mapping.cpp
   src/imu_integration.cpp
   src/camera_integration.cpp
 )
 
-target_include_directories(dino_loop_component PUBLIC
+target_include_directories(slam_core_lib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${OpenCV_INCLUDE_DIRS}
@@ -49,13 +49,13 @@ target_include_directories(dino_loop_component PUBLIC
   ${ONNXRUNTIME_DIR}/include
 )
 
-ament_target_dependencies(dino_loop_component
+ament_target_dependencies(slam_core_lib
   rclcpp
-  rclcpp_components
   sensor_msgs
   std_msgs
   cv_bridge
   OpenCV
+  rclcpp_components
   Eigen3
   PCL
   pcl_conversions
@@ -64,15 +64,11 @@ ament_target_dependencies(dino_loop_component
   tf2_geometry_msgs
 )
 
-target_link_libraries(dino_loop_component
+target_link_libraries(slam_core_lib
   faiss
   ${ONNXRUNTIME_DIR}/lib/libonnxruntime.so
 )
 
-rclcpp_components_register_node(dino_loop_component
-  PLUGIN "slam_core::DinoLoopNode"
-  EXECUTABLE dino_loop_node_exe
-)
 
 add_executable(slam_core
   src/slam_core.cpp
@@ -102,17 +98,11 @@ ament_target_dependencies(slam_core
 )
 
 target_link_libraries(slam_core
-  dino_loop_component
+  slam_core_lib          
   ${OpenCV_LIBRARIES}
   gtsam 
   Eigen3::Eigen
   ${ONNXRUNTIME_DIR}/lib/libonnxruntime.so
-)
-
-install(TARGETS dino_loop_component
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION bin
 )
 
 
@@ -136,48 +126,74 @@ ament_target_dependencies(add_noise
   OpenCV
 )
 
-target_link_libraries(add_noise ${GLEW_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp Eigen3::Eigen)
-
-
-add_executable(gtsam_and_loop_closure src/gtsam_and_loop_closure.cpp)
-ament_target_dependencies(gtsam_and_loop_closure 
-  trajectory_msgs 
-  rclcpp 
-  geometry_msgs 
-  PCL 
-  pcl_conversions 
-  sensor_msgs 
-  tf2_geometry_msgs 
-  tf2 
-  tf2_ros 
-  tf2_ros 
-  PCL
-  vision_msgs
-  std_msgs
-  Eigen3
-  cv_bridge
-  OpenCV
-  slam_interfaces
-  GTSAM
-  visualization_msgs
-)
-
-target_link_libraries(
-  gtsam_and_loop_closure 
+target_link_libraries(add_noise 
   ${GLEW_LIBRARIES} 
   ${PCL_LIBRARIES} 
   ${OpenCV_LIBS} 
-  gtsam 
   yaml-cpp 
   Eigen3::Eigen
 )
 
 
+add_library(gtsam_and_loop_closure_component SHARED
+  src/gtsam_and_loop_closure.cpp
+)
+
+target_include_directories(gtsam_and_loop_closure_component PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(gtsam_and_loop_closure_component 
+  rclcpp 
+  rclcpp_components 
+  trajectory_msgs 
+  geometry_msgs 
+  sensor_msgs 
+  nav_msgs
+  tf2 
+  tf2_ros 
+  tf2_geometry_msgs 
+  vision_msgs
+  std_msgs
+  visualization_msgs
+  slam_interfaces
+  cv_bridge
+  PCL 
+  pcl_conversions 
+  OpenCV
+  Eigen3
+  GTSAM
+)
+
+target_link_libraries(gtsam_and_loop_closure_component 
+  slam_core_lib          
+  faiss               
+  ${GLEW_LIBRARIES} 
+  ${PCL_LIBRARIES} 
+  ${OpenCV_LIBRARIES} 
+  gtsam 
+  yaml-cpp 
+  Eigen3::Eigen
+)
+
+rclcpp_components_register_node(gtsam_and_loop_closure_component
+  PLUGIN "slam_core::GtsamOptimizationNode" 
+  EXECUTABLE gtsam_and_loop_closure_exe
+)
+
+
+install(TARGETS 
+  slam_core_lib
+  gtsam_and_loop_closure_component
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
 install(TARGETS 
   slam_core
   add_noise
-  gtsam_and_loop_closure
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -52,23 +52,23 @@
 
 #include "slam_interfaces/msg/gtsam_data.hpp"
 
-#include <slam_core/DinoLoopNode.hpp>
+#include <slam_core/DinoLoop.hpp>
 #include <slam_core/Mapping.hpp>
 #include <slam_core/ImuIntegration.hpp>
 #include <slam_core/CameraIntegration.hpp>
+
+#include "slam_core/DinoLoop.hpp"
 
 
 class SlamCoreNode : public rclcpp::Node 
 {
 public:
     SlamCoreNode(
-        std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node,
         std::shared_ptr<slam_core::Mapping> mapping_node,
         std::shared_ptr<slam_core::ImuIntegration> imu_integration_node,
         std::shared_ptr<slam_core::CameraIntegration> camera_integration_node,
         const rclcpp::NodeOptions & options = rclcpp::NodeOptions()
     ) : Node("slam_core_node", options) , 
-        dino_loop_node_node_(dino_loop_node_node),
         mapping_node_(mapping_node),
         imu_integration_node_(imu_integration_node),
         camera_integration_node_(camera_integration_node)
@@ -82,6 +82,16 @@ public:
         main_frame_id_ = this->get_parameter("main_frame_id").as_string();
         use_imu = this->get_parameter("use_imu").as_bool();
         num_cameras_ = this->get_parameter("num_cameras").as_int();
+
+
+        std::string dino_path = "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx";
+        std::string lightglue_path = "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx";
+        float threshold = 0.875f;
+
+        // Instancia a classe de IA!
+        dino_loop_ = std::make_shared<slam_core::DinoLoop>(dino_path, lightglue_path, threshold);
+
+
 
         std::string robot_ns = this->get_parameter("robot_namespace").as_string();
         std::string ns_prefix = "/" + robot_ns;
@@ -264,7 +274,8 @@ private:
     std::vector<std::thread> threads_;
 
   
-    std::shared_ptr<slam_core::DinoLoopNode> dino_loop_node_node_;
+    std::shared_ptr<slam_core::DinoLoop> dino_loop_;
+    
     std::shared_ptr<slam_core::Mapping> mapping_node_;
     std::shared_ptr<slam_core::ImuIntegration> imu_integration_node_;
     std::shared_ptr<slam_core::CameraIntegration> camera_integration_node_;
@@ -640,9 +651,35 @@ private:
                    
                     msg_copy->header.frame_id = std::to_string(keyframe_id_);
 
+                    int current_kf_id;
+                    try {
+                        current_kf_id = std::stoi(msg_copy->header.frame_id);
+                    } 
+                    catch (...) 
                     {
-                        std::lock_guard<std::mutex> lock_compute(compute_mutex);
-                        dino_loop_node_node_->keyframe_callback(msg_copy);
+                        RCLCPP_ERROR(this->get_logger(), "Erro ao converter frame_id para int!");
+                        current_kf_id = -1; 
+                    }
+
+                    
+                    cv_bridge::CvImagePtr cv_ptr;
+                    try 
+                    {
+                        cv_ptr = cv_bridge::toCvCopy(msg_copy, sensor_msgs::image_encodings::RGB8);
+                    } 
+                    catch (cv_bridge::Exception& e) 
+                    {
+                        RCLCPP_ERROR(this->get_logger(), "Erro no cv_bridge: %s", e.what());
+                        
+                    }
+
+                    int loop_candidate_id = -1;
+                    {
+                        std::lock_guard<std::mutex> lock(compute_mutex);
+                        if (cv_ptr) 
+                        {
+                            loop_candidate_id = dino_loop_->process_image_and_find_loop(current_kf_id, cv_ptr->image);
+                        }
                     }
                     
                     current_target_timestamp_ = cam_data.stamp; 
@@ -678,7 +715,7 @@ private:
         
         {
             std::lock_guard<std::mutex> lock(compute_mutex);
-            dino_loop_node_node_->compute_matches(current_frame.image, last_keyframe_[camera_id].image, kp1, kp2, matches);
+            dino_loop_->compute_matches(current_frame.image, last_keyframe_[camera_id].image, kp1, kp2, matches);
         }
 
         if (!matches.empty())
@@ -915,10 +952,37 @@ private:
                            
 
                             msg_copy->header.frame_id = std::to_string(keyframe_id_);
-                            int loop_candidate_id;
+                            
+                            
+                            int current_kf_id;
+                            try {
+                                current_kf_id = std::stoi(msg_copy->header.frame_id);
+                            } 
+                            catch (...) 
+                            {
+                                RCLCPP_ERROR(this->get_logger(), "Erro ao converter frame_id para int!");
+                                current_kf_id = -1; 
+                            }
+
+                            
+                            cv_bridge::CvImagePtr cv_ptr;
+                            try 
+                            {
+                                cv_ptr = cv_bridge::toCvCopy(msg_copy, sensor_msgs::image_encodings::RGB8);
+                            } 
+                            catch (cv_bridge::Exception& e) 
+                            {
+                                RCLCPP_ERROR(this->get_logger(), "Erro no cv_bridge: %s", e.what());
+                                
+                            }
+
+                            int loop_candidate_id = -1;
                             {
                                 std::lock_guard<std::mutex> lock(compute_mutex);
-                                loop_candidate_id = dino_loop_node_node_->keyframe_callback(msg_copy);
+                                if (cv_ptr) 
+                                {
+                                    loop_candidate_id = dino_loop_->process_image_and_find_loop(current_kf_id, cv_ptr->image);
+                                }
                             }
                             
                             bool local_loop_detected = false;
@@ -938,7 +1002,7 @@ private:
                                     std::vector<cv::DMatch> loop_matches;
                                     {
                                         std::lock_guard<std::mutex> lock(compute_mutex);
-                                        dino_loop_node_node_->compute_matches(current_frame.image, candidate_kf.image, loop_kp1, loop_kp2, loop_matches);
+                                        dino_loop_->compute_matches(current_frame.image, candidate_kf.image, loop_kp1, loop_kp2, loop_matches);
                                     }
                                     if (loop_matches.size() >= 60) 
                                     {
@@ -1203,12 +1267,6 @@ int main(int argc, char * argv[])
         current_num_cameras = temp_node->declare_parameter<int>("num_cameras", 1);
     } 
 
-  
-    rclcpp::NodeOptions dino_opts;
-    dino_opts.arguments({"--ros-args", "-r", "__node:=dino_loop_node", "-p", "use_sim_time:=true"});
-    dino_opts.parameter_overrides({
-        {"robot_namespace", current_robot_ns}
-    });
 
     rclcpp::NodeOptions mapping_opts;
     mapping_opts.arguments({"--ros-args", "-r", "__node:=mapping_node", "-p", "use_sim_time:=true"});
@@ -1230,14 +1288,12 @@ int main(int argc, char * argv[])
     });
 
     
-    auto dino_loop_node = std::make_shared<slam_core::DinoLoopNode>(dino_opts);
     auto mapping_node = std::make_shared<slam_core::Mapping>(mapping_opts);
     auto imu_integration_node = std::make_shared<slam_core::ImuIntegration>(imu_opts);
     auto camera_integration_node = std::make_shared<slam_core::CameraIntegration>(camera_opts);
 
  
     auto server_node = std::make_shared<SlamCoreNode>(
-        dino_loop_node, 
         mapping_node, 
         imu_integration_node, 
         camera_integration_node,
@@ -1247,7 +1303,6 @@ int main(int argc, char * argv[])
   
     rclcpp::executors::MultiThreadedExecutor executor;
     
-    executor.add_node(dino_loop_node);
     executor.add_node(mapping_node);
     executor.add_node(imu_integration_node);
     executor.add_node(camera_integration_node);
