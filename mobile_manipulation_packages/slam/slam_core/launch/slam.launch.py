@@ -78,7 +78,7 @@ def generate_launch_description():
     gtsam_node = Node(
         package='slam_core',     
         executable='gtsam_and_loop_closure',  
-        name='slam_core',     
+        name='gtsam_and_loop_closure',     
         output='screen',                 
         parameters=[slam_parameters],
         remappings=slam_core_remappings 

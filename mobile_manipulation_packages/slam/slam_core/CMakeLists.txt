@@ -31,11 +31,14 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(slam_interfaces REQUIRED)
 
+
+find_package(slam_feature_matching REQUIRED)
+
+
 set(ONNXRUNTIME_DIR "/home/momesso/onnxruntime-linux-x64-1.18.0")
 
 
 add_library(slam_core_lib SHARED
-  src/DinoLoop.cpp       
   src/mapping.cpp
   src/imu_integration.cpp
   src/camera_integration.cpp
@@ -62,6 +65,7 @@ ament_target_dependencies(slam_core_lib
   tf2
   tf2_ros
   tf2_geometry_msgs
+  slam_feature_matching
 )
 
 target_link_libraries(slam_core_lib
@@ -95,6 +99,7 @@ ament_target_dependencies(slam_core
   cv_bridge
   visualization_msgs
   slam_interfaces
+  slam_feature_matching 
 )
 
 target_link_libraries(slam_core
@@ -117,7 +122,6 @@ ament_target_dependencies(add_noise
   tf2_geometry_msgs 
   tf2 
   tf2_ros 
-  tf2_ros 
   PCL
   vision_msgs
   std_msgs
@@ -134,19 +138,15 @@ target_link_libraries(add_noise
   Eigen3::Eigen
 )
 
+add_executable(gtsam_and_loop_closure src/gtsam_and_loop_closure.cpp)
 
-add_library(gtsam_and_loop_closure_component SHARED
-  src/gtsam_and_loop_closure.cpp
-)
-
-target_include_directories(gtsam_and_loop_closure_component PUBLIC
+target_include_directories(gtsam_and_loop_closure PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
-ament_target_dependencies(gtsam_and_loop_closure_component 
+ament_target_dependencies(gtsam_and_loop_closure 
   rclcpp 
-  rclcpp_components 
   trajectory_msgs 
   geometry_msgs 
   sensor_msgs 
@@ -158,6 +158,7 @@ ament_target_dependencies(gtsam_and_loop_closure_component
   std_msgs
   visualization_msgs
   slam_interfaces
+  slam_feature_matching
   cv_bridge
   PCL 
   pcl_conversions 
@@ -166,7 +167,7 @@ ament_target_dependencies(gtsam_and_loop_closure_component
   GTSAM
 )
 
-target_link_libraries(gtsam_and_loop_closure_component 
+target_link_libraries(gtsam_and_loop_closure 
   slam_core_lib          
   faiss               
   ${GLEW_LIBRARIES} 
@@ -177,15 +178,9 @@ target_link_libraries(gtsam_and_loop_closure_component
   Eigen3::Eigen
 )
 
-rclcpp_components_register_node(gtsam_and_loop_closure_component
-  PLUGIN "slam_core::GtsamOptimizationNode" 
-  EXECUTABLE gtsam_and_loop_closure_exe
-)
-
 
 install(TARGETS 
   slam_core_lib
-  gtsam_and_loop_closure_component
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
@@ -194,6 +189,7 @@ install(TARGETS
 install(TARGETS 
   slam_core
   add_noise
+  gtsam_and_loop_closure
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -33,6 +33,7 @@ struct FrameProcessResult
     gtsam::Pose3 delta_base;
     gtsam::SharedNoiseModel visual_noise;
     gtsam::Pose3 estimate;
+    std::vector<float> signature;
 };
 
 struct RobotSlamState
@@ -73,7 +74,7 @@ public:
         graph_markers_pubs_.reserve(num_robots);
         path_pubs_.reserve(num_robots);
 
-        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
+        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
         for (int i = 0; i < num_robots; ++i) 
         {
@@ -83,7 +84,7 @@ public:
         subs_.reserve(num_robots);
         gt_subs_.reserve(num_robots);
         cb_groups_.reserve(num_robots);
-
+        
         for (int i = 0; i < num_robots; ++i)
         {
             auto cb_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -103,7 +104,6 @@ public:
             );
             subs_.push_back(factor_sub);
 
-           
             if (use_ground_truth_)
             {
                 std::string gt_topic = "/robot_" + std::to_string(i) + "/ground_truth";
@@ -120,11 +120,11 @@ public:
             std::string odom_topic = "/robot_" + std::to_string(i) + "/odom";
             std::string marker_topic = "/robot_" + std::to_string(i) + "/gtsam_graph";
             std::string path_topic = "/robot_" + std::to_string(i) + "/gtsam_path";
-
             odom_pubs_.push_back(this->create_publisher<nav_msgs::msg::Odometry>(odom_topic, 10));
             graph_markers_pubs_.push_back(this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_topic, 10));
             path_pubs_.push_back(this->create_publisher<nav_msgs::msg::Path>(path_topic, 10));
         }
+
     }
 
 private:
@@ -450,13 +450,21 @@ int main(int argc, char * argv[])
     auto node = std::make_shared<GtsamOptimizationNode>();
     int num_robots = node->get_parameter("num_robots").as_int();
     
-    rclcpp::executors::MultiThreadedExecutor executor(
-        rclcpp::ExecutorOptions(), 
-        num_robots > 0 ? num_robots : 1
-    );
-    
-    executor.add_node(node);
-    executor.spin();
+    if (num_robots > 1) 
+    {
+        rclcpp::executors::MultiThreadedExecutor executor(
+            rclcpp::ExecutorOptions(), 
+            num_robots
+        );
+        executor.add_node(node);
+        executor.spin();
+    } 
+    else 
+    {
+        rclcpp::executors::SingleThreadedExecutor executor;
+        executor.add_node(node);
+        executor.spin();
+    }
     
     rclcpp::shutdown();
     return 0;

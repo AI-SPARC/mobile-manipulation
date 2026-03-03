@@ -52,12 +52,12 @@
 
 #include "slam_interfaces/msg/gtsam_data.hpp"
 
-#include <slam_core/DinoLoop.hpp>
 #include <slam_core/Mapping.hpp>
 #include <slam_core/ImuIntegration.hpp>
 #include <slam_core/CameraIntegration.hpp>
 
-#include "slam_core/DinoLoop.hpp"
+#include "slam_feature_matching/DinoExtractor.hpp"
+#include "slam_feature_matching/LightGlueMatcher.hpp"
 
 
 class SlamCoreNode : public rclcpp::Node 
@@ -88,9 +88,8 @@ public:
         std::string lightglue_path = "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx";
         float threshold = 0.875f;
 
-        // Instancia a classe de IA!
-        dino_loop_ = std::make_shared<slam_core::DinoLoop>(dino_path, lightglue_path, threshold);
-
+        dino_extractor_ = std::make_shared<slam_feature_matching::DinoExtractor>(dino_path);
+        lightglue_matcher_ = std::make_shared<slam_feature_matching::LightGlueMatcher>(lightglue_path);
 
 
         std::string robot_ns = this->get_parameter("robot_namespace").as_string();
@@ -179,6 +178,7 @@ private:
         std::string rgb_frame;
         std::string depth_frame;
         gtsam::Pose3 global_pose;
+        
     };
 
     struct FrameProcessResult
@@ -189,6 +189,7 @@ private:
         int target_keyframe_id = 0;
         bool is_new = false;
         rclcpp::Time time;
+        std::vector<float> signature;
     };
 
     struct LoopFactorData
@@ -274,8 +275,9 @@ private:
     std::vector<std::thread> threads_;
 
   
-    std::shared_ptr<slam_core::DinoLoop> dino_loop_;
-    
+    std::shared_ptr<slam_feature_matching::DinoExtractor> dino_extractor_;
+    std::shared_ptr<slam_feature_matching::LightGlueMatcher> lightglue_matcher_;
+        
     std::shared_ptr<slam_core::Mapping> mapping_node_;
     std::shared_ptr<slam_core::ImuIntegration> imu_integration_node_;
     std::shared_ptr<slam_core::CameraIntegration> camera_integration_node_;
@@ -612,45 +614,9 @@ private:
                 {
                     keyframe_id_ = 0; 
 
-                    
-                    slam_interfaces::msg::GtsamData init_msg;
-                    init_msg.keyframe = keyframe_id_;
-
-                    
-                    init_msg.delta_base.pose.position.x = 0.0;
-                    init_msg.delta_base.pose.position.y = 0.0;
-                    init_msg.delta_base.pose.position.z = 0.0;
-                    init_msg.estimate.position.x = 0.0;
-                    init_msg.estimate.position.y = 0.0;
-                    init_msg.estimate.position.z = 0.0;
-
-                   
-                    init_msg.delta_base.pose.orientation.x = 0.0;
-                    init_msg.delta_base.pose.orientation.y = 0.0;
-                    init_msg.delta_base.pose.orientation.z = 0.0;
-                    init_msg.delta_base.pose.orientation.w = 1.0;
-                    init_msg.estimate.orientation.x = 0.0;
-                    init_msg.estimate.orientation.y = 0.0;
-                    init_msg.estimate.orientation.z = 0.0;
-                    init_msg.estimate.orientation.w = 1.0;
-
-                    for (int r = 0; r < 6; ++r) 
-                    {
-                        for (int c = 0; c < 6; ++c) 
-                        {
-                            if (r == c) init_msg.delta_base.covariance[r * 6 + c] = 1e-6;
-                            else        init_msg.delta_base.covariance[r * 6 + c] = 0.0;
-                        }
-                    }
-
-                    if (factor_pub_) 
-                    {
-                        factor_pub_->publish(init_msg);
-                        RCLCPP_INFO(this->get_logger(), "[Cam 0] Fator de inicializacao enviado para o no GTSAM.");
-                    }
-                   
                     msg_copy->header.frame_id = std::to_string(keyframe_id_);
-
+                            
+                            
                     int current_kf_id;
                     try {
                         current_kf_id = std::stoi(msg_copy->header.frame_id);
@@ -673,14 +639,55 @@ private:
                         
                     }
 
-                    int loop_candidate_id = -1;
+                    std::vector<float> signature;
                     {
                         std::lock_guard<std::mutex> lock(compute_mutex);
+
                         if (cv_ptr) 
                         {
-                            loop_candidate_id = dino_loop_->process_image_and_find_loop(current_kf_id, cv_ptr->image);
+                            signature = dino_extractor_->process_image_and_find_loop(cv_ptr->image);
                         }
                     }
+
+                    
+                    slam_interfaces::msg::GtsamData init_msg;
+                    init_msg.keyframe = keyframe_id_;
+
+                    
+                    init_msg.delta_base.pose.position.x = 0.0;
+                    init_msg.delta_base.pose.position.y = 0.0;
+                    init_msg.delta_base.pose.position.z = 0.0;
+                    init_msg.estimate.position.x = 0.0;
+                    init_msg.estimate.position.y = 0.0;
+                    init_msg.estimate.position.z = 0.0;
+
+                   
+                    init_msg.delta_base.pose.orientation.x = 0.0;
+                    init_msg.delta_base.pose.orientation.y = 0.0;
+                    init_msg.delta_base.pose.orientation.z = 0.0;
+                    init_msg.delta_base.pose.orientation.w = 1.0;
+                    init_msg.estimate.orientation.x = 0.0;
+                    init_msg.estimate.orientation.y = 0.0;
+                    init_msg.estimate.orientation.z = 0.0;
+                    init_msg.estimate.orientation.w = 1.0;
+                    init_msg.signature = signature;
+
+                    for (int r = 0; r < 6; ++r) 
+                    {
+                        for (int c = 0; c < 6; ++c) 
+                        {
+                            if (r == c) init_msg.delta_base.covariance[r * 6 + c] = 1e-6;
+                            else        init_msg.delta_base.covariance[r * 6 + c] = 0.0;
+                        }
+                    }
+
+                    if (factor_pub_) 
+                    {
+                        factor_pub_->publish(init_msg);
+                        RCLCPP_INFO(this->get_logger(), "[Cam 0] Fator de inicializacao enviado para o no GTSAM.");
+                    }
+                   
+                    
                     
                     current_target_timestamp_ = cam_data.stamp; 
                     has_keyframe_ = true; 
@@ -715,7 +722,7 @@ private:
         
         {
             std::lock_guard<std::mutex> lock(compute_mutex);
-            dino_loop_->compute_matches(current_frame.image, last_keyframe_[camera_id].image, kp1, kp2, matches);
+            lightglue_matcher_->compute_matches(current_frame.image, last_keyframe_[camera_id].image, kp1, kp2, matches);
         }
 
         if (!matches.empty())
@@ -949,8 +956,6 @@ private:
                         {
                             keyframe_id_++; 
 
-                           
-
                             msg_copy->header.frame_id = std::to_string(keyframe_id_);
                             
                             
@@ -976,149 +981,18 @@ private:
                                 
                             }
 
-                            int loop_candidate_id = -1;
+                            std::vector<float> signature;
                             {
                                 std::lock_guard<std::mutex> lock(compute_mutex);
+
                                 if (cv_ptr) 
                                 {
-                                    loop_candidate_id = dino_loop_->process_image_and_find_loop(current_kf_id, cv_ptr->image);
+                                    signature = dino_extractor_->process_image_and_find_loop(cv_ptr->image);
                                 }
                             }
-                            
-                            bool local_loop_detected = false;
-                            Eigen::Matrix4d T_loop_relative = Eigen::Matrix4d::Identity(); 
-                            int num_loop_inliers = 0;
-                            
-                            std::vector<cv::Point3f> loop_object_pts_3d; 
-                            std::vector<cv::Point2f> loop_image_pts_2d;  
-                            std::vector<int> loop_inliers; 
 
-                            if (loop_candidate_id != -1 && keyframe_database_[camera_id].count(loop_candidate_id)) 
-                            {
-                                if ((keyframe_id_ - loop_candidate_id) >= 20) 
-                                {
-                                    FrameData candidate_kf = keyframe_database_[camera_id][loop_candidate_id];
-                                    std::vector<cv::Point2f> loop_kp1, loop_kp2;
-                                    std::vector<cv::DMatch> loop_matches;
-                                    {
-                                        std::lock_guard<std::mutex> lock(compute_mutex);
-                                        dino_loop_->compute_matches(current_frame.image, candidate_kf.image, loop_kp1, loop_kp2, loop_matches);
-                                    }
-                                    if (loop_matches.size() >= 60) 
-                                    {
-                                        std::vector<cv::Point2f> loop_train_pts, loop_query_pts;
-                                        for (const auto& match : loop_matches) 
-                                        {
-                                            if (match.trainIdx < 0 || match.trainIdx >= (int)loop_kp2.size() || match.queryIdx < 0 || match.queryIdx >= (int)loop_kp1.size()) continue;
-                                            
-                                            loop_train_pts.push_back(loop_kp2[match.trainIdx]); 
-                                            loop_query_pts.push_back(loop_kp1[match.queryIdx]); 
-                                        }
 
-                                        std::vector<cv::Point2f> loop_train_pts_undist, loop_query_pts_undist;
 
-                                        if (cv::norm(dist_coeffs_[camera_id]) > 0.0001) 
-                                        {
-                                            cv::undistortPoints(loop_train_pts, loop_train_pts_undist, camera_matrix_[camera_id], dist_coeffs_[camera_id], cv::noArray(), camera_matrix_[camera_id]);
-                                            cv::undistortPoints(loop_query_pts, loop_query_pts_undist, camera_matrix_[camera_id], dist_coeffs_[camera_id], cv::noArray(), camera_matrix_[camera_id]);
-                                        } 
-                                        else 
-                                        {
-                                            loop_train_pts_undist = loop_train_pts;
-                                            loop_query_pts_undist = loop_query_pts;
-                                        }
-
-                                        for (size_t i = 0; i < loop_train_pts.size(); ++i) 
-                                        {
-                                            float z_cand = get_robust_depth(candidate_kf.depth_image, loop_train_pts[i].x, loop_train_pts[i].y);
-
-                                            if (z_cand > 0.1f && z_cand < 7.0) 
-                                            {
-                                                float x_cand = (loop_train_pts_undist[i].x - cx) * z_cand / fx;
-                                                float y_cand = (loop_train_pts_undist[i].y - cy) * z_cand / fy;
-                                                
-                                                loop_object_pts_3d.push_back(cv::Point3f(x_cand, y_cand, z_cand));
-                                                loop_image_pts_2d.push_back(loop_query_pts_undist[i]);
-                                            }
-                                        }
-
-                                        if (loop_object_pts_3d.size() >= 15) 
-                                        {
-                                            cv::Mat rvec_loop, tvec_loop;
-                                            cv::Mat empty_loop_coeffs = cv::Mat::zeros(4, 1, CV_64F); 
-                                            
-                                            bool pnp_loop_success = cv::solvePnPRansac(
-                                                loop_object_pts_3d, loop_image_pts_2d, camera_matrix_[camera_id], empty_loop_coeffs, 
-                                                rvec_loop, tvec_loop, false, 1000, 10.0f, 0.95, loop_inliers, cv::SOLVEPNP_SQPNP
-                                            );
-                                            
-                                            if (pnp_loop_success && loop_inliers.size() >= 15 && !rvec_loop.empty() && !tvec_loop.empty()) 
-                                            {
-                                                cv::Mat R_loop;
-                                                cv::Rodrigues(rvec_loop, R_loop);
-
-                                                Eigen::Matrix4d T_loop_world = Eigen::Matrix4d::Identity();
-                                                for(int r = 0; r < 3; r++) {
-                                                    for(int c = 0; c < 3; c++) {
-                                                        T_loop_world(r,c) = R_loop.at<double>(r,c);
-                                                    }
-                                                    T_loop_world(r,3) = tvec_loop.at<double>(r);
-                                                }
-
-                                                T_loop_relative = T_loop_world.inverse();
-
-                                                local_loop_detected = true;
-                                                num_loop_inliers = loop_inliers.size();
-                                                RCLCPP_INFO(this->get_logger(), "!!! LOOP CLOSURE !!! Fechando ciclo entre KF %d e KF %d (Inliers PnP: %d)", loop_candidate_id, keyframe_id_, num_loop_inliers);
-                                            } 
-                                        } 
-                                    } 
-                                } 
-                            }
-
-                            if (local_loop_detected) 
-                            {
-                                // A CORREÇÃO: Usa a matriz diretamente!
-                                Eigen::Matrix4d relative_loop_eigen = T_loop_relative; 
-                                gtsam::Pose3 loop_pose_opt(relative_loop_eigen);
-                                gtsam::Pose3 loop_pose_base = T_base_opt_ * loop_pose_opt * T_base_opt_.inverse();
-
-                                double loop_trans_dist = T_loop_relative.block<3,1>(0,3).norm();
-                                double loop_rot_dist = Eigen::AngleAxisd(T_loop_relative.block<3,3>(0,0)).angle();
-
-                                double mean_loop_depth = 0.0;
-                                for (int idx : loop_inliers) mean_loop_depth += loop_object_pts_3d[idx].z;
-                                mean_loop_depth /= std::max((double)loop_inliers.size(), 1.0); 
-
-                                double inlier_ratio = 100.0 / std::max((double)loop_inliers.size(), 25.0); 
-                                double penalty_inliers = inlier_ratio * inlier_ratio;
-                                double penalty_motion = 1.0 + (loop_trans_dist * 2.0) + (loop_rot_dist * 2.0);
-                                double penalty_depth = std::max(1.0, mean_loop_depth * mean_loop_depth * 0.5);
-
-                                Eigen::MatrixXd cov_eigen_loop = Eigen::MatrixXd::Zero(6, 6);
-                                cov_eigen_loop(0, 0) = base_var_rot * penalty_inliers * penalty_motion;      
-                                cov_eigen_loop(1, 1) = base_var_rot * penalty_inliers * penalty_motion;      
-                                cov_eigen_loop(2, 2) = base_var_rot * penalty_inliers * penalty_motion;      
-                                cov_eigen_loop(3, 3) = base_var_trans * penalty_inliers * penalty_motion; 
-                                cov_eigen_loop(4, 4) = base_var_trans * penalty_inliers * penalty_motion; 
-                                cov_eigen_loop(5, 5) = base_var_trans * penalty_inliers * penalty_motion * penalty_depth;  
-
-                                auto loop_noise = gtsam::noiseModel::Gaussian::Covariance(cov_eigen_loop);
-                                auto robust_loop_noise = gtsam::noiseModel::Robust::Create(
-                                    gtsam::noiseModel::mEstimator::Huber::Create(1.2), loop_noise);
-
-                                {
-                                    std::lock_guard<std::mutex> lock(frame_process_result_mutex);
-                                    LoopFactorData new_loop;
-                                    new_loop.from_id = loop_candidate_id;
-                                    new_loop.to_id = keyframe_id_;
-                                    new_loop.delta_loop = loop_pose_base;
-                                    new_loop.loop_noise = robust_loop_noise;
-                                    pending_loop_factors_.push_back(new_loop);
-                                    
-                                    loop_detected = true;
-                                }
-                            }
                             
                             {
                                 std::lock_guard<std::mutex> lock(frame_process_result_mutex);
@@ -1129,6 +1003,7 @@ private:
                                 frame_process_result[camera_id].target_keyframe_id = keyframe_id_; 
                                 frame_process_result[camera_id].is_new = true;
                                 frame_process_result[camera_id].time = current_stamp;
+                                frame_process_result[camera_id].signature = signature;
                             }
 
                             last_keyframe_pose_[camera_id] = global_pose_[camera_id].clone();
@@ -1141,6 +1016,42 @@ private:
                     }
                     else 
                     {
+                        
+                        msg_copy->header.frame_id = std::to_string(keyframe_id_);
+                            
+                            
+                        int current_kf_id;
+                        try {
+                            current_kf_id = std::stoi(msg_copy->header.frame_id);
+                        } 
+                        catch (...) 
+                        {
+                            RCLCPP_ERROR(this->get_logger(), "Erro ao converter frame_id para int!");
+                            current_kf_id = -1; 
+                        }
+
+                        
+                        cv_bridge::CvImagePtr cv_ptr;
+                        try 
+                        {
+                            cv_ptr = cv_bridge::toCvCopy(msg_copy, sensor_msgs::image_encodings::RGB8);
+                        } 
+                        catch (cv_bridge::Exception& e) 
+                        {
+                            RCLCPP_ERROR(this->get_logger(), "Erro no cv_bridge: %s", e.what());
+                            
+                        }
+
+                        std::vector<float> signature;
+                        {
+                            std::lock_guard<std::mutex> lock(compute_mutex);
+
+                            if (cv_ptr) 
+                            {
+                                signature = dino_extractor_->process_image_and_find_loop(cv_ptr->image);
+                            }
+                        }
+
                         {
                             std::lock_guard<std::mutex> lock(frame_process_result_mutex);
                             frame_process_result[camera_id].delta_base = delta_base;
@@ -1149,6 +1060,7 @@ private:
                             frame_process_result[camera_id].target_keyframe_id = keyframe_id_; 
                             frame_process_result[camera_id].is_new = true;
                             frame_process_result[camera_id].time = current_stamp;
+                            frame_process_result[camera_id].signature = signature;
                         }
 
                         last_keyframe_pose_[camera_id] = global_pose_[camera_id].clone();
@@ -1236,6 +1148,8 @@ private:
                 msg.estimate.orientation.y = est_q.y();
                 msg.estimate.orientation.z = est_q.z();
                 msg.estimate.orientation.w = est_q.w();
+
+                msg.signature = frame_process_result[i].signature;
 
                 if (factor_pub_)
                  {
