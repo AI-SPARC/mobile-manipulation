@@ -42,7 +42,7 @@ def generate_launch_description():
         "target_score": 0.9,
         "rotation_step_deg": 55.0,
 
-        "use_pcd_file": True,
+        "use_pcd_file": False,
         "publish_object_mesh": True,
         "publish_gripper_mesh": True,
         "use_mean_filter": True,

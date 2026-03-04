@@ -6,7 +6,12 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
-
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <sensor_msgs/msg/camera_info.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <cv_bridge/cv_bridge.hpp>
 // PCL
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -101,6 +106,27 @@ private:
         void publishGripperCollisionBoxes();
         void publishBest();
 
+        message_filters::Subscriber<sensor_msgs::msg::Image> mask_sub_;
+        message_filters::Subscriber<sensor_msgs::msg::Image> depth_sub_;
+        message_filters::Subscriber<sensor_msgs::msg::CameraInfo> rgb_info_sub_;
+        message_filters::Subscriber<sensor_msgs::msg::CameraInfo> depth_info_sub_;
+        
+        // Define a política de tempo exato para os 4 tópicos
+        typedef message_filters::sync_policies::ExactTime<
+            sensor_msgs::msg::Image, 
+            sensor_msgs::msg::Image, 
+            sensor_msgs::msg::CameraInfo, 
+            sensor_msgs::msg::CameraInfo> ExactSyncPolicy;
+            
+        std::shared_ptr<message_filters::Synchronizer<ExactSyncPolicy>> sync_;
+
+        // O Callback atualizado com os 4 ponteiros
+        void synced_image_callback(
+            const sensor_msgs::msg::Image::ConstSharedPtr& mask_msg,
+            const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg,
+            const sensor_msgs::msg::CameraInfo::ConstSharedPtr& rgb_info_msg,
+            const sensor_msgs::msg::CameraInfo::ConstSharedPtr& depth_info_msg);
+
         Eigen::Vector4f global_centroid;
         std::string object_mesh_path_;
         std::string gripper_glb_path_;
@@ -139,7 +165,7 @@ private:
         pcl::PointCloud<pcl::PointXYZ>::Ptr collision_cloud_; 
         pcl::KdTreeFLANN<pcl::PointXYZ> collision_kdtree_;
         std::mutex toma;
-
+       
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rays_;
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_bbox_;

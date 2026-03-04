@@ -30,6 +30,7 @@ find_package(geometric_shapes REQUIRED)
 find_package(fcl REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(assimp REQUIRED)
+find_package(cv_bridge REQUIRED)
 
 add_library(vision_lib SHARED
   src/generate_scan_poses.cpp
@@ -43,6 +44,7 @@ target_include_directories(vision_lib PUBLIC
   ${PCL_INCLUDE_DIRS} 
   ${fcl_INCLUDE_DIRS} 
   ${ASSIMP_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 ament_target_dependencies(vision_lib
@@ -68,6 +70,7 @@ ament_target_dependencies(vision_lib
   geometric_shapes
   ament_index_cpp
   assimp
+  cv_bridge
 )
 
 target_link_libraries(vision_lib
@@ -89,6 +92,7 @@ target_include_directories(combined_semantic_pcl PUBLIC
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
   ${ASSIMP_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 ament_target_dependencies(combined_semantic_pcl
@@ -107,6 +111,7 @@ ament_target_dependencies(combined_semantic_pcl
   mobile_manipulation_interfaces
   PCL
   pcl_conversions
+  cv_bridge
   rclcpp_components
 )
 
@@ -136,6 +141,7 @@ ament_target_dependencies(generate_grasp_poses_main
   geometric_shapes
   ament_index_cpp
   assimp
+  cv_bridge
 )
 
 install(DIRECTORY include/

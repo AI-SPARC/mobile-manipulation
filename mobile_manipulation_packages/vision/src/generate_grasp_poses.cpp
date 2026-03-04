@@ -248,7 +248,7 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
         g_bench_pubs->n_checks_avg = this->create_publisher<std_msgs::msg::Float64>("/grasp_bench/stats/avg_run/collision_checks", 10);
     }
     
-
+   
     stored_cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
     gripper_dense_cloud_.reset(new pcl::PointCloud<pcl::PointXYZRGB>); 
     
@@ -265,11 +265,97 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     {
         loadAndProcess(pcd_path_);
     }
+
+    mask_sub_.subscribe(this, "/camera/segmentation/instance_mask");
+    depth_sub_.subscribe(this, "/camera/camera/depth/image_rect_raw");
+    rgb_info_sub_.subscribe(this, "/camera/camera/color/camera_info");
+    depth_info_sub_.subscribe(this, "/camera/camera/depth/camera_info"); 
+
+    sync_ = std::make_shared<message_filters::Synchronizer<ExactSyncPolicy>>(
+        ExactSyncPolicy(10), mask_sub_, depth_sub_, rgb_info_sub_, depth_info_sub_);
+    
+    sync_->registerCallback(std::bind(&GenerateGraspPoses::synced_image_callback, this, 
+        std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
     
     
     timer_ = this->create_wall_timer(10ms, std::bind(&GenerateGraspPoses::timerCallback, this));
 }
 
+void GenerateGraspPoses::synced_image_callback(
+    const sensor_msgs::msg::Image::ConstSharedPtr& mask_msg,
+    const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg,
+    const sensor_msgs::msg::CameraInfo::ConstSharedPtr& rgb_info_msg,
+    const sensor_msgs::msg::CameraInfo::ConstSharedPtr& depth_info_msg)
+{
+    try 
+    {
+        cv::Mat instance_mask = cv_bridge::toCvCopy(mask_msg, "mono16")->image;
+        cv::Mat depth_image = cv_bridge::toCvCopy(depth_msg, depth_msg->encoding)->image;
+
+        
+        double fx = depth_info_msg->k[0];
+        double cx = depth_info_msg->k[2];
+        double fy = depth_info_msg->k[4];
+        double cy = depth_info_msg->k[5];
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr object_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        object_cloud->header.frame_id = depth_msg->header.frame_id; 
+
+        uint16_t target_object_id = 2; 
+
+        for (int v = 0; v < depth_image.rows; ++v) 
+        {
+            for (int u = 0; u < depth_image.cols; ++u) 
+            {
+                uint16_t mask_val = instance_mask.at<uint16_t>(v, u);
+                if (mask_val != target_object_id) 
+                {
+                    continue; 
+                }
+
+                float z = 0.0f;
+                if (depth_image.type() == CV_16U) {
+                    z = static_cast<float>(depth_image.at<uint16_t>(v, u)) / 1000.0f; // mm para metros
+                } 
+                else if (depth_image.type() == CV_32F) {
+                    z = depth_image.at<float>(v, u); // já em metros
+                }
+
+                if (z <= 0.0f || std::isnan(z) || std::isinf(z)) 
+                {
+                    continue;
+                }
+
+                pcl::PointXYZ pt;
+                pt.x = (u - cx) * z / fx;
+                pt.y = (v - cy) * z / fy;
+                pt.z = z;
+
+                object_cloud->points.push_back(pt);
+            }
+        }
+
+        object_cloud->width = object_cloud->points.size();
+        object_cloud->height = 1;
+        object_cloud->is_dense = false;
+
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
+            "Nuvem gerada com %d pontos. Intrinsicos usados: fx=%.1f, fy=%.1f", 
+            (int)object_cloud->points.size(), fx, fy);
+
+        // Se a nuvem estiver vazia (SAM 2 não achou o objeto neste frame), aborta
+        if (object_cloud->points.empty()) {
+            return;
+        }
+
+        processCloud(object_cloud, object_cloud);
+
+    } 
+    catch (const cv_bridge::Exception& e) 
+    {
+        RCLCPP_ERROR(this->get_logger(), "Erro no cv_bridge durante sincronizacao quádrupla: %s", e.what());
+    }
+}
 
 void GenerateGraspPoses::loadAndProcess(const std::string& path)
 {
@@ -722,9 +808,7 @@ StepAnalysis GenerateGraspPoses::analyzeLocalCylinder(
     if (!cloud || N <= min_points_per_segment_) return result;
     result.point_count = N;
 
-    // =========================================================================
-    // 1. ESTATÍSTICAS (Manual - Otimizado)
-    // =========================================================================
+   
     const pcl::PointXYZ* points_ptr = cloud->points.data();
     
     // Média
@@ -751,52 +835,43 @@ StepAnalysis GenerateGraspPoses::analyzeLocalCylinder(
     covariance_matrix(1, 0) = covariance_matrix(0, 1); covariance_matrix(1, 1) = acc_yy * inv_N; covariance_matrix(1, 2) = acc_yz * inv_N;
     covariance_matrix(2, 0) = covariance_matrix(0, 2); covariance_matrix(2, 1) = covariance_matrix(1, 2); covariance_matrix(2, 2) = acc_zz * inv_N;
 
-    // =========================================================================
-    // 2. SOLVER E SELEÇÃO INTELIGENTE DE EIXO
-    // =========================================================================
+  
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
     
-    // Autovetores: [0]=Menor var (Espessura), [1]=Média, [2]=Maior (Comprimento ou Largura)
-    Eigen::Vector3f axis_candidate_A = eigen_solver.eigenvectors().col(1); // Médio
-    Eigen::Vector3f axis_candidate_B = eigen_solver.eigenvectors().col(2); // Maior
+   
+    Eigen::Vector3f axis_candidate_A = eigen_solver.eigenvectors().col(1); 
+    Eigen::Vector3f axis_candidate_B = eigen_solver.eigenvectors().col(2); 
 
-    // --- HEURÍSTICA DO ATAQUE PERPENDICULAR ---
-    // Qual candidato é o eixo do cilindro? Aquele que é mais PERPENDICULAR ao raio.
-    // Se o raio for paralelo ao eixo, dot_product é 1.0. Se for perpendicular, é 0.0.
-    // Queremos o MENOR dot product absoluto.
-    
+  
     float dot_A = std::abs(ray_dir.dot(axis_candidate_A));
     float dot_B = std::abs(ray_dir.dot(axis_candidate_B));
 
     Eigen::Vector3f cylinder_axis;
     if (dot_A < dot_B) {
-        cylinder_axis = axis_candidate_A; // O eixo médio é o eixo do cilindro (Cilindro curto/deitado)
+        cylinder_axis = axis_candidate_A; 
     } else {
-        cylinder_axis = axis_candidate_B; // O eixo maior é o eixo do cilindro (Cilindro longo/em pé)
+        cylinder_axis = axis_candidate_B; 
     }
 
-    // --- CÁLCULO DA NORMAL GEOMÉTRICA ---
-    // Normal = Componente do Raio perpendicular ao Eixo Escolhido
+   
     float ray_on_axis = ray_dir.dot(cylinder_axis);
     Eigen::Vector3f normal_geom = ray_dir - (ray_on_axis * cylinder_axis);
     
     if (normal_geom.squaredNorm() > 1e-6f) {
         normal_geom.normalize();
-        normal_geom = -normal_geom; // Apontar para fora (contra o raio)
+        normal_geom = -normal_geom; 
     } else {
-        normal_geom = -ray_dir; // Fallback
+        normal_geom = -ray_dir; 
     }
 
     result.normal_vector = normal_geom;
 
-    // Curvatura
+   
     Eigen::Vector3f values = eigen_solver.eigenvalues();
     float sum = values.sum();
     result.curvature = (sum > 1e-6f) ? std::abs(values[0]) / sum : 0.0f; 
 
-    // =========================================================================
-    // 3. SCORING
-    // =========================================================================
+  
     Eigen::Vector3f diff = centroid - center;
     float parallel_comp = diff.dot(ray_dir);
     Eigen::Vector3f radial_offset_vec = diff - (parallel_comp * ray_dir);
@@ -806,7 +881,7 @@ StepAnalysis GenerateGraspPoses::analyzeLocalCylinder(
     float linear_score = 1.0f - (radial_offset / safe_radius);
     result.symmetry_score = std::max(0.0f, linear_score);
 
-    // Scoring de Alinhamento
+   
     float dot = std::abs(ray_dir.dot(result.normal_vector));
     if (dot > 1.0f) dot = 1.0f; 
     result.angle_to_normal_deg = std::acos(dot) * 57.2957795f; 
@@ -1143,14 +1218,10 @@ struct ThreadStats {
 
 
 
-// Certifique-se de que sua classe tenha os headers necessários do ROS 2, PCL e Eigen incluídos no .hpp
 
 geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment)
 {
-    // =================================================================================
-    // 1. ESTRUTURAS DE DADOS E HELPER FUNCTIONS
-    // =================================================================================
-    
+   
     struct VoxelBucket {
         std::vector<pcl::PointXYZ> points;
         Eigen::Vector3f center;
@@ -1169,19 +1240,16 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         return s;
     };
 
-    // Timers Globais da Função
+    
     auto t_func_start = std::chrono::high_resolution_clock::now();
     uint64_t c_func_start = __rdtsc();
 
     hit_candidates_.clear(); 
     
-    // =================================================================================
-    // 2. PREPARAÇÃO DO AMBIENTE (KD-TREE)
-    // =================================================================================
+ 
     auto t_kdtree_start = std::chrono::high_resolution_clock::now();
     
-    // NOTA: O collision_kdtree_ é membro da classe, mas é seguro para LEITURA em paralelo
-    // desde que não chamemos setInputCloud dentro das threads.
+
     pcl::KdTreeFLANN<pcl::PointXYZ> env_kdtree;
     if (target_environment->empty()) {
         RCLCPP_WARN(this->get_logger(), "Ambiente vazio, ignorando colisão.");
@@ -1191,13 +1259,10 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     
     auto t_kdtree_end = std::chrono::high_resolution_clock::now();
     double d_kdtree = std::chrono::duration<double, std::milli>(t_kdtree_end - t_kdtree_start).count();
-
-    // =================================================================================
-    // 3. CONSTRUÇÃO DO GRID LINEAR (SERIAL - Rápido o suficiente)
-    // =================================================================================
+    
     auto t_voxel_start = std::chrono::high_resolution_clock::now();
 
-    // 3.1. Calcular Bounding Box
+   
     Eigen::Vector3f min_bound(1e9, 1e9, 1e9);
     Eigen::Vector3f max_bound(-1e9, -1e9, -1e9);
 
@@ -1215,7 +1280,6 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     min_bound -= Eigen::Vector3f(padding, padding, padding);
     max_bound += Eigen::Vector3f(padding, padding, padding);
 
-    // 3.2. Dimensões e Strides
     float inv_voxel_size = 1.0f / voxel_size;
     int dim_x = std::ceil((max_bound.x() - min_bound.x()) * inv_voxel_size);
     int dim_y = std::ceil((max_bound.y() - min_bound.y()) * inv_voxel_size);
@@ -1225,7 +1289,6 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     int stride_z = dim_x * dim_y;
     size_t total_voxels = (size_t)dim_x * dim_y * dim_z;
 
-    // Grid Linear Global (Somente Leitura no loop paralelo)
     std::vector<VoxelBucket> linear_grid(total_voxels);
     
     // 3.3. Popular o Grid
@@ -1255,7 +1318,6 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         }
     }
 
-    // 3.4. Inflação do Grid (Pre-cálculo de vizinhos)
     int expansion_rad = std::ceil(cylinder_radius_ * inv_voxel_size);
     int expansion_rad_sq = expansion_rad * expansion_rad;
 
@@ -1296,27 +1358,19 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     auto t_voxel_end = std::chrono::high_resolution_clock::now();
     
-    // =================================================================================
-    // 4. CONFIGURAÇÃO DO PARALELISMO (TBB)
-    // =================================================================================
-    
-    // Estrutura para dados locais de cada thread (evita alocação dinâmica repetitiva e race conditions)
+   
     struct ThreadLocalData {
-        // Controle de visitação (exclusivo por thread)
         std::vector<uint32_t> visited_timestamps;
         uint32_t current_query_id = 0;
 
-        // Buffers reutilizáveis
         std::vector<const VoxelBucket*> voxels_no_caminho;
         pcl::PointCloud<pcl::PointXYZ>::Ptr init_inliers;
         pcl::PointCloud<pcl::PointXYZ>::Ptr inliers_entry;
         pcl::PointCloud<pcl::PointXYZ>::Ptr inliers_exit;
 
-        // Resultados parciais
         std::vector<ScoredGrasp> local_candidates;
         std::vector<geometry_msgs::msg::Pose> local_hits;
 
-        // Timers Parciais
         double acc_inliers_ms = 0.0;
         double acc_analysis_ms = 0.0;
         double acc_scoring_ms = 0.0;
@@ -1329,15 +1383,12 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         }
     };
 
-    // Container TBB para armazenamento local
     tbb::enumerable_thread_specific<ThreadLocalData> tls([&]() {
         return ThreadLocalData(total_voxels);
     });
 
-    // Contador Atômico para Early Exit Global
     std::atomic<int> atomic_perfect_count{0};
 
-    // Constantes pré-calculadas para o lambda
     float voxel_radius = (voxel_size * 1.73205f) / 2.0f;
     float voxel_check_threshold = cylinder_radius_ + voxel_radius; 
     float voxel_check_threshold_squared = voxel_check_threshold * voxel_check_threshold;
@@ -1348,38 +1399,35 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     const float voxel_extent = (voxel_size * 1.73205f) * 0.5f; 
     const float safe_radius_sq = (cylinder_radius_ - voxel_extent) * (cylinder_radius_ - voxel_extent);
-    const bool use_fast_check = (cylinder_radius_ > voxel_extent); // Só vale se a esfera for maior que o voxel
+    const bool use_fast_check = (cylinder_radius_ > voxel_extent); 
 
     RCLCPP_INFO(this->get_logger(), "Iniciando Processamento PARALELO (Candidates: %lu)...", all_candidates_.size());
     auto t_loop_start = std::chrono::high_resolution_clock::now();
 
-    // =================================================================================
-    // 5. LOOP PARALELO PRINCIPAL
-    // =================================================================================
-    
+  
     tbb::parallel_for(tbb::blocked_range<size_t>(0, all_candidates_.size()), 
         [&](const tbb::blocked_range<size_t>& range) 
     {
-        // Obter referência aos dados exclusivos da thread atual
+        
         ThreadLocalData& local = tls.local();
 
         for (size_t i = range.begin(); i != range.end(); ++i) 
         {
-            // CHECK DE SAÍDA GLOBAL
+            
             if (atomic_perfect_count.load() >= num_best_grasps_) {
-                continue; // Skip restante
+                continue; 
             }
 
             const auto& raw_pose = all_candidates_[i]; 
             
-            // Setup Geometria do Raio
+           
             Eigen::Quaternionf q_start(raw_pose.orientation.w, raw_pose.orientation.x, raw_pose.orientation.y, raw_pose.orientation.z);
             Eigen::Vector3f ray_origin_start(raw_pose.position.x, raw_pose.position.y, raw_pose.position.z);
             Eigen::Vector3f ray_dir_start = q_start * Eigen::Vector3f::UnitX(); 
 
             auto t0 = std::chrono::high_resolution_clock::now();
 
-            // --- Reset Local ---
+            
             float t_min_init = 1e6f;
             float t_max_init = -1e6f;
             Eigen::Vector3f PIVOT_POINT = {0.0f, 0.0f, 0.0f}; 
@@ -1388,7 +1436,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             local.voxels_no_caminho.clear();
             bool continuar = false;
 
-            // --- Configuração Ray Casting ---
+            
             Eigen::Vector3f dir = ray_dir_start;
             if (std::abs(dir.x()) < 1e-9f) dir.x() = 1e-9f;
             if (std::abs(dir.y()) < 1e-9f) dir.y() = 1e-9f;
@@ -1411,14 +1459,14 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             float tDeltaY = std::abs(voxel_size / dir.y());
             float tDeltaZ = std::abs(voxel_size / dir.z());
 
-            // --- Controle de Visita O(1) Local ---
+     
             local.current_query_id++;
             if (local.current_query_id == 0) {
                 std::fill(local.visited_timestamps.begin(), local.visited_timestamps.end(), 0);
                 local.current_query_id = 1;
             }
 
-            // --- Thick Ray Traversal ---
+            
             while (true)
             {
                 if (std::min({tMaxX, tMaxY, tMaxZ}) - std::min({tDeltaX, tDeltaY, tDeltaZ}) > max_scan_dist) break;
@@ -1453,7 +1501,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 }
             }
 
-            // --- Processamento de Pontos Inicial ---
+            
             for (const auto* bucket_ptr : local.voxels_no_caminho) 
             {
                 const auto& bucket = *bucket_ptr;
@@ -1483,7 +1531,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             if (!hit_init || local.init_inliers->size() < 3 || 
                 init_thickness < 0.0005 || init_thickness > max_gripper_width_) continue;
 
-            // --- PCA ---
+           
             auto t2_pre = std::chrono::high_resolution_clock::now();
             Eigen::Vector4f centroid; 
             Eigen::Matrix3f covariance_matrix;
@@ -1501,7 +1549,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             
             float dot_prod = DIR_START.dot(DIR_TARGET);
             
-            // Clamp para evitar erros numéricos (NaN) no acos se o dot for levemente > 1.0
+            
             if (dot_prod > 1.0f) dot_prod = 1.0f;
             if (dot_prod < -1.0f) dot_prod = -1.0f;
 
@@ -1516,7 +1564,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
             auto t2_post = std::chrono::high_resolution_clock::now(); 
             local.acc_analysis_ms += std::chrono::duration<double, std::milli>(t2_post - t2_pre).count();
 
-            // --- Otimização ---
+            
             ScoredGrasp best_iter_grasp;
             best_iter_grasp.total_score = -1.0; 
             bool found_valid_in_optimization = false;
@@ -1532,7 +1580,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
                 local.voxels_no_caminho.clear();
                 
-                // Add Pivot Voxel (Manual)
+               
                 {
                     Eigen::Vector3f rel_pivot = PIVOT_POINT - min_bound;
                     int pv_x = std::floor(rel_pivot.x() * inv_voxel_size);
@@ -1544,7 +1592,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     }
                 }
 
-                // --- Raio Invertido (Stop on First Hit) ---
+               
                 Eigen::Vector3f ray_end_pos = current_ray_origin + (current_ray_dir * max_scan_dist);
                 Eigen::Vector3f traverse_dir = -current_ray_dir; 
                 if (std::abs(traverse_dir.x()) < 1e-9f) traverse_dir.x() = 1e-9f;
@@ -1583,7 +1631,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                         if (bucket_curr.is_near_surface && bucket_curr.has_points) {
                             local.voxels_no_caminho.push_back(&bucket_curr);
                             voxel_hit_any = true;
-                            break; // Stop on first hit
+                            break; 
                         }
                     } 
 
@@ -1596,7 +1644,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
                 if (!voxel_hit_any && local.voxels_no_caminho.size() <= 1) continue; 
 
-                // --- Coleta de Inliers ---
+                
                 local.inliers_entry->clear();
                 local.inliers_exit->clear();
 
@@ -1623,13 +1671,13 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 }
                 if (!exit_found && exact_t_max < -1e8f) exact_t_max = exact_t_min; 
 
-                // Coleta Esférica
+               
                 Eigen::Vector3f center_entry = current_ray_origin + current_ray_dir * exact_t_min;
                 Eigen::Vector3f center_exit  = current_ray_origin + current_ray_dir * exact_t_max;
 
                 auto collect_spherical = [&](const Eigen::Vector3f& center, pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_out) 
                 {
-                    // 1. Calcula índices do voxel central
+                    
                     int ix = std::floor((center.x() - min_bound.x()) * inv_voxel_size);
                     int iy = std::floor((center.y() - min_bound.y()) * inv_voxel_size);
                     int iz = std::floor((center.z() - min_bound.z()) * inv_voxel_size);
@@ -1640,19 +1688,17 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
                         if (!center_bucket.nearby_filled_indices.empty()) {
                             
-                            // --- OTIMIZAÇÃO DE RESERVE ---
-                            // Passo A: Calcular o total de candidatos (limite superior)
+                            
                             size_t total_candidates = 0;
                             for (const auto& neighbor_idx : center_bucket.nearby_filled_indices) {
                                 total_candidates += linear_grid[neighbor_idx].points.size();
                             }
 
-                            // Passo B: Reservar tamanho atual + candidatos
-                            // Isso garante zero realocações durante os push_back abaixo
+                            
                             cloud_out->points.reserve(cloud_out->points.size() + total_candidates);
-                            // -----------------------------
+                           
 
-                            // Cache das coordenadas do centro (fora dos loops para performance)
+                            
                             const float cx = center.x();
                             const float cy = center.y();
                             const float cz = center.z();
@@ -1695,33 +1741,28 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     auto t_now = this->now();
                     visualization_msgs::msg::MarkerArray markers;
 
-                    // Publica a nuvem original para referência
+                    
                     sensor_msgs::msg::PointCloud2 m; 
                     pcl::toROSMsg(*stored_cloud_, m); 
                     m.header.stamp = t_now; 
                     m.header.frame_id = "world"; 
                     pub_cloud_->publish(m);
 
-                    // Configuração base para NÃO PISCAR (Lifetime = 0)
+                    
                     visualization_msgs::msg::Marker base_marker;
                     base_marker.header.frame_id = "world";
                     base_marker.header.stamp = t_now;
                     base_marker.action = visualization_msgs::msg::Marker::ADD;
                     base_marker.lifetime = rclcpp::Duration::from_seconds(0); 
 
-                    // -----------------------------------------------------------------
-                    // 0. PRÉ-CÁLCULO DAS NORMAIS PARA VISUALIZAÇÃO
-                    // -----------------------------------------------------------------
-                    // Precisamos calcular as normais AGORA para poder desenhá-las
+                 
                     StepAnalysis debug_entry = analyzeLocalCylinder(local.inliers_entry, center_entry, current_ray_dir);
                     StepAnalysis debug_exit;
                     if (real_thickness > 0.001f) {
                         debug_exit = analyzeLocalCylinder(local.inliers_exit, center_exit, current_ray_dir);
                     }
 
-                    // -----------------------------------------------------------------
-                    // 1. PIVÔ E ORIGEM (Esferas)
-                    // -----------------------------------------------------------------
+                    
                     visualization_msgs::msg::Marker pivot_mk = base_marker;
                     pivot_mk.ns = "debug_anim_pivot"; 
                     pivot_mk.id = 1;
@@ -1746,9 +1787,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     origin_mk.color.a = 1.0; origin_mk.color.r = 1.0; origin_mk.color.g = 0.0; origin_mk.color.b = 1.0; 
                     markers.markers.push_back(origin_mk);
 
-                    // -----------------------------------------------------------------
-                    // 2. ESFERAS DE BUSCA (Entry & Exit)
-                    // -----------------------------------------------------------------
+                   
                     Eigen::Vector3f pos_entry = current_ray_origin + current_ray_dir * exact_t_min;
                     Eigen::Vector3f pos_exit  = current_ray_origin + current_ray_dir * exact_t_max;
 
@@ -1778,9 +1817,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                         markers.markers.push_back(sphere_exit);
                     }
 
-                    // -----------------------------------------------------------------
-                    // 3. RAIO ATUAL (Seta Amarela)
-                    // -----------------------------------------------------------------
+                   
                     visualization_msgs::msg::Marker ray_mk = base_marker;
                     ray_mk.ns = "debug_anim_ray"; 
                     ray_mk.id = 2;
@@ -1797,11 +1834,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     ray_mk.color.a = 0.8; ray_mk.color.r = 1.0; ray_mk.color.g = 1.0; ray_mk.color.b = 0.0;
                     markers.markers.push_back(ray_mk);
 
-                    // -----------------------------------------------------------------
-                    // 4. NORMAIS DA SUPERFÍCIE (Entry = Vermelha, Exit = Laranja)
-                    // -----------------------------------------------------------------
-                    
-                    // Normal de Entrada
+                   
                     if (debug_entry.valid) {
                         visualization_msgs::msg::Marker norm_entry = base_marker;
                         norm_entry.ns = "debug_anim_normal_entry";
@@ -1819,11 +1852,11 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                         norm_entry.points.push_back(p_center);
                         norm_entry.points.push_back(p_norm);
                         norm_entry.scale.x = 0.002; norm_entry.scale.y = 0.004; norm_entry.scale.z = 0.0;
-                        norm_entry.color.a = 1.0; norm_entry.color.r = 1.0; norm_entry.color.g = 0.0; norm_entry.color.b = 0.0; // Vermelho
+                        norm_entry.color.a = 1.0; norm_entry.color.r = 1.0; norm_entry.color.g = 0.0; norm_entry.color.b = 0.0; 
                         markers.markers.push_back(norm_entry);
                     }
 
-                    // Normal de Saída
+                   
                     if (debug_exit.valid) {
                         visualization_msgs::msg::Marker norm_exit = base_marker;
                         norm_exit.ns = "debug_anim_normal_exit";
@@ -1841,13 +1874,11 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                         norm_exit.points.push_back(p_center);
                         norm_exit.points.push_back(p_norm);
                         norm_exit.scale.x = 0.002; norm_exit.scale.y = 0.004; norm_exit.scale.z = 0.0;
-                        norm_exit.color.a = 1.0; norm_exit.color.r = 1.0; norm_exit.color.g = 0.5; norm_exit.color.b = 0.0; // Laranja
+                        norm_exit.color.a = 1.0; norm_exit.color.r = 1.0; norm_exit.color.g = 0.5; norm_exit.color.b = 0.0;
                         markers.markers.push_back(norm_exit);
                     }
 
-                    // -----------------------------------------------------------------
-                    // 5. INLIERS POINTS (Entry = Verde, Exit = Roxo)
-                    // -----------------------------------------------------------------
+                  
                     
                     if (local.inliers_entry && !local.inliers_entry->empty()) 
                     {
@@ -1856,7 +1887,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                         entry_mk.id = 4;
                         entry_mk.type = visualization_msgs::msg::Marker::POINTS;
                         entry_mk.scale.x = 0.003; entry_mk.scale.y = 0.003;
-                        entry_mk.color.a = 1.0; entry_mk.color.r = 0.0; entry_mk.color.g = 1.0; entry_mk.color.b = 0.0; // Verde
+                        entry_mk.color.a = 1.0; entry_mk.color.r = 0.0; entry_mk.color.g = 1.0; entry_mk.color.b = 0.0; 
 
                         entry_mk.points.reserve(local.inliers_entry->size());
                         for (const auto& p : local.inliers_entry->points) {
@@ -1885,9 +1916,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                         markers.markers.push_back(exit_mk);
                     }
 
-                    // -----------------------------------------------------------------
-                    // 6. VOXELS VISITADOS
-                    // -----------------------------------------------------------------
+                    
                     if (!local.voxels_no_caminho.empty())
                     {
                         visualization_msgs::msg::Marker vox_mk = base_marker;
@@ -1913,7 +1942,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 }
 
 
-                // --- Scoring ---
+                
                 auto t5 = std::chrono::high_resolution_clock::now();
                 std::vector<StepAnalysis> steps; steps.reserve(2); 
                 
@@ -2056,9 +2085,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         return geometry_msgs::msg::PoseArray();
     }
 
-    // =================================================================================
-    // 7. ORDENAÇÃO E COLISÃO FINAL
-    // =================================================================================
+    
     uint64_t c_sort_start = __rdtsc();
     auto t_sort_start = std::chrono::high_resolution_clock::now();
     
@@ -2102,32 +2129,26 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     double d_col = std::chrono::duration<double, std::milli>(t_collision_end - t_collision_start).count();
     uint64_t clk_func = c_func_end - c_func_start;
 
-    // --- CÁLCULO DE PROPORÇÃO (NORMALIZAÇÃO) ---
-    // Somamos todo o trabalho de CPU realizado por todas as threads
+    
     double total_cpu_work = acc_inliers_ms + acc_analysis_ms + acc_scoring_ms;
     
-    // Calculamos o fator de "paralelismo efetivo" para distribuir o d_loop (Wall Time)
-    // Se o CPU work for 0 (muito rápido), evitamos divisão por zero.
+ 
     double wall_ratio = (total_cpu_work > 1e-6) ? (d_loop / total_cpu_work) : 0.0;
 
-    // Estimativa de quanto tempo REAL (Wall Clock) cada etapa contribuiu para o atraso total
     double wall_inliers = acc_inliers_ms * wall_ratio;
     double wall_analysis = acc_analysis_ms * wall_ratio;
     double wall_scoring = acc_scoring_ms * wall_ratio;
     
-    // Cálculo de porcentagem de carga (Onde o processador mais trabalhou?)
     double pct_inliers = (total_cpu_work > 1e-6) ? (acc_inliers_ms / total_cpu_work * 100.0) : 0.0;
     double pct_analysis = (total_cpu_work > 1e-6) ? (acc_analysis_ms / total_cpu_work * 100.0) : 0.0;
 
-    // Speedup estimado (Quantas vezes mais rápido que serial?)
-    // Ex: Se CPU Work = 1.4ms e Wall Time = 0.4ms, Speedup aprox = 3.5x
+   
     double est_speedup = (d_loop > 1e-6) ? (total_cpu_work / d_loop) : 0.0;
 
     RCLCPP_INFO(this->get_logger(), "================ BENCHMARK TBB PARALLEL (AJUSTADO) ===============");
     RCLCPP_INFO(this->get_logger(), "Tempo Total Função:      %.4f ms", d_func);
     RCLCPP_INFO(this->get_logger(), "  -> Parallel Loop:      %.4f ms (Speedup Aprox: %.1fx)", d_loop, est_speedup);
     
-    // Agora mostramos o tempo normalizado (soma deve bater com d_loop) e a % de carga
     RCLCPP_INFO(this->get_logger(), "     |-> Inliers:        ~%.4f ms (%5.1f%% load)", wall_inliers, pct_inliers);
     RCLCPP_INFO(this->get_logger(), "     |-> Analysis:       ~%.4f ms (%5.1f%% load)", wall_analysis, pct_analysis);
     RCLCPP_INFO(this->get_logger(), "     |-> Scoring:        ~%.4f ms", wall_scoring);
@@ -2145,8 +2166,8 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 best_grasps_[i].total_score,
                 best_grasps_[i].score_symmetry_entry, 
                 best_grasps_[i].score_symmetry_exit,
-                best_grasps_[i].score_orientation_entry, // Campo novo
-                best_grasps_[i].score_orientation_exit   // Campo novo
+                best_grasps_[i].score_orientation_entry, 
+                best_grasps_[i].score_orientation_exit   
              );
         }
     } else {
@@ -2154,12 +2175,11 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     }
     RCLCPP_INFO(this->get_logger(), "==================================================================");
 
-    // Atualiza Stats (Mantemos o raw data para debug, mas você pode salvar o wall_inliers se preferir)
     g_last_run_stats.kd_tree = d_kdtree;
     g_last_run_stats.total_func = d_func;
     g_last_run_stats.loop_tbb = d_loop;
-    g_last_run_stats.max_inliers = wall_inliers; // Salvando o normalizado
-    g_last_run_stats.max_analysis = wall_analysis; // Salvando o normalizado
+    g_last_run_stats.max_inliers = wall_inliers; 
+    g_last_run_stats.max_analysis = wall_analysis; 
     g_last_run_stats.max_scoring = wall_scoring;
     g_last_run_stats.sort = d_sort;
     g_last_run_stats.collision = d_col;
