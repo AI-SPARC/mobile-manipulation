@@ -52,7 +52,6 @@ public:
             "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx"
         );
 
-
         main_frame_id_ = this->get_parameter("main_frame_id").as_string();
         int num_robots = this->get_parameter("num_robots").as_int();
         use_ground_truth_ = this->get_parameter("use_ground_truth").as_bool();
@@ -69,7 +68,6 @@ public:
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-        
         float threshold = 0.875f;
         faiss_loop_detector_ = std::make_shared<slam_feature_matching::FaissLoopDetector>(threshold);
         lightglue_matcher_ = std::make_shared<slam_feature_matching::LightGlueMatcher>(lightglue_path);
@@ -87,7 +85,7 @@ public:
         gt_subs_.reserve(num_robots);
         cb_groups_.reserve(num_robots);
 
-      // Parâmetros: Roll (x), Pitch (y), Yaw (z)
+        // Parâmetros: Roll (x), Pitch (y), Yaw (z)
         gtsam::Rot3 rot = gtsam::Rot3::RzRyRx(-1.2407, 0.0000, -1.5278);
         gtsam::Point3 trans(0.1190, 0.0000, 0.3435);
         gtsam::Pose3 T_base_opt_(rot, trans);
@@ -102,12 +100,12 @@ public:
             rclcpp::SubscriptionOptions sub_options;
             sub_options.callback_group = cb_group;
 
-          
-            std::string factor_topic = "/robot_" + std::to_string(i) + "/slam/camera_factors";
-            std::string image_topic = "/robot_" + std::to_string(i) + "/loop_closure/dino_image";
-            std::string depth_topic = "/robot_" + std::to_string(i) + "/loop_closure/depth_image"; 
+            // Nomes genéricos com sufixo do índice, sem a barra inicial (tópicos relativos)
+            std::string idx = std::to_string(i);
+            std::string factor_topic = "slam/camera_factors_" + idx;
+            std::string image_topic = "loop_closure/dino_image_" + idx;
+            std::string depth_topic = "loop_closure/depth_image_" + idx; 
             
-           
             auto factor_sub = std::make_shared<message_filters::Subscriber<slam_interfaces::msg::GtsamData>>(
                 this, factor_topic, rmw_qos_profile_default, sub_options);
                 
@@ -117,7 +115,6 @@ public:
             auto depth_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
                 this, depth_topic, rmw_qos_profile_default, sub_options);
 
-               
             auto sync = std::make_shared<Synchronizer>(ExactSyncPolicy(10), *factor_sub, *image_sub, *depth_sub);
             
             sync->registerCallback(
@@ -132,7 +129,7 @@ public:
             
             if (use_ground_truth_)
             {
-                std::string gt_topic = "/robot_" + std::to_string(i) + "/ground_truth";
+                std::string gt_topic = "ground_truth_" + idx;
                 auto gt_sub = this->create_subscription<nav_msgs::msg::Odometry>(
                     gt_topic, 10,
                     [this, i](const nav_msgs::msg::Odometry::SharedPtr msg) {
@@ -143,11 +140,11 @@ public:
                 gt_subs_.push_back(gt_sub);
             }
 
-         
-            std::string odom_topic = "/robot_" + std::to_string(i) + "/odom";
-            std::string marker_topic = "/robot_" + std::to_string(i) + "/gtsam_graph";
-            std::string path_topic = "/robot_" + std::to_string(i) + "/gtsam_path";
-            std::string camera_info_topic = "/robot_" + std::to_string(i) + "/camera_0/depth/camera_info"; 
+            // Publicadores também usando tópicos relativos indexados
+            std::string odom_topic = "odom_" + idx;
+            std::string marker_topic = "gtsam_graph_" + idx;
+            std::string path_topic = "gtsam_path_" + idx;
+            std::string camera_info_topic = "camera_info_" + idx; 
             
             auto info_sub = this->create_subscription<sensor_msgs::msg::CameraInfo>(
                 camera_info_topic, 10,
@@ -158,13 +155,10 @@ public:
             );
             camera_info_subs_.push_back(info_sub);
 
-           
             odom_pubs_.push_back(this->create_publisher<nav_msgs::msg::Odometry>(odom_topic, 10));
             graph_markers_pubs_.push_back(this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_topic, 10));
             path_pubs_.push_back(this->create_publisher<nav_msgs::msg::Path>(path_topic, 10));
         }
-
-        
     }
 
 private:
@@ -255,7 +249,6 @@ private:
         char robot_prefix = 'a' + robot_id;
         
         std::string odom_frame = "robot_" + std::to_string(robot_id) + "/odom";
-        std::string main_frame_id = "base_link";
 
         try 
         {
@@ -266,7 +259,7 @@ private:
             nav_msgs::msg::Odometry odom_msg;
             odom_msg.header.stamp = stamp;
             odom_msg.header.frame_id = odom_frame;        
-            odom_msg.child_frame_id = main_frame_id;    
+            odom_msg.child_frame_id = main_frame_id_;    
 
             gtsam::Pose3 base_pose = optimized_pose;
             
@@ -283,7 +276,7 @@ private:
             geometry_msgs::msg::TransformStamped t;
             t.header.stamp = stamp;
             t.header.frame_id = odom_frame;
-            t.child_frame_id = main_frame_id;
+            t.child_frame_id = main_frame_id_;
             t.transform.translation.x = base_pose.x();
             t.transform.translation.y = base_pose.y();
             t.transform.translation.z = base_pose.z();
@@ -404,7 +397,7 @@ private:
             RCLCPP_INFO(this->get_logger(), "[Robo %d] --- RELATORIO GTSAM GLOBAL ---", robot_id);
             RCLCPP_INFO(this->get_logger(), "[Grafo Global] Nos Totais: %d", (int)global_optimized_estimates_.size());
             RCLCPP_INFO(this->get_logger(), "[Grafo Global] Arestas Totais: %d", (int)global_isam2_.getFactorsUnsafe().size());
-            RCLCPP_INFO(this->get_logger(), "[Robo %d] Pose odom->%s [X: %.3f | Y: %.3f | Z: %.3f]", robot_id, main_frame_id.c_str(), base_pose.x(), base_pose.y(), base_pose.z());
+            RCLCPP_INFO(this->get_logger(), "[Robo %d] Pose odom->%s [X: %.3f | Y: %.3f | Z: %.3f]", robot_id, main_frame_id_.c_str(), base_pose.x(), base_pose.y(), base_pose.z());
             
             
             if (use_ground_truth_ && state.has_gt) 

@@ -78,23 +78,18 @@ public:
         this->declare_parameter<bool>("use_imu", false);
         this->declare_parameter<int>("num_cameras", 1);
         
-        this->declare_parameter<std::string>("robot_namespace", "robot_0"); 
+        this->declare_parameter<std::string>("dino_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx");
+        this->declare_parameter<std::string>("lightglue_path", "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx");
 
         main_frame_id_ = this->get_parameter("main_frame_id").as_string();
         use_imu = this->get_parameter("use_imu").as_bool();
         num_cameras_ = this->get_parameter("num_cameras").as_int();
 
-
-        std::string dino_path = "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx";
-        std::string lightglue_path = "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx";
-        
+        std::string dino_path = this->get_parameter("dino_path").as_string();
+        std::string lightglue_path = this->get_parameter("lightglue_path").as_string();
 
         dino_extractor_ = std::make_shared<slam_feature_matching::DinoExtractor>(dino_path);
         lightglue_matcher_ = std::make_shared<slam_feature_matching::LightGlueMatcher>(lightglue_path);
-
-
-        std::string robot_ns = this->get_parameter("robot_namespace").as_string();
-        std::string ns_prefix = "/" + robot_ns;
 
         {
             std::lock_guard<std::mutex> lock(frame_process_result_mutex);
@@ -116,33 +111,11 @@ public:
         rclcpp::QoS sensor_qos = rclcpp::SensorDataQoS();
         rclcpp::QoS default_qos(10);                     
        
-       
-        gt_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            ns_prefix + "/ground_truth", default_qos, std::bind(&SlamCoreNode::ground_truth_callback, this, std::placeholders::_1));
-        
-        current_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
-            ns_prefix + "/flann/current_image", sensor_qos);
-            
-        odometry_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
-            ns_prefix + "/flann/odometry_matches", sensor_qos);
-        
-        graph_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-            ns_prefix + "/slam/factor_graph", default_qos);
-            
-        odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(
-            ns_prefix + "/slam/odom", default_qos);
-            
-        graph_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-            ns_prefix + "/slam/graph_markers", default_qos);
-            
-        path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
-            ns_prefix + "/slam/trajectory_path", default_qos);
-
         factor_pub_ = this->create_publisher<slam_interfaces::msg::GtsamData>(
-            ns_prefix + "/slam/camera_factors", 10);
+            "slam/camera_factors", 10);
 
-        image_transport_pub_ = image_transport::create_publisher(this, ns_prefix + "/loop_closure/dino_image");
-        depth_image_transport_pub_ = image_transport::create_publisher(this, ns_prefix + "/loop_closure/depth_image");
+        image_transport_pub_ = image_transport::create_publisher(this, "loop_closure/dino_image");
+        depth_image_transport_pub_ = image_transport::create_publisher(this, "loop_closure/depth_image");
        
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -159,7 +132,7 @@ public:
             std::bind(&SlamCoreNode::process_gtsam, this)
         );
 
-        RCLCPP_INFO(this->get_logger(), "--- NO DE ODOMETRIA VISUAL INICIADO PARA O ROBO: %s ---", robot_ns.c_str());
+        RCLCPP_INFO(this->get_logger(), "--- NO DE ODOMETRIA VISUAL INICIADO NO NAMESPACE: %s ---", this->get_namespace());
     }
 
     ~SlamCoreNode() {
@@ -258,17 +231,8 @@ private:
     image_transport::Publisher depth_image_transport_pub_;
     image_transport::Publisher image_transport_pub_;
 
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr current_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr odometry_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_markers_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_pub_;
     rclcpp::Publisher<slam_interfaces::msg::GtsamData>::SharedPtr factor_pub_;
 
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr gt_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_; 
 
     rclcpp::Time last_processed_time_;
     rclcpp::TimerBase::SharedPtr gtsam_timer_;
@@ -297,74 +261,6 @@ private:
     std::mutex frame_process_result_mutex;
 
 
-    void publish_factor_graph(const gtsam::NonlinearFactorGraph& graph, const gtsam::Values& current_estimate)
-    {
-        if (graph_pub_->get_subscription_count() == 0 || current_estimate.empty()) return;
-
-        visualization_msgs::msg::MarkerArray marker_array;
-
-        visualization_msgs::msg::Marker nodes_marker;
-        nodes_marker.header.frame_id = "map";
-        nodes_marker.header.stamp = this->now();
-        nodes_marker.ns = "gtsam_nodes";
-        nodes_marker.id = 0;
-        nodes_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
-        nodes_marker.action = visualization_msgs::msg::Marker::ADD;
-        nodes_marker.pose.orientation.w = 1.0;
-        nodes_marker.scale.x = 0.1; 
-        nodes_marker.scale.y = 0.1;
-        nodes_marker.scale.z = 0.1;
-        nodes_marker.color.r = 0.0f;
-        nodes_marker.color.g = 0.5f;
-        nodes_marker.color.b = 1.0f;
-        nodes_marker.color.a = 1.0f;
-
-        for (const auto& key_value : current_estimate) {
-            auto pose = key_value.value.cast<gtsam::Pose3>();
-            geometry_msgs::msg::Point p;
-            p.x = pose.x();
-            p.y = pose.y();
-            p.z = pose.z();
-            nodes_marker.points.push_back(p);
-        }
-        marker_array.markers.push_back(nodes_marker);
-
-        visualization_msgs::msg::Marker edges_marker;
-        edges_marker.header.frame_id = "map";
-        edges_marker.header.stamp = this->now();
-        edges_marker.ns = "gtsam_edges";
-        edges_marker.id = 1;
-        edges_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
-        edges_marker.action = visualization_msgs::msg::Marker::ADD;
-        edges_marker.pose.orientation.w = 1.0;
-        edges_marker.scale.x = 0.02; 
-        edges_marker.color.r = 0.0f;
-        edges_marker.color.g = 1.0f;
-        edges_marker.color.b = 0.0f;
-        edges_marker.color.a = 0.8f;
-
-        for (const auto& factor : graph) {
-            auto between_factor = boost::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(factor);
-            if (between_factor) {
-                gtsam::Key key1 = between_factor->key1();
-                gtsam::Key key2 = between_factor->key2();
-
-                if (current_estimate.exists(key1) && current_estimate.exists(key2)) {
-                    gtsam::Pose3 pose1 = current_estimate.at<gtsam::Pose3>(key1);
-                    gtsam::Pose3 pose2 = current_estimate.at<gtsam::Pose3>(key2);
-
-                    geometry_msgs::msg::Point p1, p2;
-                    p1.x = pose1.x(); p1.y = pose1.y(); p1.z = pose1.z();
-                    p2.x = pose2.x(); p2.y = pose2.y(); p2.z = pose2.z();
-
-                    edges_marker.points.push_back(p1);
-                    edges_marker.points.push_back(p2);
-                }
-            }
-        }
-        marker_array.markers.push_back(edges_marker);
-        graph_pub_->publish(marker_array);
-    }
 
 
     void ground_truth_callback(const nav_msgs::msg::Odometry::SharedPtr msg) 
@@ -623,18 +519,7 @@ private:
                 {
                     keyframe_id_ = 0; 
 
-                    // msg_copy->header.frame_id = std::to_string(keyframe_id_);
-                            
-                            
-                    int current_kf_id;
-                    try {
-                        current_kf_id = std::stoi(msg_copy->header.frame_id);
-                    } 
-                    catch (...) 
-                    {
-                        RCLCPP_ERROR(this->get_logger(), "Erro ao converter frame_id para int!");
-                        current_kf_id = -1; 
-                    }
+                
 
                     
                     cv_bridge::CvImagePtr cv_ptr;
@@ -758,11 +643,6 @@ private:
                 }
             }
 
-
-            std_msgs::msg::Header match_header;
-            match_header.stamp = current_time; 
-            match_header.frame_id = current_frame.rgb_frame; 
-            odometry_pub_->publish(*cv_bridge::CvImage(match_header, "bgr8", debug_image).toImageMsg());
         }
         
         if (matches.size() >= 5) 
@@ -973,21 +853,7 @@ private:
                     {
                         if (translation_dist > 0.15 || rotation_dist > 0.1) 
                         {
-                            keyframe_id_++; 
-
-                            // msg_copy->header.frame_id = std::to_string(keyframe_id_);
-                            
-                            
-                            int current_kf_id;
-                            try {
-                                current_kf_id = std::stoi(msg_copy->header.frame_id);
-                            } 
-                            catch (...) 
-                            {
-                                RCLCPP_ERROR(this->get_logger(), "Erro ao converter frame_id para int!");
-                                current_kf_id = -1; 
-                            }
-
+                            keyframe_id_++;
                             
                             cv_bridge::CvImagePtr cv_ptr;
                             try 
@@ -1038,19 +904,6 @@ private:
                     else 
                     {
                         
-                        // msg_copy->header.frame_id = std::to_string(keyframe_id_);
-                            
-                            
-                        int current_kf_id;
-                        try {
-                            current_kf_id = std::stoi(msg_copy->header.frame_id);
-                        } 
-                        catch (...) 
-                        {
-                            RCLCPP_ERROR(this->get_logger(), "Erro ao converter frame_id para int!");
-                            current_kf_id = -1; 
-                        }
-
                         
                         cv_bridge::CvImagePtr cv_ptr;
                         try 
