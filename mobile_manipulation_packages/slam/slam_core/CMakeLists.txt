@@ -30,7 +30,7 @@ find_package(faiss REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(slam_interfaces REQUIRED)
-
+find_package(image_transport REQUIRED)
 
 find_package(slam_feature_matching REQUIRED)
 
@@ -66,6 +66,7 @@ ament_target_dependencies(slam_core_lib
   tf2_ros
   tf2_geometry_msgs
   slam_feature_matching
+  image_transport
 )
 
 target_link_libraries(slam_core_lib
@@ -100,6 +101,7 @@ ament_target_dependencies(slam_core
   visualization_msgs
   slam_interfaces
   slam_feature_matching 
+  image_transport
 )
 
 target_link_libraries(slam_core
@@ -158,6 +160,7 @@ ament_target_dependencies(gtsam_and_loop_closure
   std_msgs
   visualization_msgs
   slam_interfaces
+  message_filters
   slam_feature_matching
   cv_bridge
   PCL 
@@ -165,6 +168,7 @@ ament_target_dependencies(gtsam_and_loop_closure
   OpenCV
   Eigen3
   GTSAM
+  image_transport
 )
 
 target_link_libraries(gtsam_and_loop_closure 

@@ -23,6 +23,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
+#include <image_transport/image_transport.hpp>
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -86,7 +87,7 @@ public:
 
         std::string dino_path = "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/dinov2_small.onnx";
         std::string lightglue_path = "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx";
-        float threshold = 0.875f;
+        
 
         dino_extractor_ = std::make_shared<slam_feature_matching::DinoExtractor>(dino_path);
         lightglue_matcher_ = std::make_shared<slam_feature_matching::LightGlueMatcher>(lightglue_path);
@@ -139,7 +140,9 @@ public:
 
         factor_pub_ = this->create_publisher<slam_interfaces::msg::GtsamData>(
             ns_prefix + "/slam/camera_factors", 10);
-        
+
+        image_transport_pub_ = image_transport::create_publisher(this, ns_prefix + "/loop_closure/dino_image");
+        depth_image_transport_pub_ = image_transport::create_publisher(this, ns_prefix + "/loop_closure/depth_image");
        
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -188,8 +191,10 @@ private:
         gtsam::Pose3 estimate;
         int target_keyframe_id = 0;
         bool is_new = false;
-        rclcpp::Time time;
+        std_msgs::msg::Header header;
         std::vector<float> signature;
+        sensor_msgs::msg::Image::SharedPtr image;
+        sensor_msgs::msg::Image::SharedPtr depth_image;
     };
 
     struct LoopFactorData
@@ -250,7 +255,9 @@ private:
     cv::Ptr<cv::BFMatcher> local_matcher_; 
     cv::Ptr<cv::ORB> orb_;
 
-   
+    image_transport::Publisher depth_image_transport_pub_;
+    image_transport::Publisher image_transport_pub_;
+
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr current_pub_;
@@ -433,7 +440,7 @@ private:
                          const std::vector<double>& weights, 
                          Eigen::Matrix4d& out_T) 
     {
-        // Validação inicial das entradas
+       
         if (pts_source.empty() || pts_source.size() != pts_target.size() || pts_source.size() != weights.size()) {
             return false;
         }
@@ -442,20 +449,20 @@ private:
         Eigen::Vector3d centroid_source = Eigen::Vector3d::Zero();
         Eigen::Vector3d centroid_target = Eigen::Vector3d::Zero();
 
-        // Calcula os centroides ponderados
+        
         for (size_t i = 0; i < pts_source.size(); ++i) {
             total_weight += weights[i];
             centroid_source += weights[i] * pts_source[i];
             centroid_target += weights[i] * pts_target[i];
         }
 
-        // Evita divisão por zero se os pesos forem muito pequenos
+        
         if (total_weight < 1e-6) return false;
 
         centroid_source /= total_weight;
         centroid_target /= total_weight;
 
-        // Calcula a matriz de covariância cruzada ponderada (H)
+       
         Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
         for (size_t i = 0; i < pts_source.size(); ++i) {
             Eigen::Vector3d p_source = pts_source[i] - centroid_source;
@@ -463,24 +470,25 @@ private:
             H += weights[i] * p_source * p_target.transpose();
         }
 
-        // Decomposição em Valores Singulares (SVD)
+        
         Eigen::JacobiSVD<Eigen::Matrix3d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
         Eigen::Matrix3d U = svd.matrixU();
         Eigen::Matrix3d V = svd.matrixV();
 
-        // Calcula a matriz de rotação R
+       
         Eigen::Matrix3d R = V * U.transpose();
         
-        // Corrige possível reflexão (garante que seja uma rotação válida com determinante +1)
-        if (R.determinant() < 0) {
+        
+        if (R.determinant() < 0) 
+        {
             V.col(2) *= -1.0;
             R = V * U.transpose();
         }
 
-        // Calcula o vetor de translação t
+       
         Eigen::Vector3d t = centroid_target - R * centroid_source;
         
-        // Monta a matriz de transformação homogênea 4x4
+       
         out_T = Eigen::Matrix4d::Identity();
         out_T.block<3,3>(0,0) = R;
         out_T.block<3,1>(0,3) = t;
@@ -574,6 +582,7 @@ private:
             }
 
             auto msg_copy = std::make_shared<sensor_msgs::msg::Image>(*cam_data.rgb);
+            auto depth_msg_copy = std::make_shared<sensor_msgs::msg::Image>(*cam_data.depth);
 
             if (!tf_received_) 
             {
@@ -614,7 +623,7 @@ private:
                 {
                     keyframe_id_ = 0; 
 
-                    msg_copy->header.frame_id = std::to_string(keyframe_id_);
+                    // msg_copy->header.frame_id = std::to_string(keyframe_id_);
                             
                             
                     int current_kf_id;
@@ -681,11 +690,18 @@ private:
                         }
                     }
 
+                    init_msg.header.stamp = cam_data.stamp;
+                    msg_copy->header.stamp = cam_data.stamp;
+                    depth_msg_copy->header.stamp = cam_data.stamp;
+
                     if (factor_pub_) 
                     {
                         factor_pub_->publish(init_msg);
                         RCLCPP_INFO(this->get_logger(), "[Cam 0] Fator de inicializacao enviado para o no GTSAM.");
                     }
+                   
+                    image_transport_pub_.publish(msg_copy);
+                    depth_image_transport_pub_.publish(depth_msg_copy);
                    
                     
                     
@@ -697,15 +713,18 @@ private:
                 continue; 
             }
 
-            compute_translation_and_rotation(camera_id, current_frame, cam_data.stamp, msg_copy);
+            compute_translation_and_rotation(camera_id, current_frame, cam_data.stamp, msg_copy, depth_msg_copy);
             
             if (camera_id == 0) frame_count_++;
         }
     }
 
     
-    void compute_translation_and_rotation(int camera_id, FrameData& current_frame, rclcpp::Time current_stamp, std::shared_ptr<sensor_msgs::msg::Image> msg_copy)
+    void compute_translation_and_rotation(int camera_id, FrameData& current_frame, rclcpp::Time current_stamp, 
+        std::shared_ptr<sensor_msgs::msg::Image> msg_copy, std::shared_ptr<sensor_msgs::msg::Image> depth_msg_copy)
     {
+    
+
         sensor_msgs::msg::Image::ConstSharedPtr rgb_msg;
         sensor_msgs::msg::Image::ConstSharedPtr depth_msg;
 
@@ -956,7 +975,7 @@ private:
                         {
                             keyframe_id_++; 
 
-                            msg_copy->header.frame_id = std::to_string(keyframe_id_);
+                            // msg_copy->header.frame_id = std::to_string(keyframe_id_);
                             
                             
                             int current_kf_id;
@@ -992,8 +1011,8 @@ private:
                             }
 
 
-
-                            
+                           
+                           
                             {
                                 std::lock_guard<std::mutex> lock(frame_process_result_mutex);
                                 
@@ -1001,9 +1020,11 @@ private:
                                 frame_process_result[camera_id].visual_noise = visual_noise;
                                 frame_process_result[camera_id].estimate = current_global_pose;
                                 frame_process_result[camera_id].target_keyframe_id = keyframe_id_; 
-                                frame_process_result[camera_id].is_new = true;
-                                frame_process_result[camera_id].time = current_stamp;
+                                frame_process_result[camera_id].is_new = true;                            
+                                frame_process_result[camera_id].header = msg_copy->header; 
                                 frame_process_result[camera_id].signature = signature;
+                                frame_process_result[camera_id].image = msg_copy;
+                                frame_process_result[camera_id].depth_image = depth_msg_copy;
                             }
 
                             last_keyframe_pose_[camera_id] = global_pose_[camera_id].clone();
@@ -1017,7 +1038,7 @@ private:
                     else 
                     {
                         
-                        msg_copy->header.frame_id = std::to_string(keyframe_id_);
+                        // msg_copy->header.frame_id = std::to_string(keyframe_id_);
                             
                             
                         int current_kf_id;
@@ -1059,8 +1080,10 @@ private:
                             frame_process_result[camera_id].estimate = current_global_pose;
                             frame_process_result[camera_id].target_keyframe_id = keyframe_id_; 
                             frame_process_result[camera_id].is_new = true;
-                            frame_process_result[camera_id].time = current_stamp;
+                            frame_process_result[camera_id].header = msg_copy->header; 
                             frame_process_result[camera_id].signature = signature;
+                            frame_process_result[camera_id].image = msg_copy;
+                            frame_process_result[camera_id].depth_image = depth_msg_copy;
                         }
 
                         last_keyframe_pose_[camera_id] = global_pose_[camera_id].clone();
@@ -1112,6 +1135,9 @@ private:
                 }
 
                 slam_interfaces::msg::GtsamData msg;
+
+                msg.header = frame_process_result[i].header;
+
                 msg.keyframe = kf_id;
 
                 gtsam::Point3 t = frame_process_result[i].delta_base.translation();
@@ -1152,8 +1178,26 @@ private:
                 msg.signature = frame_process_result[i].signature;
 
                 if (factor_pub_)
-                 {
+                {
                     factor_pub_->publish(msg);
+                }
+
+                if (frame_process_result[i].image != nullptr) 
+                {
+                    frame_process_result[i].image->header = frame_process_result[i].header;
+        
+                    image_transport_pub_.publish(frame_process_result[i].image);
+                    
+                    RCLCPP_INFO(this->get_logger(), "Imagem da câmera %d publicada com sucesso!", i);
+                }
+
+                if (frame_process_result[i].depth_image != nullptr) 
+                {
+                    frame_process_result[i].depth_image->header = frame_process_result[i].header;
+        
+                    depth_image_transport_pub_.publish(frame_process_result[i].depth_image);
+                    
+                    RCLCPP_INFO(this->get_logger(), "Imagem Depth da câmera %d publicada com sucesso!", i);
                 }
 
                 RCLCPP_INFO(this->get_logger(), "[Pub] Fator enviado: Camera %d -> KF %d", i, kf_id);

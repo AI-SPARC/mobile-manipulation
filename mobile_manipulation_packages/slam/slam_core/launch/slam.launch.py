@@ -7,7 +7,7 @@ def generate_launch_description():
     
     robots_config = {
         'robot_0': 1,  
-        #  'robot_1': 1,   
+        # 'robot_1': 1,   
     }
 
     add_noise_parameters = {
@@ -75,13 +75,19 @@ def generate_launch_description():
 
         nodes_to_start.append(slam_core_node)
 
+    gtsam_remmapings = [
+        ('/scan', f'/robot_0/front_2d_lidar/scan'),
+        ('/tf', f'/robot_0/tf'),
+        ('/tf_static', f'/robot_0/tf_static')
+    ]
+
     gtsam_node = Node(
         package='slam_core',     
         executable='gtsam_and_loop_closure',  
         name='gtsam_and_loop_closure',     
         output='screen',                 
         parameters=[slam_parameters],
-        remappings=slam_core_remappings 
+        remappings=gtsam_remmapings 
     )
 
     nodes_to_start.append(gtsam_node)

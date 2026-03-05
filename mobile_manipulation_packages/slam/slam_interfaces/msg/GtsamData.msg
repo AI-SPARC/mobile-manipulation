@@ -1,3 +1,5 @@
+std_msgs/Header header
+
 int32 keyframe
 geometry_msgs/PoseWithCovariance delta_base
 
