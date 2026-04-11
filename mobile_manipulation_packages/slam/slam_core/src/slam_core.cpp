@@ -53,7 +53,7 @@
 
 #include "slam_interfaces/msg/gtsam_data.hpp"
 
-#include <slam_core/Mapping.hpp>
+
 #include <slam_core/ImuIntegration.hpp>
 #include <slam_core/CameraIntegration.hpp>
 
@@ -65,12 +65,10 @@ class SlamCoreNode : public rclcpp::Node
 {
 public:
     SlamCoreNode(
-        std::shared_ptr<slam_core::Mapping> mapping_node,
         std::shared_ptr<slam_core::ImuIntegration> imu_integration_node,
         std::shared_ptr<slam_core::CameraIntegration> camera_integration_node,
         const rclcpp::NodeOptions & options = rclcpp::NodeOptions()
     ) : Node("slam_core_node", options) , 
-        mapping_node_(mapping_node),
         imu_integration_node_(imu_integration_node),
         camera_integration_node_(camera_integration_node)
     {
@@ -249,7 +247,7 @@ private:
     std::shared_ptr<slam_feature_matching::DinoExtractor> dino_extractor_;
     std::shared_ptr<slam_feature_matching::LightGlueMatcher> lightglue_matcher_;
         
-    std::shared_ptr<slam_core::Mapping> mapping_node_;
+    
     std::shared_ptr<slam_core::ImuIntegration> imu_integration_node_;
     std::shared_ptr<slam_core::CameraIntegration> camera_integration_node_;
     
@@ -261,33 +259,6 @@ private:
     std::mutex frame_process_result_mutex;
 
 
-
-
-    void ground_truth_callback(const nav_msgs::msg::Odometry::SharedPtr msg) 
-    {
-        Eigen::Quaterniond q(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
-                            msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
-        gtsam::Point3 t(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
-        
-        gtsam::Pose3 current_gt_pose = gtsam::Pose3(gtsam::Rot3(q), t);
-
-        if (!first_gt_received_) 
-        {
-            initial_gt_pose_ = current_gt_pose;
-            previous_gt_pose_ = current_gt_pose; 
-            total_gt_distance_ = 0.0;            
-            first_gt_received_ = true;
-        }
-        else
-        {
-            double step_distance = (current_gt_pose.translation() - previous_gt_pose_.translation()).norm();
-            total_gt_distance_ += step_distance;
-        }
-
-        latest_gt_pose_ = current_gt_pose;
-        previous_gt_pose_ = current_gt_pose; 
-        has_gt_ = true;
-    }
 
     float get_robust_depth(const cv::Mat& depth_img, float x_f, float y_f) 
     {
@@ -473,7 +444,7 @@ private:
                     dist_coeffs_[camera_id] = cv::Mat::zeros(4, 1, CV_64F);
                 }
                 
-                if (camera_id == 0) mapping_node_->set_camera_info(info_msg, main_frame_id_, 1000.0);
+                // if (camera_id == 0) mapping_node_->set_camera_info(info_msg, main_frame_id_, 1000.0);
                 camera_info_received_[camera_id] = true;
             }
 
@@ -851,7 +822,7 @@ private:
                     
                     if (camera_id == 0) 
                     {
-                        if (translation_dist > 0.15 || rotation_dist > 0.1) 
+                        if (translation_dist > 0.1 || rotation_dist > 0.1) 
                         {
                             keyframe_id_++;
                             
@@ -1068,44 +1039,30 @@ int main(int argc, char * argv[])
 
     rclcpp::NodeOptions global_options;
 
-    std::string current_robot_ns = "robot_0";
     int current_num_cameras = 1;
 
     
     {
         auto temp_node = std::make_shared<rclcpp::Node>("slam_core", global_options);
-        current_robot_ns = temp_node->declare_parameter<std::string>("robot_namespace", "robot_0");
         current_num_cameras = temp_node->declare_parameter<int>("num_cameras", 1);
     } 
 
 
-    rclcpp::NodeOptions mapping_opts;
-    mapping_opts.arguments({"--ros-args", "-r", "__node:=mapping_node", "-p", "use_sim_time:=true"});
-    mapping_opts.parameter_overrides({
-        {"robot_namespace", current_robot_ns}
-    });
-
     rclcpp::NodeOptions imu_opts;
     imu_opts.arguments({"--ros-args", "-r", "__node:=imu_integration_node", "-p", "use_sim_time:=true"});
-    imu_opts.parameter_overrides({
-        {"robot_namespace", current_robot_ns}
-    });
 
     rclcpp::NodeOptions camera_opts;
     camera_opts.arguments({"--ros-args", "-r", "__node:=camera_integration_node", "-p", "use_sim_time:=true"});
     camera_opts.parameter_overrides({
-        {"robot_namespace", current_robot_ns},
         {"num_cameras", current_num_cameras}
     });
 
     
-    auto mapping_node = std::make_shared<slam_core::Mapping>(mapping_opts);
     auto imu_integration_node = std::make_shared<slam_core::ImuIntegration>(imu_opts);
     auto camera_integration_node = std::make_shared<slam_core::CameraIntegration>(camera_opts);
 
  
     auto server_node = std::make_shared<SlamCoreNode>(
-        mapping_node, 
         imu_integration_node, 
         camera_integration_node,
         global_options 
@@ -1114,7 +1071,6 @@ int main(int argc, char * argv[])
   
     rclcpp::executors::MultiThreadedExecutor executor;
     
-    executor.add_node(mapping_node);
     executor.add_node(imu_integration_node);
     executor.add_node(camera_integration_node);
     executor.add_node(server_node);

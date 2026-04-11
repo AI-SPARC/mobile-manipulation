@@ -31,15 +31,11 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(slam_interfaces REQUIRED)
 find_package(image_transport REQUIRED)
-
 find_package(slam_feature_matching REQUIRED)
-
 
 set(ONNXRUNTIME_DIR "/home/momesso/onnxruntime-linux-x64-1.18.0")
 
-
 add_library(slam_core_lib SHARED
-  src/mapping.cpp
   src/imu_integration.cpp
   src/camera_integration.cpp
 )
@@ -73,7 +69,6 @@ target_link_libraries(slam_core_lib
   faiss
   ${ONNXRUNTIME_DIR}/lib/libonnxruntime.so
 )
-
 
 add_executable(slam_core
   src/slam_core.cpp
@@ -112,8 +107,8 @@ target_link_libraries(slam_core
   ${ONNXRUNTIME_DIR}/lib/libonnxruntime.so
 )
 
-
 add_executable(add_noise src/add_noise.cpp)
+
 ament_target_dependencies(add_noise 
   trajectory_msgs 
   rclcpp 
@@ -140,15 +135,22 @@ target_link_libraries(add_noise
   Eigen3::Eigen
 )
 
-add_executable(gtsam_and_loop_closure src/gtsam_and_loop_closure.cpp)
+add_executable(gtsam_and_loop_closure 
+  src/gtsam_and_loop_closure.cpp
+  src/mapping.cpp
+)
 
 target_include_directories(gtsam_and_loop_closure PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+  ${OpenCV_INCLUDE_DIRS}
+  /usr/local/include
+  ${ONNXRUNTIME_DIR}/include
 )
 
 ament_target_dependencies(gtsam_and_loop_closure 
   rclcpp 
+  rclcpp_components
   trajectory_msgs 
   geometry_msgs 
   sensor_msgs 
@@ -180,6 +182,38 @@ target_link_libraries(gtsam_and_loop_closure
   gtsam 
   yaml-cpp 
   Eigen3::Eigen
+  ${ONNXRUNTIME_DIR}/lib/libonnxruntime.so
+)
+
+add_executable(ground_truth src/ground_truth.cpp)
+
+ament_target_dependencies(ground_truth 
+  trajectory_msgs 
+  rclcpp 
+  geometry_msgs 
+  PCL 
+  pcl_conversions 
+  sensor_msgs 
+  tf2_geometry_msgs 
+  tf2 
+  tf2_ros 
+  PCL
+  vision_msgs
+  std_msgs
+  Eigen3
+  cv_bridge
+  OpenCV
+  nav_msgs
+  GTSAM
+)
+
+target_link_libraries(ground_truth 
+  ${GLEW_LIBRARIES} 
+  ${PCL_LIBRARIES} 
+  ${OpenCV_LIBS} 
+  yaml-cpp 
+  gtsam
+  Eigen3::Eigen
 )
 
 
@@ -194,6 +228,7 @@ install(TARGETS
   slam_core
   add_noise
   gtsam_and_loop_closure
+  ground_truth
   DESTINATION lib/${PROJECT_NAME}
 )
 

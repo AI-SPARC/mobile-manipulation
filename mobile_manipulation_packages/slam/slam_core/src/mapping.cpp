@@ -15,12 +15,11 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
     this->declare_parameter<double>("map_publish_rate", 1.0);
     map_publish_rate_ = this->get_parameter("map_publish_rate").as_double();
 
-    std::string robot_ns = this->declare_parameter<std::string>("robot_namespace", "robot_0");
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-    std::string map_topic = "/" + robot_ns + "/slam/global_map";
+    std::string map_topic = "/slam/global_map";
     global_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(map_topic, 1);
     
     double timer_period_sec = 1.0 / map_publish_rate_;
@@ -33,8 +32,8 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
     static_transformStamped.header.stamp = this->now();
     
   
-    static_transformStamped.header.frame_id = robot_ns + "/map";
-    static_transformStamped.child_frame_id = robot_ns + "/odom"; 
+    static_transformStamped.header.frame_id = "/map";
+    static_transformStamped.child_frame_id = "/odom"; 
     
     static_transformStamped.transform.translation.x = 0.0;
     static_transformStamped.transform.translation.y = 0.0;
@@ -47,8 +46,7 @@ Mapping::Mapping(const rclcpp::NodeOptions & options)
     static_tf_broadcaster_->sendTransform(static_transformStamped);
     voxel_occupancy_set_.reserve(2000000);
 
-    RCLCPP_INFO(this->get_logger(), "[%s] Mapping Node criado. Publicacao assincrona a %.1f Hz.", 
-                robot_ns.c_str(), map_publish_rate_);
+    RCLCPP_INFO(this->get_logger(), "Mapping Node criado. Publicacao assincrona a %.1f Hz.", map_publish_rate_);
 }
 
 Mapping::~Mapping() {}
@@ -78,7 +76,13 @@ void Mapping::add_keyframe_data(int kf_id, const cv::Mat& rgb_img, const cv::Mat
     
     // Passa os frames detectados em tempo real para o gerador de nuvens
     data.local_cloud = generate_local_cloud(data.rgb, data.depth, rgb_frame, depth_frame);
-    keyframe_database_[kf_id] = data;
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+
+        keyframe_database_[kf_id] = data;
+
+    }
+    
 }
 
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(
@@ -198,91 +202,50 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr Mapping::generate_local_cloud(
     return downsampled_local_cloud;
 }
 
-void Mapping::update_global_map(const std::vector<std::pair<int, gtsam::Pose3>>& optimized_poses)
+void Mapping::update_global_map(const std::vector<std::pair<int, gtsam::Pose3>>& changed_poses)
 {
-    if (optimized_poses.empty()) return; 
+    if (changed_poses.empty()) return; 
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    bool is_massive_update = optimized_poses.size() > 1; 
+    std::lock_guard<std::mutex> lock(map_mutex_);
 
-    if (is_massive_update) 
+    // Como chegam TODAS as poses, limpamos o mapa atual para não gerar nuvens "fantasmas" (pontos duplicados no passado)
+    voxel_occupancy_set_.clear();
+
+    for (const auto& pair : changed_poses) 
     {
-        std::lock_guard<std::mutex> lock(map_mutex_);
-        voxel_occupancy_set_.clear();
-
-        for (const auto& pair : optimized_poses) 
+        int kf_id = pair.first;
+        if (keyframe_database_.find(kf_id) != keyframe_database_.end()) 
         {
-            int kf_id = pair.first;
-            const gtsam::Pose3& new_pose = pair.second;
-
-            if (keyframe_database_.find(kf_id) != keyframe_database_.end()) 
+            auto& kf_data = keyframe_database_[kf_id]; 
+            
+            // Só faz a transformação matricial PESADA se for uma pose nova ou se o GTSAM tiver movido ela (Loop Closure)
+            if (!kf_data.global_cloud_cache || !kf_data.pose.equals(pair.second, 1e-4)) 
             {
-                auto& kf_data = keyframe_database_[kf_id]; 
-                if (!kf_data.global_cloud_cache || !kf_data.pose.equals(new_pose, 1e-4)) 
-                {
-                    if (kf_data.local_cloud && !kf_data.local_cloud->empty()) 
-                    {
-                        Eigen::Matrix4f T_map_main = new_pose.matrix().cast<float>();
-                        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_map(new pcl::PointCloud<pcl::PointXYZRGB>());
-                        pcl::transformPointCloud(*(kf_data.local_cloud), *cloud_map, T_map_main);
-                        
-                        kf_data.pose = new_pose;
-                        kf_data.global_cloud_cache = cloud_map;
-                    }
-                }
-                
-                if (kf_data.global_cloud_cache) 
-                {
-                    for (const auto& pt : kf_data.global_cloud_cache->points) 
-                    {
-                        VoxelKey key{
-                            static_cast<int>(std::floor(pt.x / voxel_leaf_size_)),
-                            static_cast<int>(std::floor(pt.y / voxel_leaf_size_)),
-                            static_cast<int>(std::floor(pt.z / voxel_leaf_size_)),
-                            pt.r, pt.g, pt.b
-                        };
-                        voxel_occupancy_set_.insert(key);
-                    }
-                }
-            }
-        }
-    }
-    else
-    {
-        std::lock_guard<std::mutex> lock(map_mutex_);
-        
-        for (const auto& pair : optimized_poses) 
-        {
-            int kf_id = pair.first;
-            const gtsam::Pose3& new_pose = pair.second;
-
-            if (keyframe_database_.find(kf_id) != keyframe_database_.end()) 
-            {
-                auto& kf_data = keyframe_database_[kf_id]; 
-                
-                if (kf_data.local_cloud && !kf_data.local_cloud->empty()) 
-                {
-                    Eigen::Matrix4f T_map_main = new_pose.matrix().cast<float>();
+                if (kf_data.local_cloud && !kf_data.local_cloud->empty()) {
+                    Eigen::Matrix4f T_map_main = pair.second.matrix().cast<float>();
                     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_map(new pcl::PointCloud<pcl::PointXYZRGB>());
+                    
+                    // Transforma a nuvem local para a nova pose
                     pcl::transformPointCloud(*(kf_data.local_cloud), *cloud_map, T_map_main);
                     
-                    kf_data.pose = new_pose;
+                    kf_data.pose = pair.second;
                     kf_data.global_cloud_cache = cloud_map;
-                    
-                    for (const auto& pt : cloud_map->points) 
-                    {
-                        VoxelKey key{
-                            static_cast<int>(std::floor(pt.x / voxel_leaf_size_)),
-                            static_cast<int>(std::floor(pt.y / voxel_leaf_size_)),
-                            static_cast<int>(std::floor(pt.z / voxel_leaf_size_)),
-                            pt.r, pt.g, pt.b
-                        };
+                }
+            }
 
-                        if(voxel_occupancy_set_.find(key) == voxel_occupancy_set_.end())
-                        {
-                            voxel_occupancy_set_.insert(key);
-                        }
-                    }
+            // Adiciona os pontos (recalculados ou em cache) diretamente no conjunto de voxels
+            if (kf_data.global_cloud_cache) 
+            {
+                for (const auto& pt : kf_data.global_cloud_cache->points) 
+                {
+                    VoxelKey key{
+                        static_cast<int>(std::floor(pt.x / voxel_leaf_size_)),
+                        static_cast<int>(std::floor(pt.y / voxel_leaf_size_)),
+                        static_cast<int>(std::floor(pt.z / voxel_leaf_size_)),
+                        pt.r, pt.g, pt.b
+                    };
+                    voxel_occupancy_set_.insert(key);
                 }
             }
         }
@@ -291,9 +254,11 @@ void Mapping::update_global_map(const std::vector<std::pair<int, gtsam::Pose3>>&
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> ms_double = end_time - start_time;
 
-    RCLCPP_INFO(this->get_logger(), "[MAPPING] Calculo Interno (%s): %.2f ms", 
-            is_massive_update ? "Reconstrucao Total" : "Incremental", ms_double.count());
+    RCLCPP_INFO(this->get_logger(), "[MAPPING] Calculo Interno (Reconstrucao): %.2f ms", ms_double.count());
 }
+
+
+
 
 void Mapping::publish_map_callback()
 {
@@ -327,7 +292,7 @@ void Mapping::publish_map_callback()
 
     sensor_msgs::msg::PointCloud2 output_msg;
     pcl::toROSMsg(*cloud_to_publish, output_msg);
-    output_msg.header.frame_id = "map"; 
+    output_msg.header.frame_id = "camera_link"; 
     output_msg.header.stamp = this->now();
 
     global_map_pub_->publish(output_msg);

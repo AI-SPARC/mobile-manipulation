@@ -12,7 +12,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <tf2_ros/transform_broadcaster.h>
-#include <cv_bridge/cv_bridge.hpp> 
+#include <cv_bridge/cv_bridge.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/exact_time.h>
@@ -29,7 +29,7 @@
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/Marginals.h>
 #include <gtsam/inference/Symbol.h>
-#include <gtsam/navigation/ImuBias.h> 
+#include <gtsam/navigation/ImuBias.h>
 #include <gtsam/nonlinear/ISAM2.h>
 
 #include <Eigen/Dense>
@@ -37,38 +37,37 @@
 #include "slam_interfaces/msg/gtsam_data.hpp"
 #include "slam_feature_matching/FaissLoopDetector.hpp"
 #include "slam_feature_matching/LightGlueMatcher.hpp"
-
+#include <slam_core/Mapping.hpp>
 
 
 class GtsamOptimizationNode : public rclcpp::Node
 {
 public:
-    GtsamOptimizationNode() : Node("gtsam_optimization_node")
+    GtsamOptimizationNode(
+        std::shared_ptr<slam_core::Mapping> mapping_node,
+        const rclcpp::NodeOptions & options = rclcpp::NodeOptions()
+    ) : Node("gtsam_optimization_node", options), 
+        mapping_node_(mapping_node)
     {
         this->declare_parameter<std::string>("main_frame_id", "base_link");
         this->declare_parameter("num_robots", 1);
-        this->declare_parameter("use_ground_truth", true);
-        this->declare_parameter<std::string>("lightglue_path", 
+        this->declare_parameter<std::string>("lightglue_path",
             "/home/momesso/pibic/src/mobile_manipulation_packages/slam/slam_core/onxx/superpoint_lightglue_pipeline.onnx"
         );
 
         main_frame_id_ = this->get_parameter("main_frame_id").as_string();
         int num_robots = this->get_parameter("num_robots").as_int();
-        use_ground_truth_ = this->get_parameter("use_ground_truth").as_bool();
         std::string lightglue_path = this->get_parameter("lightglue_path").as_string();
-        
+
         RCLCPP_INFO(this->get_logger(), "Iniciando No GTSAM para %d robo(s)...", num_robots);
 
-        if(use_ground_truth_) 
-        {
-            RCLCPP_INFO(this->get_logger(), "Comparacao com Ground Truth ATIVADA.");
-        }
+
 
         RCLCPP_INFO(this->get_logger(), "LightGlue Path: %s", lightglue_path.c_str());
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-        float threshold = 0.875f;
+        float threshold = 0.93f;
         faiss_loop_detector_ = std::make_shared<slam_feature_matching::FaissLoopDetector>(threshold);
         lightglue_matcher_ = std::make_shared<slam_feature_matching::LightGlueMatcher>(lightglue_path);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -77,20 +76,17 @@ public:
         odom_pubs_.reserve(num_robots);
         graph_markers_pubs_.reserve(num_robots);
         path_pubs_.reserve(num_robots);
-        
+
         factor_subs_.reserve(num_robots);
         image_subs_.reserve(num_robots);
-        depth_subs_.reserve(num_robots); 
+        depth_subs_.reserve(num_robots);
         syncs_.reserve(num_robots);
         gt_subs_.reserve(num_robots);
         cb_groups_.reserve(num_robots);
 
-        // Parâmetros: Roll (x), Pitch (y), Yaw (z)
-        gtsam::Rot3 rot = gtsam::Rot3::RzRyRx(-1.2407, 0.0000, -1.5278);
-        gtsam::Point3 trans(0.1190, 0.0000, 0.3435);
-        gtsam::Pose3 T_base_opt_(rot, trans);
 
-        for (int i = 0; i < num_robots; ++i) 
+
+        for (int i = 0; i < num_robots; ++i)
         {
             robot_states_.push_back(std::make_unique<RobotSlamState>());
 
@@ -100,15 +96,14 @@ public:
             rclcpp::SubscriptionOptions sub_options;
             sub_options.callback_group = cb_group;
 
-            // Nomes genéricos com sufixo do índice, sem a barra inicial (tópicos relativos)
             std::string idx = std::to_string(i);
             std::string factor_topic = "slam/camera_factors_" + idx;
             std::string image_topic = "loop_closure/dino_image_" + idx;
-            std::string depth_topic = "loop_closure/depth_image_" + idx; 
-            
+            std::string depth_topic = "loop_closure/depth_image_" + idx;
+
             auto factor_sub = std::make_shared<message_filters::Subscriber<slam_interfaces::msg::GtsamData>>(
                 this, factor_topic, rmw_qos_profile_default, sub_options);
-                
+
             auto image_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
                 this, image_topic, rmw_qos_profile_default, sub_options);
 
@@ -116,42 +111,29 @@ public:
                 this, depth_topic, rmw_qos_profile_default, sub_options);
 
             auto sync = std::make_shared<Synchronizer>(ExactSyncPolicy(10), *factor_sub, *image_sub, *depth_sub);
-            
+
             sync->registerCallback(
-                std::bind(&GtsamOptimizationNode::sync_callback, this, i, 
+                std::bind(&GtsamOptimizationNode::sync_callback, this, i,
                           std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)
             );
 
             factor_subs_.push_back(factor_sub);
             image_subs_.push_back(image_sub);
-            depth_subs_.push_back(depth_sub); 
+            depth_subs_.push_back(depth_sub);
             syncs_.push_back(sync);
-            
-            if (use_ground_truth_)
-            {
-                std::string gt_topic = "ground_truth_" + idx;
-                auto gt_sub = this->create_subscription<nav_msgs::msg::Odometry>(
-                    gt_topic, 10,
-                    [this, i](const nav_msgs::msg::Odometry::SharedPtr msg) {
-                        this->ground_truth_callback(i, msg);
-                    },
-                    sub_options
-                );
-                gt_subs_.push_back(gt_sub);
-            }
 
-            // Publicadores também usando tópicos relativos indexados
+          
             std::string odom_topic = "odom_" + idx;
             std::string marker_topic = "gtsam_graph_" + idx;
             std::string path_topic = "gtsam_path_" + idx;
-            std::string camera_info_topic = "camera_info_" + idx; 
-            
+            std::string camera_info_topic = "camera_info_" + idx;
+
             auto info_sub = this->create_subscription<sensor_msgs::msg::CameraInfo>(
                 camera_info_topic, 10,
                 [this, i](const sensor_msgs::msg::CameraInfo::SharedPtr msg) {
                     this->camera_info_callback(i, msg);
                 },
-                sub_options 
+                sub_options
             );
             camera_info_subs_.push_back(info_sub);
 
@@ -163,10 +145,10 @@ public:
 
 private:
 
-    struct FrameData 
-    { 
-        cv::Mat image;  
-        cv::Mat depth_image; 
+    struct FrameData
+    {
+        cv::Mat image;
+        cv::Mat depth_image;
     };
 
     struct FrameProcessResult
@@ -195,13 +177,15 @@ private:
         gtsam::Pose3 previous_gt_pose;
         double total_gt_distance = 0.0;
         bool has_camera_info = false;
+        nav_msgs::msg::Path gt_path;
+        std::map<int, gtsam::Pose3> previous_optimized_poses;
     };
 
-    
+
 
     using ExactSyncPolicy = message_filters::sync_policies::ExactTime<
-        slam_interfaces::msg::GtsamData, 
-        sensor_msgs::msg::Image, 
+        slam_interfaces::msg::GtsamData,
+        sensor_msgs::msg::Image,
         sensor_msgs::msg::Image>;
     using Synchronizer = message_filters::Synchronizer<ExactSyncPolicy>;
 
@@ -214,11 +198,11 @@ private:
     std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>> image_subs_;
     std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>> depth_subs_;
     std::vector<std::shared_ptr<Synchronizer>> syncs_;
-    
-  
+    nav_msgs::msg::Path gt_path;
+
     std::vector<rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr> gt_subs_;
     std::vector<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr> camera_info_subs_;
-
+    std::vector<rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr> gt_path_pubs_;
     std::vector<rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr> odom_pubs_;
     std::vector<rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr> graph_markers_pubs_;
     std::vector<rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr> path_pubs_;
@@ -233,8 +217,9 @@ private:
     gtsam::Pose3 T_base_opt_;
 
     std::vector<rclcpp::CallbackGroup::SharedPtr> cb_groups_;
-    bool use_ground_truth_;
     bool tf_received = false;
+
+    std::shared_ptr<slam_core::Mapping> mapping_node_;
 
     std::map<int, std::map<int, FrameData>> keyframe_database_;
     std::mutex global_gtsam_mutex_;
@@ -247,32 +232,32 @@ private:
     {
         auto& state = *robot_states_[robot_id];
         char robot_prefix = 'a' + robot_id;
-        
-        std::string odom_frame = "robot_" + std::to_string(robot_id) + "/odom";
 
-        try 
+        std::string odom_frame = "odom";
+
+        try
         {
             if (!global_optimized_estimates_.exists(gtsam::Symbol(robot_prefix, state.keyframe_id))) return;
-            
+
             gtsam::Matrix6 covariance_gtsam = global_isam2_.marginalCovariance(gtsam::Symbol(robot_prefix, state.keyframe_id));
-            
+
             nav_msgs::msg::Odometry odom_msg;
             odom_msg.header.stamp = stamp;
-            odom_msg.header.frame_id = odom_frame;        
-            odom_msg.child_frame_id = main_frame_id_;    
+            odom_msg.header.frame_id = odom_frame;
+            odom_msg.child_frame_id = main_frame_id_;
 
             gtsam::Pose3 base_pose = optimized_pose;
-            
+
             odom_msg.pose.pose.position.x = base_pose.x();
             odom_msg.pose.pose.position.y = base_pose.y();
             odom_msg.pose.pose.position.z = base_pose.z();
-            
+
             Eigen::Quaterniond q(base_pose.rotation().matrix());
             odom_msg.pose.pose.orientation.x = q.x();
             odom_msg.pose.pose.orientation.y = q.y();
             odom_msg.pose.pose.orientation.z = q.z();
             odom_msg.pose.pose.orientation.w = q.w();
-            
+
             geometry_msgs::msg::TransformStamped t;
             t.header.stamp = stamp;
             t.header.frame_id = odom_frame;
@@ -288,10 +273,10 @@ private:
             if (tf_broadcaster_) {
                 tf_broadcaster_->sendTransform(t);
             }
-           
-            for (int i = 0; i < 3; ++i) 
+
+            for (int i = 0; i < 3; ++i)
             {
-                for (int j = 0; j < 3; ++j) 
+                for (int j = 0; j < 3; ++j)
                 {
                     odom_msg.pose.covariance[i * 6 + j] = covariance_gtsam(i + 3, j + 3);
                     odom_msg.pose.covariance[(i + 3) * 6 + (j + 3)] = covariance_gtsam(i, j);
@@ -305,10 +290,10 @@ private:
             visualization_msgs::msg::MarkerArray marker_array;
             nav_msgs::msg::Path path_msg;
             path_msg.header.stamp = stamp;
-            path_msg.header.frame_id = odom_frame; 
+            path_msg.header.frame_id = odom_frame;
 
             visualization_msgs::msg::Marker nodes_marker;
-            nodes_marker.header.frame_id = odom_frame; 
+            nodes_marker.header.frame_id = odom_frame;
             nodes_marker.header.stamp = stamp;
             nodes_marker.ns = "gtsam_nodes";
             nodes_marker.id = 0;
@@ -323,7 +308,7 @@ private:
             nodes_marker.color.b = 0.0;
 
             visualization_msgs::msg::Marker edges_marker;
-            edges_marker.header.frame_id = odom_frame; 
+            edges_marker.header.frame_id = odom_frame;
             edges_marker.header.stamp = stamp;
             edges_marker.ns = "gtsam_edges";
             edges_marker.id = 1;
@@ -335,10 +320,10 @@ private:
             edges_marker.color.g = 0.0;
             edges_marker.color.b = 0.0;
 
-            for (const auto& key_value : global_optimized_estimates_) 
+            for (const auto& key_value : global_optimized_estimates_)
             {
                 gtsam::Symbol sym(key_value.key);
-                
+
                 if (sym.chr() != robot_prefix) continue;
 
                 gtsam::Pose3 node_base_pose = key_value.value.cast<gtsam::Pose3>();
@@ -350,29 +335,29 @@ private:
                 nodes_marker.points.push_back(p);
 
                 geometry_msgs::msg::PoseStamped path_pose;
-                path_pose.header.frame_id = odom_frame; 
+                path_pose.header.frame_id = odom_frame;
                 path_pose.pose.position = p;
                 path_msg.poses.push_back(path_pose);
             }
 
             const gtsam::NonlinearFactorGraph& isam_graph = global_isam2_.getFactorsUnsafe();
 
-            for (size_t i = 0; i < isam_graph.size(); ++i) 
+            for (size_t i = 0; i < isam_graph.size(); ++i)
             {
                 auto factor = isam_graph.at(i);
                 auto between_factor = boost::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(factor);
-                
-                if (between_factor) 
+
+                if (between_factor)
                 {
                     gtsam::Key key1 = between_factor->front();
                     gtsam::Key key2 = between_factor->back();
-                    
+
                     gtsam::Symbol sym1(key1);
                     gtsam::Symbol sym2(key2);
 
                     if (sym1.chr() == robot_prefix || sym2.chr() == robot_prefix)
                     {
-                        if (global_optimized_estimates_.exists(key1) && global_optimized_estimates_.exists(key2)) 
+                        if (global_optimized_estimates_.exists(key1) && global_optimized_estimates_.exists(key2))
                         {
                             gtsam::Pose3 pose1_base = global_optimized_estimates_.at<gtsam::Pose3>(key1);
                             gtsam::Pose3 pose2_base = global_optimized_estimates_.at<gtsam::Pose3>(key2);
@@ -380,7 +365,7 @@ private:
                             geometry_msgs::msg::Point p1, p2;
                             p1.x = pose1_base.x(); p1.y = pose1_base.y(); p1.z = pose1_base.z();
                             p2.x = pose2_base.x(); p2.y = pose2_base.y(); p2.z = pose2_base.z();
-                            
+
                             edges_marker.points.push_back(p1);
                             edges_marker.points.push_back(p2);
                         }
@@ -398,26 +383,10 @@ private:
             RCLCPP_INFO(this->get_logger(), "[Grafo Global] Nos Totais: %d", (int)global_optimized_estimates_.size());
             RCLCPP_INFO(this->get_logger(), "[Grafo Global] Arestas Totais: %d", (int)global_isam2_.getFactorsUnsafe().size());
             RCLCPP_INFO(this->get_logger(), "[Robo %d] Pose odom->%s [X: %.3f | Y: %.3f | Z: %.3f]", robot_id, main_frame_id_.c_str(), base_pose.x(), base_pose.y(), base_pose.z());
-            
-            
-            if (use_ground_truth_ && state.has_gt) 
-            {
-                gtsam::Pose3 relative_gt = state.initial_gt_pose.inverse() * state.latest_gt_pose;
-                
-                double trans_error = (base_pose.translation() - relative_gt.translation()).norm();
-                double trans_error_pct = (state.total_gt_distance > 0.001) ? (trans_error / state.total_gt_distance) * 100.0 : 0.0;
 
-                gtsam::Rot3 rot_diff = base_pose.rotation().between(relative_gt.rotation());
-                double rot_error_rad = gtsam::Rot3::Logmap(rot_diff).norm();
-                double rot_error_deg = rot_error_rad * (180.0 / M_PI);
-                
-                RCLCPP_INFO(this->get_logger(), "[Robo %d] --- COMPARACAO GROUND TRUTH ---", robot_id);
-                RCLCPP_INFO(this->get_logger(), "[Robo %d] Erro Translacao: %.4f m (%.2f%%) | Erro Rotacao: %.2f°", 
-                            robot_id, trans_error, trans_error_pct, rot_error_deg);
-            }
 
             RCLCPP_INFO(this->get_logger(), "-----------------------");
-        } 
+        }
         catch (const gtsam::IndeterminantLinearSystemException& e) {
             RCLCPP_WARN(this->get_logger(), "[Robo %d] GTSAM IndeterminantLinearSystemException: Grafo instavel no momento.", robot_id);
         }
@@ -426,52 +395,21 @@ private:
         }
     }
 
-   
-    void ground_truth_callback(int robot_id, const nav_msgs::msg::Odometry::SharedPtr msg)
-    {
-        auto& state = *robot_states_[robot_id];
-        
-       
-        std::lock_guard<std::mutex> lock(global_gtsam_mutex_);
-
-        Eigen::Quaterniond q(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
-                            msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
-        gtsam::Point3 t(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
-        
-        gtsam::Pose3 current_gt_pose = gtsam::Pose3(gtsam::Rot3(q), t);
-
-        if (!state.first_gt_received) 
-        {
-            state.initial_gt_pose = current_gt_pose;
-            state.previous_gt_pose = current_gt_pose; 
-            state.total_gt_distance = 0.0;            
-            state.first_gt_received = true;
-        }
-        else
-        {
-            double step_distance = (current_gt_pose.translation() - state.previous_gt_pose.translation()).norm();
-            state.total_gt_distance += step_distance;
-        }
-
-        state.latest_gt_pose = current_gt_pose;
-        state.previous_gt_pose = current_gt_pose; 
-        state.has_gt = true;
-    }
 
     void camera_info_callback(int robot_id, const sensor_msgs::msg::CameraInfo::SharedPtr msg)
     {
-        
+
         if (robot_id < 0 || robot_id >= (int)robot_states_.size()) return;
 
-        
+
 
         auto& state = *robot_states_[robot_id];
-        
+
         if (state.has_camera_info) return;
 
         std::lock_guard<std::mutex> lock(global_gtsam_mutex_);
 
-        
+
         if (robot_id >= (int)camera_matrix_.size()) {
             camera_matrix_.resize(robot_id + 1);
         }
@@ -480,96 +418,111 @@ private:
         }
 
         camera_matrix_[robot_id] = cv::Mat::zeros(3, 3, CV_64F);
-        for (int i = 0; i < 9; ++i) 
+        for (int i = 0; i < 9; ++i)
         {
             camera_matrix_[robot_id].at<double>(i / 3, i % 3) = msg->k[i];
         }
 
-        if (!msg->d.empty()) 
+        if (!msg->d.empty())
         {
             dist_coeffs_[robot_id] = cv::Mat::zeros(msg->d.size(), 1, CV_64F);
 
-            for (size_t i = 0; i < msg->d.size(); ++i) 
+            for (size_t i = 0; i < msg->d.size(); ++i)
             {
                 dist_coeffs_[robot_id].at<double>(i) = msg->d[i];
             }
-        } 
-        else 
+        }
+        else
         {
             dist_coeffs_[robot_id] = cv::Mat::zeros(4, 1, CV_64F);
         }
 
         state.has_camera_info = true;
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "[Robo %d] CameraInfo recebido! fx: %.1f, fy: %.1f. Pronto para Loop Closure.", 
+
+  
+        float depth_scale = 1000.0f; 
+        mapping_node_->set_camera_info(msg, main_frame_id_, depth_scale);
+
+        RCLCPP_INFO(this->get_logger(),
+            "[Robo %d] CameraInfo recebido! fx: %.1f, fy: %.1f. Pronto para Loop Closure.",
             robot_id, msg->k[0], msg->k[4]);
     }
     void sync_callback(
-        int robot_id, 
+        int robot_id,
         const slam_interfaces::msg::GtsamData::ConstSharedPtr& factor_msg,
         const sensor_msgs::msg::Image::ConstSharedPtr& image_msg,
-        const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg) 
+        const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg)
     {
 
-        if (!robot_states_[robot_id]->has_camera_info) 
+        if (!robot_states_[robot_id]->has_camera_info)
         {
             RCLCPP_WARN_ONCE(this->get_logger(), "[Robo %d] Imagens ignoradas: aguardando CameraInfo...", robot_id);
-            return; 
+            return;
         }
-     
+
         if(!tf_received)
         {
             try {
                 geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_->lookupTransform(
-                    main_frame_id_, 
-                    image_msg->header.frame_id, 
+                    main_frame_id_,
+                    image_msg->header.frame_id,
                     tf2::TimePointZero,
                     std::chrono::milliseconds(100));
-                    
-              
+
+
                 Eigen::Quaterniond q(transform_stamped.transform.rotation.w, transform_stamped.transform.rotation.x,
                                     transform_stamped.transform.rotation.y, transform_stamped.transform.rotation.z);
                 Eigen::Vector3d t(transform_stamped.transform.translation.x, transform_stamped.transform.translation.y,
                                 transform_stamped.transform.translation.z);
-                
+
                 T_base_opt_ = gtsam::Pose3(gtsam::Rot3(q.toRotationMatrix()), gtsam::Point3(t));
                 tf_received = true;
-            } 
-            catch (const tf2::TransformException & ex) 
-            { 
-                RCLCPP_WARN(this->get_logger(), 
+            }
+            catch (const tf2::TransformException & ex)
+            {
+                RCLCPP_WARN(this->get_logger(),
                     "\n"
-                   
-                    "Odometry can have serious errors and severe deviations.!\n"
+
+                    "Odometry can have serious errors and severe deviations!\n"
                     "Error: %s", ex.what());
-                
-                return; 
+
+                return;
             }
         }
 
-       
 
-      
+
+
         int current_keyframe = factor_msg->keyframe;
 
-        cv::Mat converted_image, converted_depth; 
-        
-        try 
+        cv::Mat converted_image, converted_depth;
+
+        try
         {
             converted_image = cv_bridge::toCvCopy(image_msg, "bgr8")->image;
-            converted_depth = cv_bridge::toCvCopy(depth_msg, depth_msg->encoding)->image; 
-        } 
-        catch (const cv_bridge::Exception& e) 
+            converted_depth = cv_bridge::toCvCopy(depth_msg, depth_msg->encoding)->image;
+        }
+        catch (const cv_bridge::Exception& e)
         {
             RCLCPP_ERROR(this->get_logger(), "Erro cv_bridge: %s", e.what());
-            return; 
+            return;
         }
+
+            // std::thread([
+            //     mapping_node = this->mapping_node_,
+            //     kf_id = current_keyframe,
+            //     rgb_img = converted_image,          
+            //     depth_img = converted_depth,       
+            //     rgb_frame = image_msg->header.frame_id,
+            //     depth_frame = depth_msg->header.frame_id
+            // ]() {
+            //     mapping_node->add_keyframe_data(kf_id, rgb_img, depth_img, rgb_frame, depth_frame);
+            // }).detach();
 
         {
             std::lock_guard<std::mutex> lock(global_gtsam_mutex_);
             keyframe_database_[robot_id][current_keyframe].image = converted_image;
-            keyframe_database_[robot_id][current_keyframe].depth_image = converted_depth; 
+            keyframe_database_[robot_id][current_keyframe].depth_image = converted_depth;
         }
 
         FrameProcessResult result;
@@ -577,16 +530,16 @@ private:
         gtsam::Rot3 delta_rot = gtsam::Rot3::Quaternion(
             factor_msg->delta_base.pose.orientation.w, factor_msg->delta_base.pose.orientation.x,
             factor_msg->delta_base.pose.orientation.y, factor_msg->delta_base.pose.orientation.z);
-        
+
         gtsam::Point3 delta_trans(
             factor_msg->delta_base.pose.position.x, factor_msg->delta_base.pose.position.y, factor_msg->delta_base.pose.position.z);
-        
+
         result.delta_base = gtsam::Pose3(delta_rot, delta_trans);
 
         Eigen::MatrixXd cov_eigen = Eigen::MatrixXd::Zero(6, 6);
-        for (int i = 0; i < 6; ++i) 
+        for (int i = 0; i < 6; ++i)
         {
-            for (int j = 0; j < 6; ++j) 
+            for (int j = 0; j < 6; ++j)
             {
                 cov_eigen(i, j) = factor_msg->delta_base.covariance[i * 6 + j];
             }
@@ -596,25 +549,29 @@ private:
         gtsam::Rot3 est_rot = gtsam::Rot3::Quaternion(
             factor_msg->estimate.orientation.w, factor_msg->estimate.orientation.x,
             factor_msg->estimate.orientation.y, factor_msg->estimate.orientation.z);
-        
+
         gtsam::Point3 est_trans(
             factor_msg->estimate.position.x, factor_msg->estimate.position.y, factor_msg->estimate.position.z);
-        
+
         result.estimate = gtsam::Pose3(est_rot, est_trans);
-        result.signature = factor_msg->signature; 
-        
-      
+        result.signature = factor_msg->signature;
+
+
         std::pair<int, int> loop_match = faiss_loop_detector_->process_feature_and_find_loop(
             robot_id, current_keyframe, factor_msg->signature);
-        
-        if (std::get<1>(loop_match) != -1) 
+
+        if (std::get<1>(loop_match) != -1)
         {
             int best_loop_robot_id = std::get<0>(loop_match);
             int best_loop_kf_id = std::get<1>(loop_match);
-            calculate_loop_closure(best_loop_robot_id, best_loop_kf_id, robot_id, current_keyframe, result);
+
+            if (best_loop_robot_id != robot_id || std::abs(current_keyframe - best_loop_kf_id) >= 5)
+            {
+                calculate_loop_closure(best_loop_robot_id, best_loop_kf_id, robot_id, current_keyframe, result);
+            }
         }
 
-            
+
         process_gtsam(robot_id, result);
     }
 
@@ -624,34 +581,34 @@ private:
 
     void process_gtsam(int robot_id, const FrameProcessResult& result)
     {
-        auto& state = *robot_states_[robot_id]; 
-        
+        auto& state = *robot_states_[robot_id];
+
         std::lock_guard<std::mutex> lock(global_gtsam_mutex_);
-        
-        char robot_prefix = 'a' + robot_id; 
-        
-        if (!state.has_keyframe) 
+
+        char robot_prefix = 'a' + robot_id;
+
+        if (!state.has_keyframe)
         {
             state.has_keyframe = true;
             state.keyframe_id = 0;
-            
+
             global_graph_.add(gtsam::PriorFactor<gtsam::Pose3>(
                 gtsam::Symbol(robot_prefix, 0), gtsam::Pose3(), gtsam::noiseModel::Isotropic::Variance(6, 1e-6)));
             global_initial_estimates_.insert(gtsam::Symbol(robot_prefix, 0), gtsam::Pose3());
-            return; 
+            return;
         }
 
         state.keyframe_id++;
         int kf_id = state.keyframe_id;
 
         global_graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-            gtsam::Symbol(robot_prefix, kf_id - 1), 
-            gtsam::Symbol(robot_prefix, kf_id), 
-            result.delta_base, 
+            gtsam::Symbol(robot_prefix, kf_id - 1),
+            gtsam::Symbol(robot_prefix, kf_id),
+            result.delta_base,
             result.visual_noise
         ));
 
-        if (!global_initial_estimates_.exists(gtsam::Symbol(robot_prefix, kf_id))) 
+        if (!global_initial_estimates_.exists(gtsam::Symbol(robot_prefix, kf_id)))
         {
             global_initial_estimates_.insert(gtsam::Symbol(robot_prefix, kf_id), result.estimate);
         }
@@ -661,47 +618,68 @@ private:
             char from_robot_prefix = 'a' + result.loop_target_robot_id;
 
             global_graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
-                gtsam::Symbol(from_robot_prefix, result.loop_target_keyframe_id), 
-                gtsam::Symbol(robot_prefix, kf_id), 
-                result.loop_transform, 
-                result.loop_noise 
+                gtsam::Symbol(from_robot_prefix, result.loop_target_keyframe_id),
+                gtsam::Symbol(robot_prefix, kf_id),
+                result.loop_transform,
+                result.loop_noise
             ));
-            
-            RCLCPP_INFO(this->get_logger(), "[Robo %d] Loop Closure com Robo %d (KF %d -> KF %d) adicionado e enviado ao ISAM2!", 
+
+            RCLCPP_INFO(this->get_logger(), "[Robo %d] Loop Closure com Robo %d (KF %d -> KF %d) adicionado e enviado ao ISAM2!",
                         robot_id, result.loop_target_robot_id, result.loop_target_keyframe_id, kf_id);
         }
 
-        // Otimização
+        
+       // Otimização
         global_isam2_.update(global_graph_, global_initial_estimates_);
         global_optimized_estimates_ = global_isam2_.calculateEstimate();
-        
+
+        // Extrai TODAS as poses do robô atual
+        std::vector<std::pair<int, gtsam::Pose3>> all_poses_vec;
+        for (const auto& key_value : global_optimized_estimates_)
+        {
+            gtsam::Symbol sym(key_value.key);
+            if (sym.chr() == robot_prefix) 
+            {
+                all_poses_vec.push_back({sym.index(), key_value.value.cast<gtsam::Pose3>()});
+            }
+        }
+
+        // Envia todas as poses para o mapeamento
+        // if (!all_poses_vec.empty()) {
+        //     std::thread([mapping_node = this->mapping_node_, poses = std::move(all_poses_vec)]() {
+        //         mapping_node->update_global_map(poses);
+        //     }).detach();
+        // }
+
         global_graph_.resize(0);
         global_initial_estimates_.clear();
 
-        if (global_optimized_estimates_.exists(gtsam::Symbol(robot_prefix, state.keyframe_id))) 
+
+
+        if (global_optimized_estimates_.exists(gtsam::Symbol(robot_prefix, state.keyframe_id)))
         {
             gtsam::Pose3 corrected_pose = global_optimized_estimates_.at<gtsam::Pose3>(gtsam::Symbol(robot_prefix, state.keyframe_id));
-            
+
             publish_gtsam_data(robot_id, corrected_pose, this->now());
         }
     }
 
 
-    float get_robust_depth(const cv::Mat& depth_img, float x_f, float y_f) 
+    float get_robust_depth(const cv::Mat& depth_img, float x_f, float y_f)
     {
         int x = std::round(x_f);
         int y = std::round(y_f);
 
-        if (x < 1 || x >= depth_img.cols - 1 || y < 1 || y >= depth_img.rows - 1) return -1.0f; 
+        if (x < 1 || x >= depth_img.cols - 1 || y < 1 || y >= depth_img.rows - 1) return -1.0f;
 
         float min_depth = 9999.0f;
         float max_depth = 0.0f;
         float center_depth = 0.0f;
         int valid_pixels = 0;
 
-        for (int dy = -1; dy <= 1; ++dy) 
+        for (int dy = -1; dy <= 1; ++dy)
         {
-            for (int dx = -1; dx <= 1; ++dx) 
+            for (int dx = -1; dx <= 1; ++dx)
             {
                 float d = 0.0f;
                 if (depth_img.type() == CV_32FC1) {
@@ -712,7 +690,7 @@ private:
 
                 if (dx == 0 && dy == 0) center_depth = d;
 
-                if (d > 0.1f && d < 7.0f) 
+                if (d > 0.1f && d < 7.0f)
                 {
                     if (d < min_depth) min_depth = d;
                     if (d > max_depth) max_depth = d;
@@ -721,18 +699,18 @@ private:
             }
         }
 
-        if (valid_pixels < 6) return -1.0f; 
-        // if ((max_depth - min_depth) > 0.05f) return -1.0f; 
+        if (valid_pixels < 6) return -1.0f;
+        // if ((max_depth - min_depth) > 0.05f) return -1.0f;
 
         return center_depth;
     }
 
-    bool solveWeightedKabsch(const std::vector<Eigen::Vector3d>& pts_source, 
-                         const std::vector<Eigen::Vector3d>& pts_target, 
-                         const std::vector<double>& weights, 
-                         Eigen::Matrix4d& out_T) 
+    bool solveWeightedKabsch(const std::vector<Eigen::Vector3d>& pts_source,
+                         const std::vector<Eigen::Vector3d>& pts_target,
+                         const std::vector<double>& weights,
+                         Eigen::Matrix4d& out_T)
     {
-        if (pts_source.empty() || pts_source.size() != pts_target.size() || pts_source.size() != weights.size()) 
+        if (pts_source.empty() || pts_source.size() != pts_target.size() || pts_source.size() != weights.size())
         {
             return false;
         }
@@ -764,17 +742,17 @@ private:
         Eigen::Matrix3d V = svd.matrixV();
 
         Eigen::Matrix3d R = V * U.transpose();
-        
-        if (R.determinant() < 0) 
+
+        if (R.determinant() < 0)
         {
             V.col(2) *= -1.0;
             R = V * U.transpose();
         }
 
-        
+
         Eigen::Vector3d t = centroid_target - R * centroid_source;
-        
-        
+
+
         out_T = Eigen::Matrix4d::Identity();
         out_T.block<3,3>(0,0) = R;
         out_T.block<3,1>(0,3) = t;
@@ -786,17 +764,17 @@ private:
 
     void calculate_loop_closure(int best_loop_robot_id, int best_loop_kf_id, int current_robot_id, int current_keyframe_id, FrameProcessResult& result)
     {
-         
 
-        if (best_loop_kf_id == -1 || 
+
+        if (best_loop_kf_id == -1 ||
             keyframe_database_[best_loop_robot_id].count(best_loop_kf_id) == 0 ||
-            keyframe_database_[current_robot_id].count(current_keyframe_id) == 0) 
+            keyframe_database_[current_robot_id].count(current_keyframe_id) == 0)
         {
-            return; 
+            return;
         }
 
-        FrameData candidate_kf = keyframe_database_[best_loop_robot_id][best_loop_kf_id]; 
-        FrameData current_kf = keyframe_database_[current_robot_id][current_keyframe_id]; 
+        FrameData candidate_kf = keyframe_database_[best_loop_robot_id][best_loop_kf_id];
+        FrameData current_kf = keyframe_database_[current_robot_id][current_keyframe_id];
 
         std::vector<cv::Point2f> kp1, kp2;
         std::vector<cv::DMatch> matches;
@@ -805,25 +783,25 @@ private:
             lightglue_matcher_->compute_matches(current_kf.image, candidate_kf.image, kp1, kp2, matches);
         }
 
-        if (matches.size() >= 15) 
+        if (matches.size() >= 15)
         {
             std::vector<cv::Point2f> train_pts, query_pts;
-            for (const auto& match : matches) 
+            for (const auto& match : matches)
             {
                 if (match.trainIdx < 0 || match.trainIdx >= (int)kp2.size() || match.queryIdx < 0 || match.queryIdx >= (int)kp1.size()) continue;
-                
-                train_pts.push_back(kp2[match.trainIdx]); 
-                query_pts.push_back(kp1[match.queryIdx]); 
+
+                train_pts.push_back(kp2[match.trainIdx]);
+                query_pts.push_back(kp1[match.queryIdx]);
             }
 
             std::vector<cv::Point2f> train_pts_undist, query_pts_undist;
 
-            if (cv::norm(dist_coeffs_[current_robot_id]) > 0.0001) 
+            if (cv::norm(dist_coeffs_[current_robot_id]) > 0.0001)
             {
                 cv::undistortPoints(train_pts, train_pts_undist, camera_matrix_[current_robot_id], dist_coeffs_[current_robot_id], cv::noArray(), camera_matrix_[current_robot_id]);
                 cv::undistortPoints(query_pts, query_pts_undist, camera_matrix_[current_robot_id], dist_coeffs_[current_robot_id], cv::noArray(), camera_matrix_[current_robot_id]);
-            } 
-            else 
+            }
+            else
             {
                 train_pts_undist = train_pts;
                 query_pts_undist = query_pts;
@@ -837,7 +815,7 @@ private:
             std::vector<cv::Point3f> object_pts_3d;
             std::vector<cv::Point2f> image_pts_2d;
 
-            for (size_t i = 0; i < train_pts.size(); ++i) 
+            for (size_t i = 0; i < train_pts.size(); ++i)
             {
                 cv::Point2f pt2d_train = train_pts[i];
                 float z_center = get_robust_depth(candidate_kf.depth_image, pt2d_train.x, pt2d_train.y);
@@ -845,13 +823,13 @@ private:
                 if (z_center <= 0.1f || z_center > 7.0) continue;
 
                 float min_z = z_center, max_z = z_center;
-                for (int dy = -1; dy <= 1; ++dy) 
+                for (int dy = -1; dy <= 1; ++dy)
                 {
-                    for (int dx = -1; dx <= 1; ++dx) 
+                    for (int dx = -1; dx <= 1; ++dx)
                     {
-                        if (dx == 0 && dy == 0) continue; 
+                        if (dx == 0 && dy == 0) continue;
                         float z_neighbor = get_robust_depth(candidate_kf.depth_image, pt2d_train.x + dx, pt2d_train.y + dy);
-                        if (z_neighbor > 0.1f) 
+                        if (z_neighbor > 0.1f)
                         {
                             min_z = std::min(min_z, z_neighbor);
                             max_z = std::max(max_z, z_neighbor);
@@ -861,23 +839,23 @@ private:
 
                 float x_cand = (train_pts_undist[i].x - cx) * z_center / fx;
                 float y_cand = (train_pts_undist[i].y - cy) * z_center / fy;
-                
+
                 object_pts_3d.push_back(cv::Point3f(x_cand, y_cand, z_center));
                 image_pts_2d.push_back(query_pts_undist[i]);
             }
 
-            if (object_pts_3d.size() >= 15) 
+            if (object_pts_3d.size() >= 15)
             {
                 cv::Mat rvec_guess = cv::Mat::zeros(3, 1, CV_64F);
                 cv::Mat tvec_guess = cv::Mat::zeros(3, 1, CV_64F);
                 std::vector<int> loop_inliers;
-                
+
                 bool pnp_loop_success = cv::solvePnPRansac(
-                    object_pts_3d, image_pts_2d, camera_matrix_[current_robot_id], cv::Mat::zeros(4, 1, CV_64F), 
+                    object_pts_3d, image_pts_2d, camera_matrix_[current_robot_id], cv::Mat::zeros(4, 1, CV_64F),
                     rvec_guess, tvec_guess, false, 1000, 10.0f, 0.95, loop_inliers, cv::SOLVEPNP_SQPNP
                 );
-                
-                if (pnp_loop_success && loop_inliers.size() >= 15 && !rvec_guess.empty() && !tvec_guess.empty()) 
+
+                if (pnp_loop_success && loop_inliers.size() >= 15 && !rvec_guess.empty() && !tvec_guess.empty())
                 {
                     std::vector<Eigen::Vector3d> inlier_pts_kf, inlier_pts_curr;
                     std::vector<double> inlier_weights;
@@ -891,10 +869,10 @@ private:
                         t_eigen(r) = tvec_guess.at<double>(r);
                     }
 
-                    for (int idx : loop_inliers) 
+                    for (int idx : loop_inliers)
                     {
                         inlier_pts_kf.push_back(Eigen::Vector3d(object_pts_3d[idx].x, object_pts_3d[idx].y, object_pts_3d[idx].z));
-                        
+
                         float z_est = (R_eigen.row(2) * inlier_pts_kf.back())(0) + t_eigen(2);
                         float x_curr = (image_pts_2d[idx].x - cx) * z_est / fx;
                         float y_curr = (image_pts_2d[idx].y - cy) * z_est / fy;
@@ -902,7 +880,7 @@ private:
 
                         inlier_weights.push_back(1.0 / (object_pts_3d[idx].z * object_pts_3d[idx].z));
                     }
-                    
+
                     Eigen::Matrix4d T_camera_world_refined;
                     solveWeightedKabsch(inlier_pts_kf, inlier_pts_curr, inlier_weights, T_camera_world_refined);
 
@@ -911,7 +889,7 @@ private:
                     gtsam::Pose3 loop_pose_opt(T_loop_relative);
                     gtsam::Pose3 loop_pose_base = T_base_opt_ * loop_pose_opt * T_base_opt_.inverse();
 
-                   
+
 
                     Eigen::Matrix3d R_opt = T_loop_relative.block<3,3>(0,0);
                     Eigen::Vector3d t_opt = T_loop_relative.block<3,1>(0,3);
@@ -921,39 +899,38 @@ private:
 
                     double mean_loop_depth = 0.0;
                     for (int idx : loop_inliers) mean_loop_depth += object_pts_3d[idx].z;
-                    mean_loop_depth /= std::max((double)loop_inliers.size(), 1.0); 
+                    mean_loop_depth /= std::max((double)loop_inliers.size(), 1.0);
 
-                    double inlier_ratio = 100.0 / std::max((double)loop_inliers.size(), 25.0); 
+                    double inlier_ratio = 100.0 / std::max((double)loop_inliers.size(), 25.0);
                     double penalty_inliers = inlier_ratio * inlier_ratio;
                     double penalty_motion = 1.0 + (loop_trans_dist * 2.0) + (loop_rot_dist * 2.0);
                     double penalty_depth = std::max(1.0, mean_loop_depth * mean_loop_depth * 0.5);
 
-                    double base_var_trans = 0.01; 
-                    double base_var_rot   = 0.07; 
+                    double base_var_trans = 0.01;
+                    double base_var_rot   = 0.07;
 
                     Eigen::MatrixXd cov_eigen_loop = Eigen::MatrixXd::Zero(6, 6);
-                    cov_eigen_loop(0, 0) = base_var_rot * penalty_inliers * penalty_motion;      
-                    cov_eigen_loop(1, 1) = base_var_rot * penalty_inliers * penalty_motion;      
-                    cov_eigen_loop(2, 2) = base_var_rot * penalty_inliers * penalty_motion;      
-                    cov_eigen_loop(3, 3) = base_var_trans * penalty_inliers * penalty_motion; 
-                    cov_eigen_loop(4, 4) = base_var_trans * penalty_inliers * penalty_motion; 
-                    cov_eigen_loop(5, 5) = base_var_trans * penalty_inliers * penalty_motion * penalty_depth;  
+                    cov_eigen_loop(0, 0) = base_var_rot * penalty_inliers * penalty_motion;
+                    cov_eigen_loop(1, 1) = base_var_rot * penalty_inliers * penalty_motion;
+                    cov_eigen_loop(2, 2) = base_var_rot * penalty_inliers * penalty_motion;
+                    cov_eigen_loop(3, 3) = base_var_trans * penalty_inliers * penalty_motion;
+                    cov_eigen_loop(4, 4) = base_var_trans * penalty_inliers * penalty_motion;
+                    cov_eigen_loop(5, 5) = base_var_trans * penalty_inliers * penalty_motion * penalty_depth;
 
                     auto loop_noise = gtsam::noiseModel::Gaussian::Covariance(cov_eigen_loop);
                     auto robust_loop_noise = gtsam::noiseModel::Robust::Create(
                         gtsam::noiseModel::mEstimator::Huber::Create(1.2), loop_noise);
 
-                    // --- ATUALIZAÇÃO DIRETA NO RESULT (Sem precisar de Mutex!) ---
                     result.has_loop_closure = true;
                     result.loop_target_robot_id = best_loop_robot_id;
                     result.loop_target_keyframe_id = best_loop_kf_id;
                     result.loop_transform = loop_pose_base;
                     result.loop_noise = robust_loop_noise;
 
-                    RCLCPP_INFO(this->get_logger(), "!!! LOOP CLOSURE !!! Robô %d (KF %d) pareou com Robô %d (KF %d). Inliers: %d", 
+                    RCLCPP_INFO(this->get_logger(), "!!! LOOP CLOSURE !!! Robô %d (KF %d) pareou com Robô %d (KF %d). Inliers: %d",
                                 current_robot_id, current_keyframe_id, best_loop_robot_id, best_loop_kf_id, (int)loop_inliers.size());
-                } 
-            } 
+                }
+            }
         }
     }
 };
@@ -961,26 +938,33 @@ private:
 int main(int argc, char * argv[])
 {
     rclcpp::init(argc, argv);
+
+    rclcpp::NodeOptions options;
+    auto mapping_node = std::make_shared<slam_core::Mapping>(options);
+
+    auto node = std::make_shared<GtsamOptimizationNode>(mapping_node);
     
-    auto node = std::make_shared<GtsamOptimizationNode>();
+
     int num_robots = node->get_parameter("num_robots").as_int();
-    
-    if (num_robots > 1) 
+
+    if (num_robots > 1)
     {
         rclcpp::executors::MultiThreadedExecutor executor(
-            rclcpp::ExecutorOptions(), 
+            rclcpp::ExecutorOptions(),
             num_robots
         );
-        executor.add_node(node);
-        executor.spin();
-    } 
-    else 
-    {
-        rclcpp::executors::SingleThreadedExecutor executor;
+        executor.add_node(mapping_node);
         executor.add_node(node);
         executor.spin();
     }
-    
+    else
+    {
+        rclcpp::executors::SingleThreadedExecutor executor;
+        executor.add_node(mapping_node);
+        executor.add_node(node);
+        executor.spin();
+    }
+
     rclcpp::shutdown();
     return 0;
 }
