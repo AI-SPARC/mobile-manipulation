@@ -11,7 +11,7 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     
     parameters = [{
-        "pcd_path": "/home/momesso/pcds/Wrench.pcd",
+        "pcd_path": "/home/momesso/grasp_factory/graspfactory/FrankaPanda/FrankaPanda/pointclouds/00000071_767e4372b5f94a88a7a17d90_step_012_0001.pcd",
         "object_mesh_path": "/home/momesso/pcds/GLB_Foxglove/Wrench.glb",
         "gripper_glb_path": "/home/momesso/pcds/GLB_Foxglove/PandaHand.glb",
         "gripper_mesh_path": "/home/momesso/hand_and_fingers.obj",
@@ -19,35 +19,36 @@ def generate_launch_description():
         "min_points_per_segment": 2,
         "mean_filter_k": 15,
         "num_best_grasps": 1,
-        "num_random_orientations": 1,
+        "num_random_orientations": 20,
         "num_benchmark_runs": 1,
         "animation_delay_ms": 5000,
 
         "gripper_mesh_scale": 1.0,
-        "mesh_offset_x": 0.025,
+        "mesh_offset_x": 0.0,
         "mesh_offset_y": 0.0,
-        "mesh_offset_z": 0.0,
+        "mesh_offset_z": 0.025,
         "mesh_rot_roll": 1.57,
         "mesh_rot_pitch": 0.0,
-        "mesh_rot_yaw": 1.57,
-        "grid_res": 0.0075,
-        "cloud_voxel_size": 0.002,
-        "cylinder_radius": 0.03,
+        "mesh_rot_yaw": 0.0,
+        "grid_res": 0.005,
+        "cloud_voxel_size": 0.001,
+        "cylinder_radius": 0.025,
         "cylinder_height": 0.005,
         "analysis_step_size": 0.01,
         "max_gripper_width": 0.07,
         "finger_offset": 0.027,
         "weight_orientation": 0.75,
         "weight_symmetry": 0.25,
-        "target_score": 0.9,
-        "rotation_step_deg": 55.0,
+        "target_score": 10.0,
+        "rotation_step_deg": 15.0,
 
-        "use_pcd_file": False,
+        "use_pcd_file": True,
+        "eval_mode": True,
         "publish_object_mesh": True,
         "publish_gripper_mesh": True,
-        "use_mean_filter": True,
+        "use_mean_filter": False,
         "enable_ray_animation": False,
-        "activate_centroid": True
+        "activate_centroid": False
     }]
 
   

@@ -25,6 +25,10 @@
 #include <vector>
 #include <string>
 #include <Eigen/Dense>
+#include "message_filters/subscriber.h"
+#include "message_filters/sync_policies/approximate_time.h"
+#include "message_filters/synchronizer.h"
+#include "sensor_msgs/msg/point_cloud2.hpp"
 
 namespace vision 
 {
@@ -51,7 +55,7 @@ struct ScoredGrasp {
     Eigen::Vector3f entry_normal;
     Eigen::Vector3f debug_entry_pt;
     Eigen::Vector3f debug_exit_pt;
-    pcl::PointCloud<pcl::PointXYZ> debug_inliers;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr debug_inliers;
 };
 
 struct StepAnalysis {
@@ -81,14 +85,14 @@ class GenerateGraspPoses : public rclcpp::Node
 public:
     explicit GenerateGraspPoses(const rclcpp::NodeOptions & options);
 
-    geometry_msgs::msg::PoseArray processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
+    void processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
 
 private:
         void timerCallback();
-        void loadAndProcess(const std::string& path);
+        std::vector<double> loadAndProcess(const std::string& obj_path, const std::string& amb_path);
         
         std::vector<geometry_msgs::msg::Pose> generateMultiOrientedRays(
-            const Eigen::Vector4f& min, const Eigen::Vector4f& max, float res);
+            const Eigen::Vector3f& min, const Eigen::Vector3f& max, float res);
             
         StepAnalysis analyzeLocalCylinder(
             const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
@@ -106,28 +110,28 @@ private:
         void publishGripperCollisionBoxes();
         void publishBest();
 
-        message_filters::Subscriber<sensor_msgs::msg::Image> mask_sub_;
-        message_filters::Subscriber<sensor_msgs::msg::Image> depth_sub_;
-        message_filters::Subscriber<sensor_msgs::msg::CameraInfo> rgb_info_sub_;
-        message_filters::Subscriber<sensor_msgs::msg::CameraInfo> depth_info_sub_;
+        message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_map_sub_;
+        message_filters::Subscriber<sensor_msgs::msg::PointCloud2> segmented_cloud_sub_;
         
-        // Define a política de tempo exato para os 4 tópicos
-        typedef message_filters::sync_policies::ExactTime<
-            sensor_msgs::msg::Image, 
-            sensor_msgs::msg::Image, 
-            sensor_msgs::msg::CameraInfo, 
-            sensor_msgs::msg::CameraInfo> ExactSyncPolicy;
-            
-        std::shared_ptr<message_filters::Synchronizer<ExactSyncPolicy>> sync_;
+        // Policy EXCLUSIVAMENTE para 2 PointClouds
+        typedef message_filters::sync_policies::ApproximateTime<
+            sensor_msgs::msg::PointCloud2, 
+            sensor_msgs::msg::PointCloud2
+        > PointCloudSyncPolicy;
+        
+        std::shared_ptr<message_filters::Synchronizer<PointCloudSyncPolicy>> sync_;
 
-        // O Callback atualizado com os 4 ponteiros
-        void synced_image_callback(
-            const sensor_msgs::msg::Image::ConstSharedPtr& mask_msg,
-            const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg,
-            const sensor_msgs::msg::CameraInfo::ConstSharedPtr& rgb_info_msg,
-            const sensor_msgs::msg::CameraInfo::ConstSharedPtr& depth_info_msg);
+        // Assinatura da função
+        void pointcloud_callback(
+            const sensor_msgs::msg::PointCloud2::ConstSharedPtr& segmented_cloud_msg,
+            const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_map_msg);
+        
 
-        Eigen::Vector4f global_centroid;
+
+
+    
+            bool eval_mode_ = false;
+        Eigen::Vector3f global_centroid;
         std::string object_mesh_path_;
         std::string gripper_glb_path_;
         bool publish_object_mesh_;
@@ -190,7 +194,7 @@ private:
         
         std::vector<LocalBox> gripper_boxes_; 
 
-        Eigen::Vector4f min_pt_, max_pt_;
+        Eigen::Vector3f min_pt_, max_pt_;
         std::vector<geometry_msgs::msg::Pose> all_candidates_;
         std::vector<geometry_msgs::msg::Pose> hit_candidates_;
         std::vector<ScoredGrasp> best_grasps_;
