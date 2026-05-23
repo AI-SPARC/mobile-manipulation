@@ -1,5 +1,5 @@
 #include "vision/GenerateGraspPoses.hpp" 
-
+#include "vision/VoxelCollision.hpp"
 #include <rclcpp_components/register_node_macro.hpp>
 #include <cmath>
 #include <random>
@@ -101,50 +101,49 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     this->declare_parameter<std::string>("pcd_path", "/home/momesso/pcds/Wrench.pcd");
     
     this->declare_parameter<std::string>("object_mesh_path", "/home/momesso/pcds/GLB_Foxglove/Wrench.glb");
-    this->declare_parameter<bool>("publish_object_mesh", true);
+    this->declare_parameter<bool>("publish_object_mesh", false);
 
     this->declare_parameter<std::string>("gripper_mesh_path", "/home/momesso/hand_and_fingers.obj");
     this->declare_parameter<double>("gripper_mesh_scale", 1.0);
     
     this->declare_parameter<std::string>("gripper_glb_path", "/home/momesso/pcds/GLB_Foxglove/PandaHand.glb");
-    this->declare_parameter<bool>("publish_gripper_mesh", true);
+    this->declare_parameter<bool>("publish_gripper_mesh", false);
     
-    this->declare_parameter<double>("mesh_offset_x", 0.025);
+    this->declare_parameter<double>("mesh_offset_x", 0.0);
     this->declare_parameter<double>("mesh_offset_y", 0.0);
-    this->declare_parameter<double>("mesh_offset_z", 0.0);
+    this->declare_parameter<double>("mesh_offset_z", 0.025);
     
     this->declare_parameter<double>("mesh_rot_roll", 1.57);
     this->declare_parameter<double>("mesh_rot_pitch", 0.0);
-    this->declare_parameter<double>("mesh_rot_yaw", 1.57); 
+    this->declare_parameter<double>("mesh_rot_yaw", 0.0); 
 
     this->declare_parameter<double>("grid_res", 0.005);
     this->declare_parameter<double>("cloud_voxel_size", 0.001);
     
-    this->declare_parameter<double>("cylinder_radius", 0.025); 
-    this->declare_parameter<double>("cylinder_height", 0.005);
+    this->declare_parameter<double>("sphere_radius", 0.01); 
     this->declare_parameter<double>("analysis_step_size", 0.01);
     
     this->declare_parameter<double>("max_gripper_width", 0.07); 
     this->declare_parameter<double>("finger_offset", 0.027); 
     
     this->declare_parameter<int>("min_points_per_segment", 2);
-    this->declare_parameter<double>("weight_orientation", 0.75); 
-    this->declare_parameter<double>("weight_symmetry", 0.25);
+    this->declare_parameter<double>("weight_orientation", 0.6); 
+    this->declare_parameter<double>("weight_symmetry", 0.4);
     this->declare_parameter<double>("target_score", 10.0);
     
-    this->declare_parameter<bool>("use_mean_filter", true); 
+    this->declare_parameter<bool>("use_mean_filter", false); 
     this->declare_parameter<int>("mean_filter_k", 15);
 
     this->declare_parameter<int>("num_best_grasps", 100);
-    this->declare_parameter<double>("rotation_step_deg", 55.0);
+    this->declare_parameter<double>("rotation_step_deg", 15.0);
 
-    this->declare_parameter<int>("num_random_orientations", 1);
+    this->declare_parameter<int>("num_random_orientations", 20);
 
     this->declare_parameter<int>("num_benchmark_runs", 1);
     this->declare_parameter<bool>("enable_ray_animation", false);
     this->declare_parameter<int>("animation_delay_ms", 5000);
 
-    this->declare_parameter<bool>("activate_centroid", true);
+    this->declare_parameter<bool>("activate_centroid", false);
     this->declare_parameter<bool>("eval_mode", true);
 
     use_pcd_file = this->get_parameter("use_pcd_file").as_bool();
@@ -189,8 +188,8 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     grid_res_ = static_cast<float>(this->get_parameter("grid_res").as_double());
     cloud_voxel_size_ = static_cast<float>(this->get_parameter("cloud_voxel_size").as_double());
 
-    cylinder_radius_ = static_cast<float>(this->get_parameter("cylinder_radius").as_double());
-    cylinder_height_ = static_cast<float>(this->get_parameter("cylinder_height").as_double());
+    sphere_radius_ = static_cast<float>(this->get_parameter("sphere_radius").as_double());
+
     analysis_step_size_ = static_cast<float>(this->get_parameter("analysis_step_size").as_double());
 
     max_gripper_width_ = static_cast<float>(this->get_parameter("max_gripper_width").as_double());
@@ -232,6 +231,7 @@ GenerateGraspPoses::GenerateGraspPoses(const rclcpp::NodeOptions & options)
     pub_gripper_boxes_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("debug_gripper_boxes", 10);
     pub_debug_grasps_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug_grasps_cloud", 10);
     debug_marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/grasp_debug_rays", 10);
+    sphere_debug_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("debug/sphere_sectors", rclcpp::QoS(1).transient_local());
     
     pub_object_mesh_ = this->create_publisher<visualization_msgs::msg::Marker>("debug_object_mesh", qos_profile);
 
@@ -728,7 +728,7 @@ void GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target
         {
             *collision_cloud_ = *target_environment;
         }
-        collision_kdtree_.setInputCloud(collision_cloud_);
+        voxel_checker_.build(collision_cloud_, 0.003f); 
     }
     else
     {
@@ -739,6 +739,7 @@ void GenerateGraspPoses::processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target
     return;
 }
 
+
 std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedRays(
     const Eigen::Vector3f& min_global, const Eigen::Vector3f& max_global, float res) 
 {
@@ -746,23 +747,10 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
     ray_lengths.clear(); 
 
     // O comprimento do raio agora é fixo e igual à abertura máxima da garra
-    // (Talvez um pouquinho maior para garantir margem, ex: 1.1x, mas você pediu max_gripper_width_)
     float ray_len = max_gripper_width_;
-
-    struct VoxelLimits {
-        float min_val = 1e9f;
-        float max_val = -1e9f;
-        bool active = false;
-    };
-
-    // Grids de Projeção (Mapas Esparsos)
-    std::map<int, std::map<int, VoxelLimits>> grid_YZ; // Para raios X
-    std::map<int, std::map<int, VoxelLimits>> grid_XZ; // Para raios Y
-    std::map<int, std::map<int, VoxelLimits>> grid_XY; // Para raios Z
-
     float inv_res = 1.0f / res;
 
-   std::set<std::tuple<int, int, int>> occupied_voxels;
+    std::set<std::tuple<int, int, int>> occupied_voxels;
 
     for (const auto& pt : stored_cloud_->points)
     {
@@ -772,11 +760,16 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
         occupied_voxels.insert({ix, iy, iz});
     }
 
-    // Lambda original mantido
     auto add_pose = [&](float x, float y, float z, Eigen::Vector3f dir) 
     {
         geometry_msgs::msg::Pose p;
-        p.position.x = x; p.position.y = y; p.position.z = z;
+        
+        // A lambda já faz o recuo! Se dir = {-1, 0, 0}, então:
+        // p.position.x = x - (-1 * res) = x + res.
+        // Ou seja, o raio nasce 1 voxel para fora e aponta para dentro.
+        p.position.x = x - (dir.x() * res);
+        p.position.y = y - (dir.y() * res);
+        p.position.z = z - (dir.z() * res);
         
         Eigen::Quaternionf q; 
         q.setFromTwoVectors(Eigen::Vector3f::UnitZ(), dir); 
@@ -787,7 +780,38 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
         ray_lengths.push_back(ray_len);
     };
 
-    // 2. GERAÇÃO DE RAIOS (Apenas nas faces expostas / casca externa)
+    // --- SETUP DOS MARKERS DOS VOXELS ---
+    visualization_msgs::msg::Marker internal_voxels_marker;
+    internal_voxels_marker.header.frame_id = "map";
+    internal_voxels_marker.header.stamp = this->now();
+    internal_voxels_marker.ns = "voxels_internos";
+    internal_voxels_marker.id = 0;
+    internal_voxels_marker.type = visualization_msgs::msg::Marker::CUBE_LIST;
+    internal_voxels_marker.action = visualization_msgs::msg::Marker::ADD;
+    internal_voxels_marker.scale.x = res; 
+    internal_voxels_marker.scale.y = res; 
+    internal_voxels_marker.scale.z = res;
+    internal_voxels_marker.color.r = 0.8f; 
+    internal_voxels_marker.color.g = 0.8f; 
+    internal_voxels_marker.color.b = 0.8f; 
+    internal_voxels_marker.color.a = 0.25f; // Cinza transparente (interno)
+
+    visualization_msgs::msg::Marker surface_voxels_marker;
+    surface_voxels_marker.header.frame_id = "map";
+    surface_voxels_marker.header.stamp = this->now();
+    surface_voxels_marker.ns = "voxels_superficie_vermelhos";
+    surface_voxels_marker.id = 1;
+    surface_voxels_marker.type = visualization_msgs::msg::Marker::CUBE_LIST;
+    surface_voxels_marker.action = visualization_msgs::msg::Marker::ADD;
+    surface_voxels_marker.scale.x = res; 
+    surface_voxels_marker.scale.y = res; 
+    surface_voxels_marker.scale.z = res;
+    surface_voxels_marker.color.r = 1.0f; 
+    surface_voxels_marker.color.g = 0.0f; 
+    surface_voxels_marker.color.b = 0.0f; 
+    surface_voxels_marker.color.a = 0.9f; // Vermelho sólido (superfície)
+
+    // 2. GERAÇÃO DE RAIOS E CLASSIFICAÇÃO DOS VOXELS
     for (const auto& voxel : occupied_voxels) 
     {
         int ix = std::get<0>(voxel);
@@ -799,51 +823,98 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
         float cy = (iy + 0.5f) * res;
         float cz = (iz + 0.5f) * res;
 
+        bool is_surface = false;
+
         // --- EIXO X ---
-        // Se o voxel vizinho em +X está VAZIO, esta face é casca externa!
+        // Passamos APENAS cx, cy, cz para o add_pose, porque a lambda já calcula o offset de recuo
         if (occupied_voxels.find({ix + 1, iy, iz}) == occupied_voxels.end()) {
-            add_pose(cx + res, cy, cz, {-1, 0, 0}); // Raio vem da direita pra esquerda
+            add_pose(cx, cy, cz, {-1, 0, 0}); 
+            is_surface = true;
         }
-        // Se o voxel vizinho em -X está VAZIO
         if (occupied_voxels.find({ix - 1, iy, iz}) == occupied_voxels.end()) {
-            add_pose(cx - res, cy, cz, {1, 0, 0});  // Raio vem da esquerda pra direita
+            add_pose(cx, cy, cz, {1, 0, 0});  
+            is_surface = true;
         }
 
         // --- EIXO Y ---
         if (occupied_voxels.find({ix, iy + 1, iz}) == occupied_voxels.end()) {
-            add_pose(cx, cy + res, cz, {0, -1, 0}); // Vem de cima pra baixo
+            add_pose(cx, cy, cz, {0, -1, 0}); 
+            is_surface = true;
         }
         if (occupied_voxels.find({ix, iy - 1, iz}) == occupied_voxels.end()) {
-            add_pose(cx, cy - res, cz, {0, 1, 0});  // Vem de baixo pra cima
+            add_pose(cx, cy, cz, {0, 1, 0});  
+            is_surface = true;
         }
 
         // --- EIXO Z ---
         if (occupied_voxels.find({ix, iy, iz + 1}) == occupied_voxels.end()) {
-            add_pose(cx, cy, cz + res, {0, 0, -1}); // Vem da frente pra trás
+            add_pose(cx, cy, cz, {0, 0, -1}); 
+            is_surface = true;
         }
         if (occupied_voxels.find({ix, iy, iz - 1}) == occupied_voxels.end()) {
-            add_pose(cx, cy, cz - res, {0, 0, 1});  // Vem de trás pra frente
+            add_pose(cx, cy, cz, {0, 0, 1});  
+            is_surface = true;
+        }
+
+        geometry_msgs::msg::Point pt;
+        pt.x = cx; pt.y = cy; pt.z = cz;
+
+        if (is_surface) {
+            surface_voxels_marker.points.push_back(pt);
+        } else {
+            internal_voxels_marker.points.push_back(pt);
         }
     }
 
     // 3. VISUALIZAÇÃO
+    // 3. VISUALIZAÇÃO
     if (pub_rays_) { 
         visualization_msgs::msg::MarkerArray marker_array;
+        
         visualization_msgs::msg::Marker clear_marker;
         clear_marker.action = visualization_msgs::msg::Marker::DELETEALL;
         marker_array.markers.push_back(clear_marker);
 
+        if (!internal_voxels_marker.points.empty()) 
+            marker_array.markers.push_back(internal_voxels_marker);
+        if (!surface_voxels_marker.points.empty())  
+            marker_array.markers.push_back(surface_voxels_marker);
+
+        int ray_id = 2;
         for (size_t i = 0; i < poses.size(); ++i) {
             visualization_msgs::msg::Marker marker;
             marker.header.frame_id = "map"; 
             marker.header.stamp = this->now();
             marker.ns = "adaptive_rays";
-            marker.id = i;
+            marker.id = ray_id++;
             marker.type = visualization_msgs::msg::Marker::ARROW;
             marker.action = visualization_msgs::msg::Marker::ADD;
-            marker.pose = poses[i];
             
-            marker.scale.x = ray_lengths[i]; // Comprimento exato da garra
+            // Força a origem do Marker para 0,0,0 (usaremos os Points para ditar a posição e rotação)
+            marker.pose.orientation.w = 1.0;
+
+            // Ponto Inicial (Origem do raio recuada pelo tamanho do voxel)
+            geometry_msgs::msg::Point p_start;
+            p_start.x = poses[i].position.x;
+            p_start.y = poses[i].position.y;
+            p_start.z = poses[i].position.z;
+
+            // Recria o vetor de direção a partir do Quaternion armazenado
+            Eigen::Quaterniond q(poses[i].orientation.w, poses[i].orientation.x, poses[i].orientation.y, poses[i].orientation.z);
+            Eigen::Vector3d ray_dir = q * Eigen::Vector3d::UnitZ();
+
+            // Ponto Final (Origem + Direção * Comprimento do raio)
+            geometry_msgs::msg::Point p_end;
+            p_end.x = p_start.x + (ray_dir.x() * ray_lengths[i]);
+            p_end.y = p_start.y + (ray_dir.y() * ray_lengths[i]);
+            p_end.z = p_start.z + (ray_dir.z() * ray_lengths[i]);
+
+            marker.points.push_back(p_start);
+            marker.points.push_back(p_end);
+            
+            // Quando usamos "points" na ARROW:
+            // scale.x é a espessura da haste, scale.y é a largura da ponta, scale.z é o tamanho da ponta
+            marker.scale.x = 0.0015; 
             marker.scale.y = 0.003; 
             marker.scale.z = 0.003; 
 
@@ -852,107 +923,92 @@ std::vector<geometry_msgs::msg::Pose> GenerateGraspPoses::generateMultiOrientedR
 
             marker_array.markers.push_back(marker);
         }
+        
         pub_rays_->publish(marker_array);
     }
-
     return poses;
 }
 
-StepAnalysis GenerateGraspPoses::analyzeLocalCylinder(
+
+StepAnalysis GenerateGraspPoses::analyzeLocalSphere(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
     const Eigen::Vector3f& center,
     const Eigen::Vector3f& ray_dir)
 {
-    StepAnalysis result; 
-    result.valid = false; 
+    StepAnalysis result;
+    result.valid = false;
     result.center = center;
 
-    size_t N = cloud->size();
+    const size_t N = cloud->size();
     if (!cloud || N <= min_points_per_segment_) return result;
     result.point_count = N;
 
-   
-    const pcl::PointXYZ* points_ptr = cloud->points.data();
-    
-    // Média
+    const pcl::PointXYZ* __restrict__ pts = cloud->points.data();
+
     float sx = 0.0f, sy = 0.0f, sz = 0.0f;
     for (size_t i = 0; i < N; ++i) {
-        sx += points_ptr[i].x; sy += points_ptr[i].y; sz += points_ptr[i].z;
+        sx += pts[i].x; sy += pts[i].y; sz += pts[i].z;
     }
-    float inv_N = 1.0f / static_cast<float>(N);
-    float mean_x = sx * inv_N; float mean_y = sy * inv_N; float mean_z = sz * inv_N;
-    Eigen::Vector3f centroid(mean_x, mean_y, mean_z);
+    const float inv_N = 1.0f / static_cast<float>(N);
+    const float mx = sx * inv_N, my = sy * inv_N, mz = sz * inv_N;
 
-    // Covariância
     float acc_xx = 0.0f, acc_xy = 0.0f, acc_xz = 0.0f;
     float acc_yy = 0.0f, acc_yz = 0.0f, acc_zz = 0.0f;
+    for (size_t i = 0; i < N; ++i) {
+        const float dx = pts[i].x - mx, dy = pts[i].y - my, dz = pts[i].z - mz;
+        acc_xx += dx*dx; acc_xy += dx*dy; acc_xz += dx*dz;
+        acc_yy += dy*dy; acc_yz += dy*dz; acc_zz += dz*dz;
+    }
+
+    Eigen::Matrix3f cov;
+    cov(0,0)=acc_xx*inv_N; cov(0,1)=acc_xy*inv_N; cov(0,2)=acc_xz*inv_N;
+    cov(1,0)=cov(0,1);     cov(1,1)=acc_yy*inv_N; cov(1,2)=acc_yz*inv_N;
+    cov(2,0)=cov(0,2);     cov(2,1)=cov(1,2);     cov(2,2)=acc_zz*inv_N;
+
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(cov, Eigen::ComputeEigenvectors);
+    const Eigen::Matrix3f& ev = solver.eigenvectors();
+
+    const Eigen::Vector3f& vals = solver.eigenvalues();
+    const float eig_sum = vals[0] + vals[1] + vals[2];
+    result.curvature = (eig_sum > 1e-6f) ? std::abs(vals[0]) / eig_sum : 0.0f;
+
+    Eigen::Vector3f pca_normal = ev.col(0);
+    if (pca_normal.dot(ray_dir) > 0.0f) pca_normal = -pca_normal;
+    result.normal_vector = pca_normal;
+
+    const float t1x=ev(0,1), t1y=ev(1,1), t1z=ev(2,1);
+    const float t2x=ev(0,2), t2y=ev(1,2), t2z=ev(2,2);
+    const float ox=center.x(), oy=center.y(), oz=center.z();
+
+    // Limite radial: metade do raio
+    const float safe_r = (sphere_radius_ > 1e-4f) ? sphere_radius_ : 0.02f;
+    const float r2_half = (safe_r * 0.5f) * (safe_r * 0.5f);
+
+    constexpr int NUM_SECTORS = 16; // 8 angulares × 2 anéis radiais
+    int sector_counts[NUM_SECTORS] = {0};
 
     for (size_t i = 0; i < N; ++i) {
-        float dx = points_ptr[i].x - mean_x; float dy = points_ptr[i].y - mean_y; float dz = points_ptr[i].z - mean_z;
-        acc_xx += dx * dx; acc_xy += dx * dy; acc_xz += dx * dz;
-        acc_yy += dy * dy; acc_yz += dy * dz; acc_zz += dz * dz;
+        const float dx = pts[i].x - ox, dy = pts[i].y - oy, dz = pts[i].z - oz;
+        const float u = dx*t1x + dy*t1y + dz*t1z;
+        const float v = dx*t2x + dy*t2y + dz*t2z;
+        const float r2 = u*u + v*v;
+        const int ring = (r2 >= r2_half);  // bit 3: 0 = interno (centro→meio), 1 = externo (meio→raio)
+        const int sector = (u >= 0.0f) | ((v >= 0.0f) << 1) | ((u*u >= v*v) << 2) | (ring << 3);
+        sector_counts[sector]++;
     }
 
-    Eigen::Matrix3f covariance_matrix;
-    covariance_matrix(0, 0) = acc_xx * inv_N; covariance_matrix(0, 1) = acc_xy * inv_N; covariance_matrix(0, 2) = acc_xz * inv_N;
-    covariance_matrix(1, 0) = covariance_matrix(0, 1); covariance_matrix(1, 1) = acc_yy * inv_N; covariance_matrix(1, 2) = acc_yz * inv_N;
-    covariance_matrix(2, 0) = covariance_matrix(0, 2); covariance_matrix(2, 1) = covariance_matrix(1, 2); covariance_matrix(2, 2) = acc_zz * inv_N;
+    const int threshold = static_cast<int>(min_points_per_segment_);
+    int populated = 0;
+    for (int k = 0; k < NUM_SECTORS; ++k)
+        populated += (sector_counts[k] >= threshold);
+    result.symmetry_score = static_cast<float>(populated) / static_cast<float>(NUM_SECTORS);
 
-  
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance_matrix, Eigen::ComputeEigenvectors);
-    
-   
-    Eigen::Vector3f axis_candidate_A = eigen_solver.eigenvectors().col(1); 
-    Eigen::Vector3f axis_candidate_B = eigen_solver.eigenvectors().col(2); 
+    const float dot_val = std::min(std::abs(ray_dir.dot(result.normal_vector)), 1.0f);
+    result.angle_to_normal_deg = std::acos(dot_val) * 57.2957795f;
 
-  
-    float dot_A = std::abs(ray_dir.dot(axis_candidate_A));
-    float dot_B = std::abs(ray_dir.dot(axis_candidate_B));
-
-    Eigen::Vector3f cylinder_axis;
-    if (dot_A < dot_B) {
-        cylinder_axis = axis_candidate_A; 
-    } else {
-        cylinder_axis = axis_candidate_B; 
-    }
-
-   
-    float ray_on_axis = ray_dir.dot(cylinder_axis);
-    Eigen::Vector3f normal_geom = ray_dir - (ray_on_axis * cylinder_axis);
-    
-    if (normal_geom.squaredNorm() > 1e-6f) {
-        normal_geom.normalize();
-        normal_geom = -normal_geom; 
-    } else {
-        normal_geom = -ray_dir; 
-    }
-
-    result.normal_vector = normal_geom;
-
-   
-    Eigen::Vector3f values = eigen_solver.eigenvalues();
-    float sum = values.sum();
-    result.curvature = (sum > 1e-6f) ? std::abs(values[0]) / sum : 0.0f; 
-
-  
-    Eigen::Vector3f diff = centroid - center;
-    float parallel_comp = diff.dot(ray_dir);
-    Eigen::Vector3f radial_offset_vec = diff - (parallel_comp * ray_dir);
-    float radial_offset = radial_offset_vec.norm();
-
-    float safe_radius = (cylinder_radius_ > 1e-4f) ? cylinder_radius_ : 0.02f;
-    float linear_score = 1.0f - (radial_offset / safe_radius);
-    result.symmetry_score = std::max(0.0f, linear_score);
-
-   
-    float dot = std::abs(ray_dir.dot(result.normal_vector));
-    if (dot > 1.0f) dot = 1.0f; 
-    result.angle_to_normal_deg = std::acos(dot) * 57.2957795f; 
-    
     result.valid = true;
     return result;
 }
-
 
 void GenerateGraspPoses::extractBoundingBoxesFromOBJ()
 {
@@ -1016,7 +1072,7 @@ void GenerateGraspPoses::extractBoundingBoxesFromOBJ()
         }
 
         LocalBox box;
-        float margin = 0.001f;
+        float margin = 0.005f;
         box.min_pt = Eigen::Vector3f(min_x - margin, min_y - margin, min_z - margin);
         box.max_pt = Eigen::Vector3f(max_x + margin, max_y + margin, max_z + margin);
         
@@ -1115,214 +1171,58 @@ void GenerateGraspPoses::publishGripperCollisionBoxes()
     pub_gripper_boxes_->publish(ma);
 }
 
-
-bool GenerateGraspPoses::check_collision(ScoredGrasp& grasp, const pcl::KdTreeFLANN<pcl::PointXYZ>& env_kdtree, bool publish_debug, bool try_rotations)
+bool GenerateGraspPoses::check_collision(ScoredGrasp& grasp, 
+    const pcl::KdTreeFLANN<pcl::PointXYZ>& /*env_kdtree*/, 
+    bool /*publish_debug*/, bool try_rotations)
 {
     if (gripper_boxes_.empty()) return true;
-    if (!env_kdtree.getInputCloud() || env_kdtree.getInputCloud()->empty()) return true;
+    if (!voxel_checker_.isReady()) return true;
 
-    static bool radius_initialized = false;
-    static float max_search_radius = 0.0f;
+    Eigen::Vector3f grasp_pos(
+        grasp.pose_center.position.x, 
+        grasp.pose_center.position.y, 
+        grasp.pose_center.position.z);
+    Eigen::Quaternionf original_rot(
+        grasp.pose_center.orientation.w, 
+        grasp.pose_center.orientation.x, 
+        grasp.pose_center.orientation.y, 
+        grasp.pose_center.orientation.z);
 
-    if (!radius_initialized) 
-    {
-        float max_box_dist = 0.0f;
-        for(const auto& box : gripper_boxes_) {
-             float mx = std::max(std::abs(box.max_pt.x()), std::abs(box.min_pt.x()));
-             float my = std::max(std::abs(box.max_pt.y()), std::abs(box.min_pt.y()));
-             float mz = std::max(std::abs(box.max_pt.z()), std::abs(box.min_pt.z()));
-             float dist = std::sqrt(mx*mx + my*my + mz*mz);
-             if (dist > max_box_dist) max_box_dist = dist;
-        }
-        max_search_radius = max_box_dist + 0.04f; 
-        radius_initialized = true;
-    }
-
-    Eigen::Vector3f grasp_pos(grasp.pose_center.position.x, grasp.pose_center.position.y, grasp.pose_center.position.z);
-    Eigen::Quaternionf original_rot(grasp.pose_center.orientation.w, grasp.pose_center.orientation.x, grasp.pose_center.orientation.y, grasp.pose_center.orientation.z);
-
-    std::vector<int> pointIdx;
-    std::vector<float> pointSqDist;
-    pcl::PointXYZ searchPoint(grasp_pos.x(), grasp_pos.y(), grasp_pos.z());
-
-    if (env_kdtree.radiusSearch(searchPoint, max_search_radius, pointIdx, pointSqDist) == 0) {
-        if (publish_debug) 
-        {
-            RCLCPP_WARN(this->get_logger(), "ALERTA CRÍTICO: A KD-Tree encontrou 0 pontos perto da garra! As nuvens estão em coordenadas separadas!");
-            return false;
-        }
-        return true; 
-    }
-
-    const float MARGIN = 0.003f; // Margem de segurança de 2mm
-    const auto& cloud_points = env_kdtree.getInputCloud()->points;
-    const int NUM_STEPS = try_rotations ? 18 : 1; 
-    const float ANGLE_STEP = (2.0f * M_PI) / 18.0f; 
-    
-    bool final_collision_state = true; 
+    const int NUM_STEPS = try_rotations ? 18 : 1;
+    const float ANGLE_STEP = (2.0f * M_PI) / 18.0f;
+    const float MARGIN = 0.003f;
 
     for (int step = 0; step < NUM_STEPS; ++step)
     {
-        float current_angle = step * ANGLE_STEP;
-        Eigen::Quaternionf rotation_offset(Eigen::AngleAxisf(current_angle, Eigen::Vector3f::UnitY()));
-        Eigen::Quaternionf current_rot = original_rot * rotation_offset;
+        float angle = step * ANGLE_STEP;
+        Eigen::Quaternionf rot_offset(
+            Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitY()));
+        Eigen::Quaternionf current_rot = original_rot * rot_offset;
 
-        // MATRIZ DEFINITIVA DA FÍSICA! (Crua, Baseada unicamente no TCP)
-        Eigen::Affine3f tf_tcp_to_world = Eigen::Translation3f(grasp_pos) * current_rot;
+        Eigen::Affine3f tf_tcp_to_world = 
+            Eigen::Translation3f(grasp_pos) * current_rot;
         Eigen::Affine3f tf_world_to_tcp = tf_tcp_to_world.inverse();
-        Eigen::Quaternionf q_tcp_world(tf_tcp_to_world.rotation());
 
-        // =========================================================================
-        // PUBLICAÇÃO DO ESTADO DE DEBUG (Eixos + Caixas na Posição Real do Teste)
-        // =========================================================================
-        if (publish_debug && step == 0) {
-            visualization_msgs::msg::MarkerArray debug_ma;
-            auto t_now = this->now();
-
-            visualization_msgs::msg::Marker center_mk;
-            center_mk.header.frame_id = "map";
-            center_mk.header.stamp = t_now;
-            center_mk.ns = "check_collision_center";
-            center_mk.id = 0;
-            center_mk.type = visualization_msgs::msg::Marker::SPHERE;
-            center_mk.action = visualization_msgs::msg::Marker::ADD;
-            center_mk.pose.position.x = grasp_pos.x();
-            center_mk.pose.position.y = grasp_pos.y();
-            center_mk.pose.position.z = grasp_pos.z();
-            center_mk.scale.x = 0.015; center_mk.scale.y = 0.015; center_mk.scale.z = 0.015;
-            center_mk.color.r = 1.0; center_mk.color.g = 1.0; center_mk.color.b = 0.0; center_mk.color.a = 1.0;
-            debug_ma.markers.push_back(center_mk);
-
-            auto create_axis_arrow = [&](int id, Eigen::Vector3f end_local, float r, float g, float b) {
-                visualization_msgs::msg::Marker arrow_mk;
-                arrow_mk.header.frame_id = "map";
-                arrow_mk.header.stamp = t_now;
-                arrow_mk.ns = "check_collision_axes";
-                arrow_mk.id = id;
-                arrow_mk.type = visualization_msgs::msg::Marker::ARROW;
-                arrow_mk.action = visualization_msgs::msg::Marker::ADD;
-                
-                arrow_mk.pose.position.x = grasp_pos.x();
-                arrow_mk.pose.position.y = grasp_pos.y();
-                arrow_mk.pose.position.z = grasp_pos.z();
-                arrow_mk.pose.orientation.x = q_tcp_world.x();
-                arrow_mk.pose.orientation.y = q_tcp_world.y();
-                arrow_mk.pose.orientation.z = q_tcp_world.z();
-                arrow_mk.pose.orientation.w = q_tcp_world.w();
-                
-                geometry_msgs::msg::Point p1, p2;
-                p1.x = 0.0; p1.y = 0.0; p1.z = 0.0; 
-                p2.x = end_local.x(); p2.y = end_local.y(); p2.z = end_local.z(); 
-                
-                arrow_mk.points.push_back(p1);
-                arrow_mk.points.push_back(p2);
-                
-                arrow_mk.scale.x = 0.004; arrow_mk.scale.y = 0.008; arrow_mk.scale.z = 0.0; 
-                arrow_mk.color.r = r; arrow_mk.color.g = g; arrow_mk.color.b = b; arrow_mk.color.a = 1.0;
-                return arrow_mk;
-            };
-
-            float axis_len = 0.06f; 
-            debug_ma.markers.push_back(create_axis_arrow(1, Eigen::Vector3f(axis_len, 0.0, 0.0), 1.0, 0.0, 0.0)); // X (Vermelho)
-            debug_ma.markers.push_back(create_axis_arrow(2, Eigen::Vector3f(0.0, axis_len, 0.0), 0.0, 1.0, 0.0)); // Y (Verde)
-            debug_ma.markers.push_back(create_axis_arrow(3, Eigen::Vector3f(0.0, 0.0, axis_len), 0.0, 0.0, 1.0)); // Z (Azul)
-
-            for(size_t b = 0; b < gripper_boxes_.size(); b++) {
-                visualization_msgs::msg::Marker box_mk;
-                box_mk.header.frame_id = "map";
-                box_mk.header.stamp = t_now;
-                box_mk.ns = "check_collision_boxes";
-                box_mk.id = b;
-                box_mk.type = visualization_msgs::msg::Marker::CUBE;
-                box_mk.action = visualization_msgs::msg::Marker::ADD;
-
-                Eigen::Vector3f cw = tf_tcp_to_world * gripper_boxes_[b].center;
-                box_mk.pose.position.x = cw.x();
-                box_mk.pose.position.y = cw.y();
-                box_mk.pose.position.z = cw.z();
-
-                box_mk.pose.orientation.x = q_tcp_world.x();
-                box_mk.pose.orientation.y = q_tcp_world.y();
-                box_mk.pose.orientation.z = q_tcp_world.z();
-                box_mk.pose.orientation.w = q_tcp_world.w();
-
-                box_mk.scale.x = gripper_boxes_[b].dimensions.x();
-                box_mk.scale.y = gripper_boxes_[b].dimensions.y();
-                box_mk.scale.z = gripper_boxes_[b].dimensions.z();
-
-                box_mk.color.r = 1.0; box_mk.color.g = 0.0; box_mk.color.b = 1.0; 
-                box_mk.color.a = 0.6;
-                debug_ma.markers.push_back(box_mk);
-            }
-
-            if (debug_marker_pub_) {
-                debug_marker_pub_->publish(debug_ma);
-            }
-        }
-
-        bool collision_in_this_angle = false;
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr debug_cloud;
-        
-        if (publish_debug && step == 0) {
-            debug_cloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
-            debug_cloud->header.frame_id = "map";
-            debug_cloud->reserve(pointIdx.size());
-        }
-
-        for (int idx : pointIdx)
+        if (!voxel_checker_.gripperCollides(
+                tf_tcp_to_world, tf_world_to_tcp, 
+                gripper_boxes_, MARGIN))
         {
-            const auto& pt = cloud_points[idx];
-            Eigen::Vector3f p_world(pt.x, pt.y, pt.z);
-            
-            // Joga o ponto de volta para dentro do referencial da garra (Matemática pura, sem visual_tf lixo)
-            Eigen::Vector3f p_local = tf_world_to_tcp * p_world;
-
-            bool point_is_inside = false;
-            for (const auto& box : gripper_boxes_)
-            {
-                // SE O PONTO INVADIR A CAIXA UM MILÍMETRO QUE SEJA, A CHAPA ESQUENTA
-                if (p_local.x() >= (box.min_pt.x() - MARGIN) && p_local.x() <= (box.max_pt.x() + MARGIN) &&
-                    p_local.y() >= (box.min_pt.y() - MARGIN) && p_local.y() <= (box.max_pt.y() + MARGIN) &&
-                    p_local.z() >= (box.min_pt.z() - MARGIN) && p_local.z() <= (box.max_pt.z() + MARGIN))
-                {
-                    point_is_inside = true;
-                    collision_in_this_angle = true;
-                    break; // Ponto mortífero detectado
-                }
-            }
-
-            if (publish_debug && debug_cloud) {
-                pcl::PointXYZRGB p_vis;
-                p_vis.x = pt.x; p_vis.y = pt.y; p_vis.z = pt.z;
-                if (point_is_inside) { p_vis.r = 255; p_vis.g = 0; p_vis.b = 0; } // Vermelho = Colisão Feroz
-                else                 { p_vis.r = 0; p_vis.g = 255; p_vis.b = 0; } // Verde = Seguro
-                debug_cloud->points.push_back(p_vis);
-            }
-
-            // Otimização: Se achou colisão e não é debug, mata o teste desse ângulo na hora
-            if (collision_in_this_angle && !publish_debug) break;
-        }
-
-        if (publish_debug && debug_cloud && !debug_cloud->empty() && step == 0) {
-            sensor_msgs::msg::PointCloud2 msg;
-            pcl::toROSMsg(*debug_cloud, msg);
-            msg.header.stamp = this->now();
-            pub_debug_collision_->publish(msg);
-        }
-
-        // Se passar ileso pela caixa de colisão, achamos nosso campeão
-        if (!collision_in_this_angle) {
+            // Sem colisão neste ângulo → atualiza orientação e retorna válido
             grasp.pose_center.orientation.w = current_rot.w();
             grasp.pose_center.orientation.x = current_rot.x();
             grasp.pose_center.orientation.y = current_rot.y();
             grasp.pose_center.orientation.z = current_rot.z();
-            final_collision_state = false; 
-            break; 
+            return true;
         }
     }
-
-    return !final_collision_state; // Retorna true (válido) se não houver colisão
+    return false; // Todas as rotações colidem
 }
+
+
+
+
+
+
 
 
 
@@ -1476,7 +1376,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
         }
     }
 
-    int expansion_rad = std::ceil(cylinder_radius_ * inv_voxel_size);
+    int expansion_rad = std::ceil(sphere_radius_ * inv_voxel_size);
     int expansion_rad_sq = expansion_rad * expansion_rad;
 
     std::vector<std::tuple<int, int, int>> sphere_offsets;
@@ -1548,16 +1448,16 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     std::atomic<int> atomic_perfect_count{0};
 
     float voxel_radius = (voxel_size * 1.73205f) / 2.0f;
-    float voxel_check_threshold = cylinder_radius_ + voxel_radius; 
+    float voxel_check_threshold = sphere_radius_ + voxel_radius; 
     float voxel_check_threshold_squared = voxel_check_threshold * voxel_check_threshold;
-    float cylinder_radius_sq = cylinder_radius_ * cylinder_radius_;
+    float cylinder_radius_sq = sphere_radius_ * sphere_radius_;
     float max_scan_dist = max_gripper_width_ * 1.1f;
-    int r_int = std::ceil(cylinder_radius_ * inv_voxel_size);
+    int r_int = std::ceil(sphere_radius_ * inv_voxel_size);
     int r_sq = r_int * r_int;
 
     const float voxel_extent = (voxel_size * 1.73205f) * 0.5f; 
-    const float safe_radius_sq = (cylinder_radius_ - voxel_extent) * (cylinder_radius_ - voxel_extent);
-    const bool use_fast_check = (cylinder_radius_ > voxel_extent); 
+    const float safe_radius_sq = (sphere_radius_ - voxel_extent) * (sphere_radius_ - voxel_extent);
+    const bool use_fast_check = (sphere_radius_ > voxel_extent); 
 
     RCLCPP_INFO(this->get_logger(), "Iniciando Processamento PARALELO (Candidates: %lu)...", all_candidates_.size());
     auto t_loop_start = std::chrono::high_resolution_clock::now();
@@ -1893,223 +1793,161 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 float real_thickness = exact_t_max - exact_t_min;
                 if (!points_found || local.inliers_entry->size() < 5 || local.inliers_exit->size() < 5 || real_thickness >= max_gripper_width_) continue; 
 
-
                 if (enable_ray_animation_ && debug_marker_pub_)
                 {
                     std::lock_guard<std::mutex> lock(toma);
                     auto t_now = this->now();
                     visualization_msgs::msg::MarkerArray markers;
 
-                    
+                    // Limpa marcadores da iteração anterior
+                    visualization_msgs::msg::Marker clear_marker;
+                    clear_marker.action = visualization_msgs::msg::Marker::DELETEALL;
+                    markers.markers.push_back(clear_marker);
+
+                    // Publica a nuvem original de contexto
                     sensor_msgs::msg::PointCloud2 m; 
                     pcl::toROSMsg(*stored_cloud_, m); 
                     m.header.stamp = t_now; 
                     m.header.frame_id = "map"; 
                     pub_cloud_->publish(m);
 
-                    
                     visualization_msgs::msg::Marker base_marker;
                     base_marker.header.frame_id = "map";
                     base_marker.header.stamp = t_now;
                     base_marker.action = visualization_msgs::msg::Marker::ADD;
+                    base_marker.pose.orientation.w = 1.0;
                     base_marker.lifetime = rclcpp::Duration::from_seconds(0); 
 
-                 
-                    StepAnalysis debug_entry = analyzeLocalCylinder(local.inliers_entry, center_entry, current_ray_dir);
+                    StepAnalysis debug_entry = analyzeLocalSphere(local.inliers_entry, center_entry, current_ray_dir);
                     StepAnalysis debug_exit;
                     if (real_thickness > 0.001f) {
-                        debug_exit = analyzeLocalCylinder(local.inliers_exit, center_exit, current_ray_dir);
+                        debug_exit = analyzeLocalSphere(local.inliers_exit, center_exit, current_ray_dir);
                     }
 
-                    
-                    visualization_msgs::msg::Marker pivot_mk = base_marker;
-                    pivot_mk.ns = "debug_anim_pivot"; 
-                    pivot_mk.id = 1;
-                    pivot_mk.type = visualization_msgs::msg::Marker::SPHERE;
-                    pivot_mk.pose.position.x = PIVOT_POINT.x(); 
-                    pivot_mk.pose.position.y = PIVOT_POINT.y(); 
-                    pivot_mk.pose.position.z = PIVOT_POINT.z();
-                    pivot_mk.pose.orientation.w = 1.0;
-                    pivot_mk.scale.x = 0.005; pivot_mk.scale.y = 0.005; pivot_mk.scale.z = 0.005;
-                    pivot_mk.color.a = 1.0; pivot_mk.color.r = 0.0; pivot_mk.color.g = 1.0; pivot_mk.color.b = 1.0; 
-                    markers.markers.push_back(pivot_mk);
-
+                    // 1. ORIGEM DO RAIO (Esfera Magenta)
                     visualization_msgs::msg::Marker origin_mk = base_marker;
-                    origin_mk.ns = "current_ray_origin"; 
-                    origin_mk.id = 1;
+                    origin_mk.ns = "anim_ray_origin"; origin_mk.id = 1;
                     origin_mk.type = visualization_msgs::msg::Marker::SPHERE;
                     origin_mk.pose.position.x = current_ray_origin.x(); 
                     origin_mk.pose.position.y = current_ray_origin.y(); 
                     origin_mk.pose.position.z = current_ray_origin.z();
-                    origin_mk.pose.orientation.w = 1.0;
                     origin_mk.scale.x = 0.005; origin_mk.scale.y = 0.005; origin_mk.scale.z = 0.005;
                     origin_mk.color.a = 1.0; origin_mk.color.r = 1.0; origin_mk.color.g = 0.0; origin_mk.color.b = 1.0; 
                     markers.markers.push_back(origin_mk);
 
-                   
-                    Eigen::Vector3f pos_entry = current_ray_origin + current_ray_dir * exact_t_min;
-                    Eigen::Vector3f pos_exit  = current_ray_origin + current_ray_dir * exact_t_max;
-
-                    visualization_msgs::msg::Marker sphere_entry = base_marker;
-                    sphere_entry.ns = "debug_anim_sphere_entry";
-                    sphere_entry.id = 6;
-                    sphere_entry.type = visualization_msgs::msg::Marker::SPHERE;
-                    sphere_entry.pose.position.x = pos_entry.x();
-                    sphere_entry.pose.position.y = pos_entry.y();
-                    sphere_entry.pose.position.z = pos_entry.z();
-                    sphere_entry.pose.orientation.w = 1.0;
-                    sphere_entry.scale.x = cylinder_radius_ * 2.0; 
-                    sphere_entry.scale.y = cylinder_radius_ * 2.0; 
-                    sphere_entry.scale.z = cylinder_radius_ * 2.0;
-                    sphere_entry.color.a = 0.3; sphere_entry.color.r = 0.0; sphere_entry.color.g = 0.5; sphere_entry.color.b = 1.0;
-                    markers.markers.push_back(sphere_entry);
-
-                    if ((exact_t_max - exact_t_min) > 0.005) 
-                    {
-                        visualization_msgs::msg::Marker sphere_exit = sphere_entry; 
-                        sphere_exit.ns = "debug_anim_sphere_exit";
-                        sphere_exit.id = 7;
-                        sphere_exit.pose.position.x = pos_exit.x();
-                        sphere_exit.pose.position.y = pos_exit.y();
-                        sphere_exit.pose.position.z = pos_exit.z();
-                        sphere_exit.color.r = 1.0; sphere_exit.color.g = 0.5; sphere_exit.color.b = 0.0;
-                        markers.markers.push_back(sphere_exit);
-                    }
-
-                   
+                    // 2. RAIO PRINCIPAL (Seta Amarela Atravessando)
                     visualization_msgs::msg::Marker ray_mk = base_marker;
-                    ray_mk.ns = "debug_anim_ray"; 
-                    ray_mk.id = 2;
+                    ray_mk.ns = "anim_ray"; ray_mk.id = 2;
                     ray_mk.type = visualization_msgs::msg::Marker::ARROW;
-                    
                     geometry_msgs::msg::Point p_start, p_end;
-                    p_start.x = current_ray_origin.x(); p_start.y = current_ray_origin.y(); p_start.z = current_ray_origin.z();
-                    Eigen::Vector3f visual_end = current_ray_origin + (current_ray_dir * (DISTANCE_TO_PIVOT + 0.05f));
+                    p_start.x = current_ray_origin.x(); 
+                    p_start.y = current_ray_origin.y(); 
+                    p_start.z = current_ray_origin.z();
+                    // O raio vai um pouco além do ponto de saída para mostrar o vazamento
+                    Eigen::Vector3f visual_end = current_ray_origin + (current_ray_dir * (exact_t_max + 0.03f)); 
                     p_end.x = visual_end.x(); p_end.y = visual_end.y(); p_end.z = visual_end.z();
-
-                    ray_mk.points.push_back(p_start); 
-                    ray_mk.points.push_back(p_end);
-                    ray_mk.scale.x = 0.003; ray_mk.scale.y = 0.006; ray_mk.scale.z = 0.01;  
-                    ray_mk.color.a = 0.8; ray_mk.color.r = 1.0; ray_mk.color.g = 1.0; ray_mk.color.b = 0.0;
+                    ray_mk.points.push_back(p_start); ray_mk.points.push_back(p_end);
+                    ray_mk.scale.x = 0.002; ray_mk.scale.y = 0.005; ray_mk.scale.z = 0.005;  
+                    ray_mk.color.a = 1.0; ray_mk.color.r = 1.0; ray_mk.color.g = 1.0; ray_mk.color.b = 0.2;
                     markers.markers.push_back(ray_mk);
 
-                   
-                    if (debug_entry.valid) {
-                        visualization_msgs::msg::Marker norm_entry = base_marker;
-                        norm_entry.ns = "debug_anim_normal_entry";
-                        norm_entry.id = 3;
-                        norm_entry.type = visualization_msgs::msg::Marker::ARROW;
-
-                        geometry_msgs::msg::Point p_center, p_norm;
-                        p_center.x = debug_entry.center.x(); 
-                        p_center.y = debug_entry.center.y(); 
-                        p_center.z = debug_entry.center.z();
-
-                        Eigen::Vector3f n_end = debug_entry.center + (debug_entry.normal_vector * 0.04f);
-                        p_norm.x = n_end.x(); p_norm.y = n_end.y(); p_norm.z = n_end.z();
-
-                        norm_entry.points.push_back(p_center);
-                        norm_entry.points.push_back(p_norm);
-                        norm_entry.scale.x = 0.002; norm_entry.scale.y = 0.004; norm_entry.scale.z = 0.0;
-                        norm_entry.color.a = 1.0; norm_entry.color.r = 1.0; norm_entry.color.g = 0.0; norm_entry.color.b = 0.0; 
-                        markers.markers.push_back(norm_entry);
-                    }
-
-                   
-                    if (debug_exit.valid) {
-                        visualization_msgs::msg::Marker norm_exit = base_marker;
-                        norm_exit.ns = "debug_anim_normal_exit";
-                        norm_exit.id = 4;
-                        norm_exit.type = visualization_msgs::msg::Marker::ARROW;
-
-                        geometry_msgs::msg::Point p_center, p_norm;
-                        p_center.x = debug_exit.center.x(); 
-                        p_center.y = debug_exit.center.y(); 
-                        p_center.z = debug_exit.center.z();
-
-                        Eigen::Vector3f n_end = debug_exit.center + (debug_exit.normal_vector * 0.04f);
-                        p_norm.x = n_end.x(); p_norm.y = n_end.y(); p_norm.z = n_end.z();
-
-                        norm_exit.points.push_back(p_center);
-                        norm_exit.points.push_back(p_norm);
-                        norm_exit.scale.x = 0.002; norm_exit.scale.y = 0.004; norm_exit.scale.z = 0.0;
-                        norm_exit.color.a = 1.0; norm_exit.color.r = 1.0; norm_exit.color.g = 0.5; norm_exit.color.b = 0.0;
-                        markers.markers.push_back(norm_exit);
-                    }
-
-                  
-                    
-                    if (local.inliers_entry && !local.inliers_entry->empty()) 
+                    // --- FUNÇÃO AUXILIAR PARA RENDERIZAR O PONTO DE CONTATO (ESTILO DEBUG) ---
+                    auto drawContact = [&](const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+                                           const Eigen::Vector3f& center, const StepAnalysis& analysis,
+                                           const std::string& prefix, int base_id, 
+                                           float r, float g, float b, float norm_r, float norm_g, float norm_b) 
                     {
-                        visualization_msgs::msg::Marker entry_mk = base_marker;
-                        entry_mk.ns = "debug_anim_inliers_entry"; 
-                        entry_mk.id = 4;
-                        entry_mk.type = visualization_msgs::msg::Marker::POINTS;
-                        entry_mk.scale.x = 0.003; entry_mk.scale.y = 0.003;
-                        entry_mk.color.a = 1.0; entry_mk.color.r = 0.0; entry_mk.color.g = 1.0; entry_mk.color.b = 0.0; 
-
-                        entry_mk.points.reserve(local.inliers_entry->size());
-                        for (const auto& p : local.inliers_entry->points) {
-                            geometry_msgs::msg::Point gp;
-                            gp.x = p.x; gp.y = p.y; gp.z = p.z;
-                            entry_mk.points.push_back(gp);
-                        }
-                        markers.markers.push_back(entry_mk);
-                    }
-
-                    if (local.inliers_exit && !local.inliers_exit->empty()) 
-                    {
-                        visualization_msgs::msg::Marker exit_mk = base_marker;
-                        exit_mk.ns = "debug_anim_inliers_exit"; 
-                        exit_mk.id = 5;
-                        exit_mk.type = visualization_msgs::msg::Marker::POINTS;
-                        exit_mk.scale.x = 0.003; exit_mk.scale.y = 0.003;
-                        exit_mk.color.a = 1.0; exit_mk.color.r = 1.0; exit_mk.color.g = 0.0; exit_mk.color.b = 1.0; // Roxo
-
-                        exit_mk.points.reserve(local.inliers_exit->size());
-                        for (const auto& p : local.inliers_exit->points) {
-                            geometry_msgs::msg::Point gp;
-                            gp.x = p.x; gp.y = p.y; gp.z = p.z;
-                            exit_mk.points.push_back(gp);
-                        }
-                        markers.markers.push_back(exit_mk);
-                    }
-
-                    
-                    if (!local.voxels_no_caminho.empty())
-                    {
-                        visualization_msgs::msg::Marker vox_mk = base_marker;
-                        vox_mk.ns = "debug_anim_voxels_path";
-                        vox_mk.id = 9;
-                        vox_mk.type = visualization_msgs::msg::Marker::CUBE_LIST; 
-                        vox_mk.scale.x = 0.0075; vox_mk.scale.y = 0.0075; vox_mk.scale.z = 0.0075;
-                        vox_mk.color.r = 0.0; vox_mk.color.g = 1.0; vox_mk.color.b = 1.0; vox_mk.color.a = 0.15;
-
-                        vox_mk.points.reserve(local.voxels_no_caminho.size());
-                        for (const auto* bucket_ptr : local.voxels_no_caminho) {
-                            if (bucket_ptr) {
-                                geometry_msgs::msg::Point p;
-                                p.x = bucket_ptr->center.x(); p.y = bucket_ptr->center.y(); p.z = bucket_ptr->center.z();
-                                vox_mk.points.push_back(p);
+                        // A. Pontos Inliers (Cubos 3D para melhor visibilidade)
+                        if (cloud && !cloud->empty()) {
+                            visualization_msgs::msg::Marker pts_mk = base_marker;
+                            pts_mk.ns = prefix + "_inliers"; pts_mk.id = base_id + 1;
+                            pts_mk.type = visualization_msgs::msg::Marker::CUBE_LIST;
+                            pts_mk.scale.x = 0.0011; pts_mk.scale.y = 0.0011; pts_mk.scale.z = 0.0011;
+                            pts_mk.color.a = 1.0; pts_mk.color.r = r; pts_mk.color.g = g; pts_mk.color.b = b;
+                            pts_mk.points.reserve(cloud->size());
+                            for (const auto& p : cloud->points) {
+                                geometry_msgs::msg::Point gp; gp.x = p.x; gp.y = p.y; gp.z = p.z;
+                                pts_mk.points.push_back(gp);
                             }
+                            markers.markers.push_back(pts_mk);
                         }
-                        markers.markers.push_back(vox_mk);
+
+                        // B. Esfera Translúcida de Busca
+                        visualization_msgs::msg::Marker sphere_mk = base_marker;
+                        sphere_mk.ns = prefix + "_sphere"; sphere_mk.id = base_id + 2;
+                        sphere_mk.type = visualization_msgs::msg::Marker::SPHERE;
+                        sphere_mk.pose.position.x = center.x(); sphere_mk.pose.position.y = center.y(); sphere_mk.pose.position.z = center.z();
+                        sphere_mk.scale.x = sphere_radius_ * 2.0; sphere_mk.scale.y = sphere_radius_ * 2.0; sphere_mk.scale.z = sphere_radius_ * 2.0;
+                        sphere_mk.color.a = 0.12; sphere_mk.color.r = r; sphere_mk.color.g = g; sphere_mk.color.b = b;
+                        markers.markers.push_back(sphere_mk);
+
+                        // C. Ponto de Contato Perfeito (Esfera Sólida Central)
+                        visualization_msgs::msg::Marker contact_mk = base_marker;
+                        contact_mk.ns = prefix + "_contact"; contact_mk.id = base_id + 3;
+                        contact_mk.type = visualization_msgs::msg::Marker::SPHERE;
+                        contact_mk.pose = sphere_mk.pose;
+                        contact_mk.scale.x = 0.004; contact_mk.scale.y = 0.004; contact_mk.scale.z = 0.004;
+                        contact_mk.color.a = 1.0; contact_mk.color.r = norm_r; contact_mk.color.g = norm_g; contact_mk.color.b = norm_b;
+                        markers.markers.push_back(contact_mk);
+
+                        if (analysis.valid) {
+                            // D. Disco PCA (Cilindro de Vidro)
+                            visualization_msgs::msg::Marker disc_mk = base_marker;
+                            disc_mk.ns = prefix + "_pca_disc"; disc_mk.id = base_id + 4;
+                            disc_mk.type = visualization_msgs::msg::Marker::CYLINDER;
+                            disc_mk.pose.position = sphere_mk.pose.position;
+                            Eigen::Quaternionf q = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitZ(), analysis.normal_vector);
+                            disc_mk.pose.orientation.x = q.x(); disc_mk.pose.orientation.y = q.y(); 
+                            disc_mk.pose.orientation.z = q.z(); disc_mk.pose.orientation.w = q.w();
+                            disc_mk.scale.x = sphere_radius_ * 2.0; disc_mk.scale.y = sphere_radius_ * 2.0; disc_mk.scale.z = 0.0005; // Fino como papel
+                            disc_mk.color.a = 0.35; disc_mk.color.r = r; disc_mk.color.g = g; disc_mk.color.b = b;
+                            markers.markers.push_back(disc_mk);
+
+                            // E. Seta Normal Local
+                            visualization_msgs::msg::Marker norm_mk = base_marker;
+                            norm_mk.ns = prefix + "_normal"; norm_mk.id = base_id + 5;
+                            norm_mk.type = visualization_msgs::msg::Marker::ARROW;
+                            geometry_msgs::msg::Point n0, n1;
+                            n0.x = center.x(); n0.y = center.y(); n0.z = center.z();
+                            Eigen::Vector3f n_end = center + (analysis.normal_vector * (sphere_radius_ * 1.5f));
+                            n1.x = n_end.x(); n1.y = n_end.y(); n1.z = n_end.z();
+                            norm_mk.points.push_back(n0); norm_mk.points.push_back(n1);
+                            norm_mk.scale.x = 0.002; norm_mk.scale.y = 0.005; norm_mk.scale.z = 0.005;
+                            norm_mk.color.a = 1.0; norm_mk.color.r = norm_r; norm_mk.color.g = norm_g; norm_mk.color.b = norm_b; 
+                            markers.markers.push_back(norm_mk);
+                        }
+                    };
+
+                    // 3. Desenhar Zona de Entrada (Verde Claro)
+                    drawContact(local.inliers_entry, center_entry, debug_entry, "anim_entry", 100, 
+                                0.1f, 0.9f, 0.4f,  // Cor da Nuvem/Disco (Verde)
+                                0.0f, 1.0f, 0.0f); // Cor Normal/Contato
+
+                    // 4. Desenhar Zona de Saída (Laranja)
+                    if (real_thickness > 0.001f) {
+                        drawContact(local.inliers_exit, center_exit, debug_exit, "anim_exit", 200, 
+                                    1.0f, 0.5f, 0.1f,  // Cor da Nuvem/Disco (Laranja)
+                                    1.0f, 0.4f, 0.0f); // Cor Normal/Contato
                     }
+
+                    // 5. Voxels do Caminho do Raio (Apenas para contexto de colisão)
+                   
 
                     debug_marker_pub_->publish(markers);
                     std::this_thread::sleep_for(std::chrono::milliseconds(animation_delay_ms_));
                 }
 
 
+            
                 
                 auto t5 = std::chrono::high_resolution_clock::now();
                 std::vector<StepAnalysis> steps; steps.reserve(2); 
                 
-                StepAnalysis res_entry = analyzeLocalCylinder(local.inliers_entry, center_entry, current_ray_dir);
+                StepAnalysis res_entry = analyzeLocalSphere(local.inliers_entry, center_entry, current_ray_dir);
                 if (res_entry.valid) steps.push_back(res_entry);
 
                 if (real_thickness > 0.001f) { 
-                    StepAnalysis res_exit = analyzeLocalCylinder(local.inliers_exit, center_exit, current_ray_dir);
+                    StepAnalysis res_exit = analyzeLocalSphere(local.inliers_exit, center_exit, current_ray_dir);
                     if (res_exit.valid) steps.push_back(res_exit);
                 }
                 
@@ -2191,6 +2029,12 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                     best_iter_grasp.score_symmetry = (score_sym_entry + score_sym_exit) * 0.5f;
                     best_iter_grasp.score_orientation = (score_ang_entry + score_ang_exit) * 0.5f;
                     best_iter_grasp.raw_ray_dir = current_ray_dir;
+                    best_iter_grasp.debug_ray_origin = current_ray_origin;
+                    best_iter_grasp.debug_ray_dir_final = current_ray_dir;
+                    best_iter_grasp.debug_center_entry = center_entry;
+                    best_iter_grasp.debug_center_exit = center_exit;
+                    best_iter_grasp.debug_t_min = exact_t_min;
+                    best_iter_grasp.debug_t_max = exact_t_max;
                 }
 
                 if(activate_centroid == false)
@@ -2218,9 +2062,9 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
                 //{
                     
                 //}
-
-                local.local_candidates.push_back(best_iter_grasp);
-                    local.local_hits.push_back(raw_pose);
+                    local.local_candidates.push_back(best_iter_grasp);
+                    local.local_hits.push_back(raw_pose);    
+                
             }
         }
     }, tbb::auto_partitioner());
@@ -2353,7 +2197,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
 
     */
     
-
+    
 
    geometry_msgs::msg::PoseArray pose_array;
     pose_array.header.frame_id = "map"; 
@@ -2400,7 +2244,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     RCLCPP_INFO(this->get_logger(), "  -> Sort:               %.4f ms", d_sort);
     RCLCPP_INFO(this->get_logger(), "  -> Collision Final:    %.4f ms (%d checks)", d_col, checks_count.load());
     
-    size_t num_to_print = std::max((size_t)5, best_grasps_.size());
+    size_t num_to_print = best_grasps_.size();
    if (num_to_print > 0) {
         RCLCPP_INFO(this->get_logger(), ">>> TOP %lu SCORES <<<", num_to_print);
         for (size_t i = 0; i < num_to_print; ++i) {
@@ -2442,6 +2286,7 @@ geometry_msgs::msg::PoseArray GenerateGraspPoses::evaluateGrasps(pcl::PointCloud
     g_last_run_stats.collision = d_col;
     g_last_run_stats.checks = checks_count;
 
+   
 
     return pose_array;
 }
@@ -2475,7 +2320,8 @@ void GenerateGraspPoses::timerCallback()
     if(has_best_) 
     {
         publishBest();
-    }
+        publishBestGraspDebug(best_grasps_[0]);
+    } 
 
     
     
@@ -2633,6 +2479,418 @@ void GenerateGraspPoses::publishBest()
     pub_poses_->publish(pose_array_msg);
     
     
+    
+}
+
+
+
+void GenerateGraspPoses::publishBestGraspDebug(const ScoredGrasp& best)
+{
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud(stored_cloud_);
+
+    auto collectSphere = [&](const Eigen::Vector3f& center) -> pcl::PointCloud<pcl::PointXYZ>::Ptr {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointXYZ query;
+        query.x = center.x(); query.y = center.y(); query.z = center.z();
+        std::vector<int> indices;
+        std::vector<float> dists;
+        kdtree.radiusSearch(query, sphere_radius_, indices, dists);
+        cloud->points.reserve(indices.size());
+        for (int idx : indices)
+            cloud->points.push_back(stored_cloud_->points[idx]);
+        return cloud;
+    };
+
+    const Eigen::Vector3f& ray_dir = best.debug_ray_dir_final;
+    const Eigen::Vector3f& ray_origin = best.debug_ray_origin;
+    const Eigen::Vector3f& center_entry = best.debug_center_entry;
+    const Eigen::Vector3f& center_exit = best.debug_center_exit;
+    const float t_min = best.debug_t_min;
+    const float t_max = best.debug_t_max;
+    const float thickness = t_max - t_min;
+
+    auto cloud_entry = collectSphere(center_entry);
+    auto cloud_exit  = collectSphere(center_exit);
+
+    StepAnalysis res_entry = analyzeLocalSphere(cloud_entry, center_entry, ray_dir);
+    StepAnalysis res_exit;
+    if (thickness > 0.001f)
+        res_exit = analyzeLocalSphere(cloud_exit, center_exit, ray_dir);
+
+    auto getPCAAxes = [&](const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+                          const Eigen::Vector3f& center, const Eigen::Vector3f& rdir,
+                          Eigen::Vector3f& normal_out, Eigen::Vector3f& t1_out, Eigen::Vector3f& t2_out,
+                          std::vector<float>& us_out, std::vector<float>& vs_out,
+                          std::vector<int>& sectors_out, bool* sector_valid_out, int* sector_counts_out)
+    {
+        const size_t N = cloud->size();
+        const pcl::PointXYZ* pts = cloud->points.data();
+        float sx=0,sy=0,sz=0;
+        for (size_t i=0;i<N;++i){sx+=pts[i].x;sy+=pts[i].y;sz+=pts[i].z;}
+        float inv_N=1.0f/static_cast<float>(N);
+        float mx=sx*inv_N, my=sy*inv_N, mz=sz*inv_N;
+        float axx=0,axy=0,axz=0,ayy=0,ayz=0,azz=0;
+        for(size_t i=0;i<N;++i){
+            float dx=pts[i].x-mx,dy=pts[i].y-my,dz=pts[i].z-mz;
+            axx+=dx*dx;axy+=dx*dy;axz+=dx*dz;ayy+=dy*dy;ayz+=dy*dz;azz+=dz*dz;
+        }
+        Eigen::Matrix3f cov;
+        cov(0,0)=axx*inv_N;cov(0,1)=axy*inv_N;cov(0,2)=axz*inv_N;
+        cov(1,0)=cov(0,1);cov(1,1)=ayy*inv_N;cov(1,2)=ayz*inv_N;
+        cov(2,0)=cov(0,2);cov(2,1)=cov(1,2);cov(2,2)=azz*inv_N;
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> sol(cov, Eigen::ComputeEigenvectors);
+        normal_out = sol.eigenvectors().col(0);
+        if (normal_out.dot(rdir) > 0.0f) normal_out = -normal_out;
+        t1_out = sol.eigenvectors().col(1);
+        t2_out = sol.eigenvectors().col(2);
+
+        const float ox=center.x(), oy=center.y(), oz=center.z();
+        const int threshold = static_cast<int>(min_points_per_segment_);
+        const float safe_r_loc = (sphere_radius_ > 1e-4f) ? sphere_radius_ : 0.02f;
+        const float r2_half = (safe_r_loc * 0.5f) * (safe_r_loc * 0.5f);
+        for(int k=0;k<16;++k) sector_counts_out[k]=0;
+        us_out.resize(N); vs_out.resize(N); sectors_out.resize(N);
+        for(size_t i=0;i<N;++i){
+            float dx=pts[i].x-ox, dy=pts[i].y-oy, dz=pts[i].z-oz;
+            float u=dx*t1_out.x()+dy*t1_out.y()+dz*t1_out.z();
+            float v=dx*t2_out.x()+dy*t2_out.y()+dz*t2_out.z();
+            float r2 = u*u + v*v;
+            int ring = (r2 >= r2_half) ? 1 : 0;
+            int sec=(u>=0.0f)|((v>=0.0f)<<1)|((u*u>=v*v)<<2)|(ring<<3);
+            us_out[i]=u; vs_out[i]=v;
+            sectors_out[i]=sec;
+            sector_counts_out[sec]++;
+        }
+        for(int k=0;k<16;++k)
+            sector_valid_out[k]=(sector_counts_out[k]>=threshold);
+    };
+
+    // ========== Configuração visual ==========
+    constexpr double CUBE_SIZE = 0.0011;  // Tamanho dos cubos de simetria
+
+    // Cores/estilos por esfera
+    struct SphereStyle {
+        float normal_r, normal_g, normal_b;   // seta normal
+        float sphere_r, sphere_g, sphere_b;   // esfera transparente + cubos + círculo
+        float contact_r, contact_g, contact_b; // ponto de contato
+    };
+
+    const SphereStyle style_entry = {0.0f, 1.0f, 0.4f,   // normal: verde claro
+                                     0.1f, 0.9f, 0.4f,   // esfera/cubos/círculo: verde
+                                     0.0f, 1.0f, 0.0f};  // contato: verde puro
+
+    const SphereStyle style_exit  = {1.0f, 0.4f, 0.0f,   // normal: laranja
+                                     1.0f, 0.5f, 0.1f,   // esfera/cubos/círculo: laranja
+                                     1.0f, 0.5f, 0.0f};  // contato: laranja
+
+    visualization_msgs::msg::MarkerArray ma;
+    auto stamp = this->now();
+    const std::string frame = "map";
+    int id = 0;
+    const float safe_r = (sphere_radius_ > 1e-4f) ? sphere_radius_ : 0.02f;
+
+    auto addSphereDebug = [&](const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+                              const Eigen::Vector3f& center, const Eigen::Vector3f& rdir,
+                              const std::string& prefix, const SphereStyle& style)
+    {
+        if (!cloud || cloud->empty()) return;
+        const size_t N = cloud->size();
+
+        Eigen::Vector3f normal, t1, t2;
+        std::vector<float> us, vs;
+        std::vector<int> sectors;
+        bool sector_valid[16];
+        int sector_counts[16];
+        getPCAAxes(cloud, center, rdir, normal, t1, t2, us, vs, sectors, sector_valid, sector_counts);
+
+        float ox = center.x(), oy = center.y(), oz = center.z();
+
+        // Helper: ponto no plano PCA a partir de coords (u,v), com leve offset ao longo da normal
+        auto planePoint = [&](float u, float v, float normal_offset) {
+            geometry_msgs::msg::Point p;
+            p.x = ox + u*t1.x() + v*t2.x() + normal.x()*normal_offset;
+            p.y = oy + u*t1.y() + v*t2.y() + normal.y()*normal_offset;
+            p.z = oz + u*t1.z() + v*t2.z() + normal.z()*normal_offset;
+            return p;
+        };
+
+        // --- 1. Cubos de simetria: COR DISTINTA POR SETOR (16 setores) ---
+        static constexpr float SEC16[16][3] = {
+            // Anel INTERNO (centro → meio raio) — cores QUENTES
+            {1.00f, 0.00f, 0.00f}, {1.00f, 0.50f, 0.00f}, {1.00f, 1.00f, 0.00f}, {0.60f, 1.00f, 0.00f},
+            {1.00f, 0.00f, 0.50f}, {1.00f, 0.30f, 0.30f}, {0.80f, 0.60f, 0.00f}, {1.00f, 0.00f, 1.00f},
+            // Anel EXTERNO (meio → raio completo) — cores FRIAS
+            {0.00f, 0.40f, 1.00f}, {0.00f, 0.80f, 1.00f}, {0.00f, 0.90f, 0.60f}, {0.50f, 0.00f, 1.00f},
+            {0.30f, 0.30f, 1.00f}, {0.00f, 1.00f, 0.80f}, {0.60f, 0.40f, 1.00f}, {0.00f, 0.60f, 0.80f},
+        };
+        for (int k = 0; k < 16; ++k) {
+            if (sector_counts[k] == 0) continue;
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_sec"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::CUBE_LIST;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.scale.x = CUBE_SIZE; m.scale.y = CUBE_SIZE; m.scale.z = CUBE_SIZE;
+            m.pose.orientation.w = 1.0;
+            m.color.r = SEC16[k][0]; m.color.g = SEC16[k][1]; m.color.b = SEC16[k][2];
+            m.color.a = sector_valid[k] ? 1.0f : 0.35f;
+            m.points.reserve(sector_counts[k]);
+            for (size_t i = 0; i < N; ++i) {
+                if (sectors[i] != k) continue;
+                m.points.push_back(planePoint(us[i], vs[i], 0.0f));
+            }
+            if (!m.points.empty()) ma.markers.push_back(std::move(m));
+        }
+
+        // --- 2. Disco do plano PCA em DUAS ZONAS RADIAIS ---
+        Eigen::Quaternionf q_disc = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitZ(), normal);
+
+        // Zona EXTERNA (meio raio → raio completo): cor da esfera
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_plane_outer"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::CYLINDER;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            Eigen::Vector3f off_out = normal * (-0.0015f);
+            m.pose.position.x = ox + off_out.x();
+            m.pose.position.y = oy + off_out.y();
+            m.pose.position.z = oz + off_out.z();
+            m.pose.orientation.x = q_disc.x(); m.pose.orientation.y = q_disc.y();
+            m.pose.orientation.z = q_disc.z(); m.pose.orientation.w = q_disc.w();
+            m.scale.x = safe_r * 2.0; m.scale.y = safe_r * 2.0; m.scale.z = 0.0005;
+            m.color.r = style.sphere_r; m.color.g = style.sphere_g; m.color.b = style.sphere_b;
+            m.color.a = 0.35f;
+            ma.markers.push_back(std::move(m));
+        }
+
+        // Zona INTERNA (centro → meio raio): cor clareada
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_plane_inner"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::CYLINDER;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            Eigen::Vector3f off_in = normal * (-0.0007f);
+            m.pose.position.x = ox + off_in.x();
+            m.pose.position.y = oy + off_in.y();
+            m.pose.position.z = oz + off_in.z();
+            m.pose.orientation.x = q_disc.x(); m.pose.orientation.y = q_disc.y();
+            m.pose.orientation.z = q_disc.z(); m.pose.orientation.w = q_disc.w();
+            m.scale.x = safe_r * 1.0; m.scale.y = safe_r * 1.0; m.scale.z = 0.0005;
+            m.color.r = std::min(1.0f, style.sphere_r + 0.5f);
+            m.color.g = std::min(1.0f, style.sphere_g + 0.5f);
+            m.color.b = std::min(1.0f, style.sphere_b + 0.5f);
+            m.color.a = 0.55f;
+            ma.markers.push_back(std::move(m));
+        }
+
+        // --- 2.5. LINHAS DIVISÓRIAS dos setores sobre o disco ---
+        // Offset acima dos discos (que estão em -0.0007/-0.0015) para ficarem visíveis,
+        // mas abaixo dos cubos (que estão em 0.0). Usamos -0.0003.
+        const float LINE_Z = -0.0003f;
+
+        // 2.5a. Linhas radiais — 4 diâmetros = 8 fatias angulares de 45°
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_div_radial"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::LINE_LIST;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.scale.x = 0.0006; // espessura da linha
+            m.pose.orientation.w = 1.0;
+            m.color.r = 0.05f; m.color.g = 0.05f; m.color.b = 0.05f; m.color.a = 0.9f; // quase preto
+
+            // 8 raios a cada 45° (0, 45, 90, ... 315) => 4 diâmetros completos
+            for (int s = 0; s < 8; ++s) {
+                float ang = s * (M_PI / 4.0f); // 45° em rad
+                float cu = std::cos(ang) * safe_r;
+                float cv = std::sin(ang) * safe_r;
+                m.points.push_back(planePoint(0.0f, 0.0f, LINE_Z)); // centro
+                m.points.push_back(planePoint(cu, cv, LINE_Z));     // borda
+            }
+            ma.markers.push_back(std::move(m));
+        }
+
+        // 2.5b. Círculo de fronteira radial (meio raio) — separa anel interno do externo
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_div_ring_mid"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::LINE_STRIP;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.scale.x = 0.0007;
+            m.pose.orientation.w = 1.0;
+            m.color.r = 0.05f; m.color.g = 0.05f; m.color.b = 0.05f; m.color.a = 0.9f;
+            constexpr int RES = 96;
+            float mid_r = safe_r * 0.5f;
+            m.points.reserve(RES + 1);
+            for (int j = 0; j <= RES; ++j) {
+                float ang = 2.0f * M_PI * j / RES;
+                m.points.push_back(planePoint(std::cos(ang) * mid_r, std::sin(ang) * mid_r, LINE_Z));
+            }
+            ma.markers.push_back(std::move(m));
+        }
+
+        // 2.5c. Círculo de borda externa (raio completo) — contorno nítido do disco
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_div_ring_outer"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::LINE_STRIP;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.scale.x = 0.0009; // borda externa um pouco mais grossa
+            m.pose.orientation.w = 1.0;
+            m.color.r = 0.05f; m.color.g = 0.05f; m.color.b = 0.05f; m.color.a = 1.0f;
+            constexpr int RES = 128;
+            m.points.reserve(RES + 1);
+            for (int j = 0; j <= RES; ++j) {
+                float ang = 2.0f * M_PI * j / RES;
+                m.points.push_back(planePoint(std::cos(ang) * safe_r, std::sin(ang) * safe_r, LINE_Z));
+            }
+            ma.markers.push_back(std::move(m));
+        }
+
+        // --- 4. Esfera Principal Suave ---
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_sphere"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::SPHERE;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.pose.position.x = ox; m.pose.position.y = oy; m.pose.position.z = oz;
+            m.pose.orientation.w = 1.0;
+            m.scale.x = safe_r * 2.0; m.scale.y = safe_r * 2.0; m.scale.z = safe_r * 2.0;
+            m.color.r = style.sphere_r; m.color.g = style.sphere_g; m.color.b = style.sphere_b;
+            m.color.a = 0.12f;
+            ma.markers.push_back(std::move(m));
+        }
+
+        // --- 5. Normal PCA ---
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_normal"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::ARROW;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.scale.x = 0.002; m.scale.y = 0.005; m.scale.z = 0.005;
+            m.pose.orientation.w = 1.0;
+            m.color.r = style.normal_r; m.color.g = style.normal_g; m.color.b = style.normal_b;
+            m.color.a = 1.0f;
+            geometry_msgs::msg::Point p0, p1;
+            float arrow_len = safe_r * 1.5f;
+            p0.x = ox; p0.y = oy; p0.z = oz;
+            p1.x = ox + normal.x()*arrow_len;
+            p1.y = oy + normal.y()*arrow_len;
+            p1.z = oz + normal.z()*arrow_len;
+            m.points.push_back(p0); m.points.push_back(p1);
+            ma.markers.push_back(std::move(m));
+        }
+
+        // --- 6. Centro de Contato ---
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_contact"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::SPHERE;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.pose.position.x = ox; m.pose.position.y = oy; m.pose.position.z = oz;
+            m.pose.orientation.w = 1.0;
+            m.scale.x = 0.004; m.scale.y = 0.004; m.scale.z = 0.004;
+            m.color.r = style.contact_r; m.color.g = style.contact_g; m.color.b = style.contact_b;
+            m.color.a = 1.0f;
+            ma.markers.push_back(std::move(m));
+        }
+
+        // --- 2.5. Pontos nas posições 3D ORIGINAIS (vermelho) ---
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = prefix + "_pts_original_3d"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::CUBE_LIST;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.scale.x = CUBE_SIZE; m.scale.y = CUBE_SIZE; m.scale.z = CUBE_SIZE;
+            m.pose.orientation.w = 1.0;
+            m.color.r = 1.0f; m.color.g = 0.0f; m.color.b = 0.0f; m.color.a = 1.0f;
+            const pcl::PointXYZ* pts = cloud->points.data();
+            m.points.reserve(N);
+            for (size_t i = 0; i < N; ++i) {
+                geometry_msgs::msg::Point p;
+                p.x = pts[i].x; p.y = pts[i].y; p.z = pts[i].z;
+                m.points.push_back(p);
+            }
+            ma.markers.push_back(std::move(m));
+        }
+
+
+         {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = frame; m.header.stamp = stamp;
+            m.ns = "voxel_cloud"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::CUBE_LIST;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            // Tamanho do cubo = tamanho do voxel usado na nuvem (cloud_voxel_size_)
+            const double vsize = (cloud_voxel_size_ >= 0.001f)
+                                ? static_cast<double>(cloud_voxel_size_) : 0.001;
+            m.scale.x = vsize; m.scale.y = vsize; m.scale.z = vsize;
+            m.pose.orientation.w = 1.0;
+            m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 1.0f; m.color.a = 1.0f; // cinza
+            m.points.reserve(stored_cloud_->points.size());
+            for (const auto& pt : stored_cloud_->points) {
+                geometry_msgs::msg::Point p;
+                p.x = pt.x; p.y = pt.y; p.z = pt.z;
+                m.points.push_back(p);
+            }
+            ma.markers.push_back(std::move(m));
+        }
+    };
+
+    addSphereDebug(cloud_entry, center_entry, ray_dir, "best_entry", style_entry);
+    if (thickness > 0.001f)
+        addSphereDebug(cloud_exit, center_exit, ray_dir, "best_exit", style_exit);
+
+    // ===== Raio completo (amarelo) =====
+    {
+        visualization_msgs::msg::Marker m;
+        m.header.frame_id = frame; m.header.stamp = stamp;
+        m.ns = "best_ray"; m.id = id++;
+        m.type = visualization_msgs::msg::Marker::ARROW;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        m.scale.x = 0.002; m.scale.y = 0.005; m.scale.z = 0.005;
+        m.pose.orientation.w = 1.0;
+        m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 0.2f; m.color.a = 1.0f;
+        geometry_msgs::msg::Point p0, p1;
+        Eigen::Vector3f visual_end = ray_origin + ray_dir * (t_max + 0.03f);
+        p0.x = ray_origin.x(); p0.y = ray_origin.y(); p0.z = ray_origin.z();
+        p1.x = visual_end.x(); p1.y = visual_end.y(); p1.z = visual_end.z();
+        m.points.push_back(p0); m.points.push_back(p1);
+        ma.markers.push_back(std::move(m));
+    }
+
+    // ===== Origem do raio (magenta) =====
+    {
+        visualization_msgs::msg::Marker m;
+        m.header.frame_id = frame; m.header.stamp = stamp;
+        m.ns = "best_ray_origin"; m.id = id++;
+        m.type = visualization_msgs::msg::Marker::SPHERE;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        m.pose.position.x = ray_origin.x(); m.pose.position.y = ray_origin.y(); m.pose.position.z = ray_origin.z();
+        m.pose.orientation.w = 1.0;
+        m.scale.x = 0.005; m.scale.y = 0.005; m.scale.z = 0.005;
+        m.color.r = 1.0f; m.color.g = 0.0f; m.color.b = 1.0f; m.color.a = 1.0f;
+        ma.markers.push_back(std::move(m));
+    }
+
+    sphere_debug_pub_->publish(ma);
+
+    {
+        sensor_msgs::msg::PointCloud2 msg;
+        pcl::toROSMsg(*cloud_entry, msg);
+        msg.header.frame_id = frame; msg.header.stamp = stamp;
+        pub_debug_inliers_->publish(msg);
+    }
+
     
 }
 } // namespace vision

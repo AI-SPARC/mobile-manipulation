@@ -12,6 +12,8 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <cv_bridge/cv_bridge.hpp>
+#include "vision/VoxelCollision.hpp"
+
 // PCL
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -56,6 +58,13 @@ struct ScoredGrasp {
     Eigen::Vector3f debug_entry_pt;
     Eigen::Vector3f debug_exit_pt;
     pcl::PointCloud<pcl::PointXYZ>::Ptr debug_inliers;
+    // Campos para debug do melhor grasp
+    Eigen::Vector3f debug_ray_origin = Eigen::Vector3f::Zero();
+    Eigen::Vector3f debug_ray_dir_final = Eigen::Vector3f::Zero();
+    Eigen::Vector3f debug_center_entry = Eigen::Vector3f::Zero();
+    Eigen::Vector3f debug_center_exit = Eigen::Vector3f::Zero();
+    float debug_t_min = 0.0f;
+    float debug_t_max = 0.0f;
 };
 
 struct StepAnalysis {
@@ -88,13 +97,16 @@ public:
     void processCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr target, pcl::PointCloud<pcl::PointXYZ>::Ptr target_environment);
 
 private:
+
+      
         void timerCallback();
         std::vector<double> loadAndProcess(const std::string& obj_path, const std::string& amb_path);
         
         std::vector<geometry_msgs::msg::Pose> generateMultiOrientedRays(
             const Eigen::Vector3f& min, const Eigen::Vector3f& max, float res);
-            
-        StepAnalysis analyzeLocalCylinder(
+        VoxelCollisionChecker voxel_checker_;
+    
+        StepAnalysis analyzeLocalSphere(
             const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
             const Eigen::Vector3f& center,
             const Eigen::Vector3f& ray_dir);
@@ -109,7 +121,9 @@ private:
         void publishGripperModel();
         void publishGripperCollisionBoxes();
         void publishBest();
+        void debugCollisionAlignment(const ScoredGrasp& grasp);
 
+        void publishBestGraspDebug(const ScoredGrasp& best);
         message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_map_sub_;
         message_filters::Subscriber<sensor_msgs::msg::PointCloud2> segmented_cloud_sub_;
         
@@ -127,10 +141,10 @@ private:
             const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_map_msg);
         
 
-
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr sphere_debug_pub_;
 
     
-            bool eval_mode_ = false;
+        bool eval_mode_ = false;
         Eigen::Vector3f global_centroid;
         std::string object_mesh_path_;
         std::string gripper_glb_path_;
@@ -148,8 +162,7 @@ private:
         bool enable_ray_animation_;
         float grid_res_;
         float cloud_voxel_size_;
-        float cylinder_radius_;
-        float cylinder_height_;
+        float sphere_radius_;
         float analysis_step_size_;
         float max_gripper_width_;
         float finger_offset_;
